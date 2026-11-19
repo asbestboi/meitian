@@ -64,11 +64,13 @@ import com.asbestboi.meitian.data.Speaker
 import com.asbestboi.meitian.data.Words
 import com.asbestboi.meitian.data.isSwear
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import uniffi.meitian_core.Story
 import uniffi.meitian_core.StoryImage
 import uniffi.meitian_core.StoryLine
 import uniffi.meitian_core.StoryQuestion
-import uniffi.meitian_core.allStories
+import uniffi.meitian_core.shelfStories
+import uniffi.meitian_core.storyImageUrls
 import uniffi.meitian_core.storyOfTheDay
 import uniffi.meitian_core.storyWordIds
 
@@ -132,13 +134,20 @@ fun FullScreenImage(image: StoryImage, close: () -> Unit) {
 @Composable
 private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () -> Unit) {
     Column(
-        Modifier.width(200.dp).card().clickable(onClick = onClick).alpha(if (locked) 0.55f else 1f),
+        Modifier.width(200.dp).card().clickable(enabled = !locked, onClick = onClick).alpha(if (locked) 0.55f else 1f),
     ) {
         Box {
             StoryImageView(story.cover, 130.dp, fill = true)
             Text(story.emoji, fontSize = 24.sp, modifier = Modifier.padding(8.dp))
             if (done) Text("✅", fontSize = 20.sp, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
-            if (locked) Text("🔒", fontSize = 30.sp, modifier = Modifier.align(Alignment.Center))
+            if (locked) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🔒", fontSize = 30.sp)
+                Text("HSK ${story.level.toInt() - 1} first", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+            if (story.style == "chat" || story.date.isNotEmpty()) Text(if (story.style == "chat") "💬 chat" else "daily",
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 3.dp))
         }
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(story.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
@@ -154,15 +163,20 @@ fun StoryShelf() {
     val app = LocalApp.current
     val nav = LocalNav.current
     val ctx = LocalContext.current
-    val stories = remember(ContentSync.generation) { allStories() }
+    val stories = remember(ContentSync.generation, app.todayKey) { shelfStories(app.todayKey) }
     if (stories.isEmpty()) return
     val done = remember(ContentSync.generation, nav.content) { StoryProgress.done(ctx) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("stories ✦", style = street(22.sp), color = Street.c.text)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             stories.forEach { s ->
-                StoryCard(s, locked = s.level.toInt() > app.currentLevel + 1, done = s.id in done) {
-                    nav.show { StoryPlayer(s) { nav.close() } }
+                // daily stories are never locked; others unlock one level above yours
+                val locked = s.date.isEmpty() && s.level.toInt() > app.currentLevel + 1
+                StoryCard(s, locked = locked, done = s.id in done) {
+                    if (!locked) {
+                        prefetchStory(ctx, s)
+                        nav.show { StoryPlayer(s) { nav.close() } }
+                    }
                 }
             }
         }
@@ -199,6 +213,10 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
     var english by remember { mutableStateOf(false) }
     var confetti by remember { mutableIntStateOf(0) }
     var zoomed by remember { mutableStateOf<StoryImage?>(null) }
+    var typing by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val isChat = story.style == "chat"
+    LaunchedEffect(story.id) { prefetchStory(ctx, story) }
     val p = story.panels[panel]
     val linesDone = shown >= p.lines.size
     val questionPending = linesDone && p.question != null && picked == null
@@ -222,7 +240,18 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(if (english) Street.c.ink else Street.c.card)
                         .clickable { english = !english }.padding(horizontal = 12.dp, vertical = 8.dp))
             }
-            AnimatedContent(panel, Modifier.weight(1f),
+            if (isChat) Box(Modifier.weight(1f)) {
+                ChatThread(story, panel, shown, typing, english, onImage = { zoomed = it })
+                val q = p.question
+                if (q != null && linesDone) Box(Modifier.align(Alignment.BottomCenter)) {
+                    Question(q, picked) { i ->
+                        if (picked == null) {
+                            picked = i
+                            if (i == q.answer.toInt()) { correct++; Sfx.play(Sfx.Sound.Correct) } else Sfx.play(Sfx.Sound.Wrong)
+                        }
+                    }
+                }
+            } else AnimatedContent(panel, Modifier.weight(1f),
                 transitionSpec = { (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut()) }, label = "panel") { idx ->
                 val cur = story.panels[idx]
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -245,6 +274,10 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
             }
             BigButton(if (!linesDone) "continue" else if (panel + 1 < story.panels.size) "next" else "finish", enabled = !questionPending) {
                 when {
+                    !linesDone && isChat -> if (!typing) scope.launch {
+                        // "…" first, like a real chat
+                        typing = true; delay(650); typing = false; shown++; Sfx.play(Sfx.Sound.Tick)
+                    }
                     !linesDone -> shown++
                     panel + 1 < story.panels.size -> { panel++; shown = 1; picked = null; Sfx.play(Sfx.Sound.Swoosh) }
                     else -> {
@@ -319,5 +352,66 @@ private fun StoryResults(story: Story, correct: Int, close: () -> Unit) {
         }
         Spacer(Modifier.weight(1f))
         BigButton("Done", onClick = close)
+    }
+}
+
+/** Starts downloading a story's pictures (into Coil's cache) as soon as it's opened. */
+fun prefetchStory(ctx: android.content.Context, story: Story) {
+    val loader = coil.Coil.imageLoader(ctx)
+    storyImageUrls(story).forEach { url -> loader.enqueue(coil.request.ImageRequest.Builder(ctx).data(url).build()) }
+}
+
+/** An SMS thread: earlier panels stay visible, my messages on the right, pictures inside bubbles. */
+@Composable
+private fun ChatThread(story: Story, panel: Int, shown: Int, typing: Boolean, english: Boolean, onImage: (StoryImage) -> Unit) {
+    val items = buildList {
+        for (pi in 0..panel) {
+            val lines = story.panels[pi].lines
+            val n = if (pi < panel) lines.size else minOf(shown, lines.size)
+            for (i in 0 until n) add("$pi-$i" to lines[i])
+        }
+    }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(items.size, typing) { listState.animateScrollToItem((items.size + if (typing) 1 else 0 + 1).coerceAtLeast(1) - 1) }
+    androidx.compose.foundation.lazy.LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 200.dp)) {
+        items(items.size, key = { items[it].first }) { idx ->
+            ChatBubble(items[idx].second, story.me, english, onImage)
+        }
+        if (typing) item(key = "typing") {
+            Text("•••", fontSize = 18.sp, color = Street.c.secondary,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(Street.c.card).padding(horizontal = 14.dp, vertical = 8.dp))
+        }
+        // room so the question card doesn't cover the last message
+        item(key = "pad") { Spacer(Modifier.height(1.dp)) }
+    }
+}
+
+@Composable
+private fun ChatBubble(line: StoryLine, me: String, english: Boolean, onImage: (StoryImage) -> Unit) {
+    if (line.speaker.isEmpty()) {
+        Text(if (english) "${line.zh} · ${line.en}" else line.zh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Street.c.secondary,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
+        return
+    }
+    val mine = line.speaker == me
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+        Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = if (mine) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (!mine) Text(line.speaker, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.pink, modifier = Modifier.padding(start = 6.dp))
+            line.image?.let { img ->
+                StoryImageView(img, 170.dp, Modifier.width(230.dp).clip(RoundedCornerShape(18.dp)), fill = true, onClick = { onImage(img) })
+            }
+            if (line.zh.isNotEmpty()) {
+                val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp)
+                Column(Modifier.clip(shape).background(if (mine) Street.c.sky.copy(alpha = 0.2f) else Street.c.card).padding(horizontal = 12.dp, vertical = 9.dp)) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Box(Modifier.weight(1f, fill = false)) { TokenSentence(line.tokens, 20.sp) }
+                        HSpacer(6.dp)
+                        SpeakButton(line.zh, 28.dp, Street.c.sky)
+                    }
+                    if (english) Text(line.en, fontSize = 12.sp, color = Street.c.secondary)
+                }
+            }
+        }
     }
 }

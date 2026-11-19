@@ -51,6 +51,24 @@ struct StoryImageView: View {
     }
 }
 
+/// Downloads a story's pictures into the shared URL cache as soon as the story is opened, so they're
+/// already there when each panel or message appears (AsyncImage reads the same cache).
+enum ImagePrefetch {
+    static func run(_ urls: [String]) {
+        for s in urls {
+            guard let url = URL(string: s) else { continue }
+            let request = URLRequest(url: url)
+            if URLCache.shared.cachedResponse(for: request) != nil { continue }
+            URLSession.shared.dataTask(with: request) { data, response, _ in
+                guard let data, let response else { return }
+                URLCache.shared.storeCachedResponse(CachedURLResponse(response: response, data: data), for: request)
+            }.resume()
+        }
+    }
+
+    static func run(_ story: Story) { run(storyImageUrls(story: story)) }
+}
+
 struct ImageRef: Identifiable {
     let image: StoryImage
     var id: String { image.url }
@@ -139,7 +157,7 @@ struct StoryShelf: View {
     @State private var open: StoryRef?
 
     var body: some View {
-        let stories = content.generation >= 0 ? allStories() : []
+        let stories = content.generation >= 0 ? shelfStories(dayKey: store.todayKey) : []
         if !stories.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -149,8 +167,15 @@ struct StoryShelf: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: 14) {
                         ForEach(stories, id: \.id) { s in
-                            Button { open = StoryRef(story: s) } label: { StoryCard(story: s, locked: Int(s.level) > store.currentLevel + 1) }
+                            // daily stories are never locked; others unlock one level above yours
+                            let locked = s.date.isEmpty && Int(s.level) > store.currentLevel + 1
+                            Button {
+                                ImagePrefetch.run(s)
+                                open = StoryRef(story: s)
+                            } label: { StoryCard(story: s, locked: locked) }
                                 .buttonStyle(PressableStyle())
+                                .disabled(locked)
+                                .accessibilityHint(locked ? "Unlocks at HSK \(Int(s.level) - 1)" : "")
                         }
                     }
                     .padding(.vertical, 6)
@@ -181,6 +206,16 @@ struct StoryCard: View {
                 .overlay(alignment: .topLeading) {
                     Text(story.emoji).font(.title2).padding(8)
                 }
+                .overlay(alignment: .bottomLeading) {
+                    if story.style == "chat" || !story.date.isEmpty {
+                        Text(story.style == "chat" ? "💬 chat" : "daily")
+                            .font(.rounded(.caption2, weight: .bold))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.black.opacity(0.45), in: Capsule())
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                }
                 .overlay(alignment: .topTrailing) {
                     if done {
                         Image(systemName: "checkmark.circle.fill").font(.title3)
@@ -203,7 +238,11 @@ struct StoryCard: View {
         .opacity(locked ? 0.55 : 1)
         .overlay {
             if locked {
-                Image(systemName: "lock.fill").font(.title).foregroundStyle(.white).shadow(radius: 6)
+                VStack(spacing: 4) {
+                    Image(systemName: "lock.fill").font(.title)
+                    Text("HSK \(Int(story.level) - 1) first").font(.rounded(.caption, weight: .bold))
+                }
+                .foregroundStyle(.white).shadow(radius: 6)
             }
         }
     }
@@ -226,8 +265,26 @@ struct StoryPlayer: View {
     @State private var confetti = 0
     @State private var added = false
     @State private var zoomed: ImageRef?
+    @State private var typing = false
 
+    private var isChat: Bool { story.style == "chat" }
     private var current: StoryPanel { story.panels[panel] }
+
+    private struct ChatItem: Identifiable {
+        let id: String
+        let line: StoryLine
+    }
+
+    /// Chat stories keep the whole thread: all earlier panels plus what's revealed of this one.
+    private var chatItems: [ChatItem] {
+        var out: [ChatItem] = []
+        for p in 0...panel {
+            let lines = story.panels[p].lines
+            let n = p < panel ? lines.count : min(shown, lines.count)
+            for i in 0..<n { out.append(ChatItem(id: "\(p)-\(i)", line: lines[i])) }
+        }
+        return out
+    }
     private var linesDone: Bool { shown >= current.lines.count }
     private var questionPending: Bool { linesDone && current.question != nil && picked == nil }
 
@@ -241,23 +298,38 @@ struct StoryPlayer: View {
                     header.padding(.horizontal, 20).padding(.bottom, 12)
                     ScrollViewReader { proxy in
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 14) {
-                                image
-                                ForEach(0..<min(shown, current.lines.count), id: \.self) { i in
-                                    bubble(current.lines[i])
-                                        .id(i)
-                                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                            VStack(alignment: .leading, spacing: isChat ? 8 : 14) {
+                                if isChat {
+                                    ForEach(chatItems) { item in
+                                        chatBubble(item.line)
+                                            .id(item.id)
+                                            .transition(.asymmetric(insertion: .scale(scale: 0.85, anchor: .bottom).combined(with: .opacity), removal: .opacity))
+                                    }
+                                    if typing { typingBubble.id("typing").transition(.opacity) }
+                                } else {
+                                    image
+                                    ForEach(0..<min(shown, current.lines.count), id: \.self) { i in
+                                        bubble(current.lines[i])
+                                            .id(i)
+                                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                                    }
                                 }
                                 if linesDone, let q = current.question { question(q).id("q") }
                             }
                             .padding(.horizontal, 20)
                             .padding(.bottom, 20)
-                            .id(panel)
+                            .id(isChat ? 0 : panel)
                             .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
                                                     removal: .move(edge: .leading).combined(with: .opacity)))
                         }
                         .scrollIndicators(.hidden)
-                        .onChange(of: shown) { _, s in withAnimation(Theme.spring) { proxy.scrollTo(s - 1, anchor: .bottom) } }
+                        .onChange(of: shown) { _, s in
+                            withAnimation(Theme.spring) {
+                                if isChat { proxy.scrollTo(chatItems.last?.id ?? "", anchor: .bottom) }
+                                else { proxy.scrollTo(s - 1, anchor: .bottom) }
+                            }
+                        }
+                        .onChange(of: typing) { _, t in if t { withAnimation(Theme.spring) { proxy.scrollTo("typing", anchor: .bottom) } } }
                         .onChange(of: linesDone) { _, d in if d { withAnimation(Theme.spring) { proxy.scrollTo("q", anchor: .bottom) } } }
                     }
                     footer.padding(20)
@@ -265,7 +337,10 @@ struct StoryPlayer: View {
             }
             ConfettiView(trigger: confetti)
         }
-        .onAppear { speakCurrentLine() }
+        .onAppear {
+            ImagePrefetch.run(story)
+            speakCurrentLine()
+        }
         .fullScreenCover(item: $zoomed) { ref in FullScreenImage(image: ref.image) }
     }
 
@@ -341,6 +416,62 @@ struct StoryPlayer: View {
         }
     }
 
+    private func chatBubble(_ line: StoryLine) -> some View {
+        let narration = line.speaker.isEmpty
+        let mine = !narration && line.speaker == story.me
+        return Group {
+            if narration {
+                Text(showEnglish ? "\(line.zh) · \(line.en)" : line.zh)
+                    .font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            } else {
+                HStack(alignment: .bottom) {
+                    if mine { Spacer(minLength: 50) }
+                    VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
+                        if !mine {
+                            Text(line.speaker).font(.hanzi(12, weight: .bold)).foregroundStyle(Theme.hot).padding(.leading, 6)
+                        }
+                        if let img = line.image {
+                            StoryImageView(image: img, height: 170, fill: true)
+                                .frame(width: 230)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .onTapGesture { zoomed = ImageRef(image: img) }
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityLabel("Sent picture, tap to enlarge")
+                        }
+                        if !line.zh.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(alignment: .top, spacing: 6) {
+                                    TokenSentence(tokens: line.tokens, size: 20)
+                                    SpeakButton(text: line.zh, size: 28, tint: Theme.sky)
+                                }
+                                if showEnglish {
+                                    Text(line.en).font(.rounded(.caption)).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 9)
+                            .background(mine ? Theme.sky.opacity(0.2) : Theme.card,
+                                        in: UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: mine ? 18 : 4,
+                                                                   bottomTrailingRadius: mine ? 4 : 18, topTrailingRadius: 18,
+                                                                   style: .continuous))
+                        }
+                    }
+                    if !mine { Spacer(minLength: 50) }
+                }
+            }
+        }
+    }
+
+    private var typingBubble: some View {
+        HStack {
+            TypingDots()
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(Theme.card, in: Capsule())
+            Spacer()
+        }
+    }
+
     private func question(_ q: StoryQuestion) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(q.prompt).font(.rounded(.headline, weight: .bold))
@@ -387,6 +518,20 @@ struct StoryPlayer: View {
 
     private func advance() {
         if !linesDone {
+            if isChat {
+                // "…" first, like a real chat
+                guard !typing else { return }
+                withAnimation(Theme.spring) { typing = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+                    withAnimation(Theme.bouncy) {
+                        typing = false
+                        shown += 1
+                    }
+                    SFX.shared.play(.tick)
+                    speakCurrentLine()
+                }
+                return
+            }
             withAnimation(Theme.bouncy) { shown += 1 }
             speakCurrentLine()
         } else if panel + 1 < story.panels.count {
@@ -456,7 +601,7 @@ struct StoryOfTheDayCard: View {
     var body: some View {
         let s = content.generation >= 0 ? storyOfTheDay(dayKey: store.todayKey, maxLevel: UInt8(clamping: store.currentLevel)) : nil
         if let s {
-            Button { open = StoryRef(story: s) } label: {
+            Button { ImagePrefetch.run(s); open = StoryRef(story: s) } label: {
                 ZStack(alignment: .bottomLeading) {
                     StoryImageView(image: s.cover, height: 190, fill: true)
                     LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
@@ -478,5 +623,21 @@ struct StoryOfTheDayCard: View {
                 StoryPlayer(story: ref.story).environment(store)
             }
         }
+    }
+}
+
+/// Three bouncing dots ("is typing…").
+struct TypingDots: View {
+    @State private var on = false
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                    .offset(y: on ? -3 : 3)
+                    .animation(.easeInOut(duration: 0.4).repeatForever().delay(Double(i) * 0.15), value: on)
+            }
+        }
+        .onAppear { on = true }
+        .accessibilityLabel("typing")
     }
 }
