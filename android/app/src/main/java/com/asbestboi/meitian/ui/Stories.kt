@@ -69,15 +69,48 @@ import uniffi.meitian_core.Story
 import uniffi.meitian_core.StoryImage
 import uniffi.meitian_core.StoryLine
 import uniffi.meitian_core.StoryQuestion
+import uniffi.meitian_core.nextStory
 import uniffi.meitian_core.shelfStories
+import uniffi.meitian_core.storyById
 import uniffi.meitian_core.storyImageUrls
 import uniffi.meitian_core.storyOfTheDay
 import uniffi.meitian_core.storyWordIds
 
+/** Reading history (ordered, oldest first) and the current "next story" surprise for each kind. */
 object StoryProgress {
     private fun prefs(c: Context) = c.getSharedPreferences("stories", Context.MODE_PRIVATE)
-    fun done(c: Context): Set<String> = prefs(c).getStringSet("done", emptySet()) ?: emptySet()
-    fun markDone(c: Context, id: String) = prefs(c).edit().putStringSet("done", done(c) + id).apply()
+
+    fun read(c: Context): List<String> {
+        val p = prefs(c)
+        if (!p.contains("read")) {
+            // migrate the old unordered set
+            val old = p.getStringSet("done", emptySet()) ?: emptySet()
+            p.edit().putString("read", old.joinToString(",")).apply()
+        }
+        return p.getString("read", "")!!.split(",").filter { it.isNotEmpty() }
+    }
+
+    fun isRead(c: Context, id: String) = id in read(c)
+
+    fun markRead(c: Context, id: String) {
+        val r = read(c)
+        if (id !in r) prefs(c).edit().putString("read", (r + id).joinToString(",")).apply()
+    }
+
+    fun done(c: Context): Set<String> = read(c).toSet()
+
+    /** The surprise waiting for this learner: stays the same until read, then a new random unread one. */
+    fun next(c: Context, chat: Boolean, dayKey: String, level: Int): Story? {
+        val key = if (chat) "nextChat" else "nextStory"
+        val readIds = read(c)
+        prefs(c).getString(key, null)?.let { id ->
+            val s = storyById(id)
+            if (s != null && id !in readIds && (s.style == "chat") == chat && (s.date.isEmpty() || s.date <= dayKey)) return s
+        }
+        val s = nextStory(chat, dayKey, level.coerceIn(0, 255).toUByte(), readIds, kotlin.random.Random.nextLong().toULong())
+        prefs(c).edit().apply { if (s == null) remove(key) else putString(key, s.id) }.apply()
+        return s
+    }
 }
 
 /** Story picture. Panels show the whole image (fit) over a blurred filled copy; cards fill and crop. */
@@ -157,45 +190,69 @@ private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () 
     }
 }
 
-/** Horizontal shelf of stories (Practice tab). */
+/** Practice tab: a mystery "next story" (no cover, no title — a surprise), plus the history of stories
+ *  already read, which can be revisited (no XP the second time). */
 @Composable
-fun StoryShelf(chats: Boolean = false) {
+fun StoryHub(chats: Boolean = false) {
     val app = LocalApp.current
     val nav = LocalNav.current
     val ctx = LocalContext.current
-    val stories = remember(ContentSync.generation, app.todayKey, chats) { shelfStories(app.todayKey).filter { (it.style == "chat") == chats } }
-    if (stories.isEmpty()) return
-    val done = remember(ContentSync.generation, nav.content) { StoryProgress.done(ctx) }
+    // recomputed when content changes, the day changes, or a story screen closes
+    val key = Triple(ContentSync.generation, app.todayKey, nav.content == null)
+    val all = remember(key, chats) { shelfStories(app.todayKey).filter { (it.style == "chat") == chats } }
+    if (all.isEmpty()) return
+    val history = remember(key, chats) { val byId = all.associateBy { it.id }; StoryProgress.read(ctx).reversed().mapNotNull { byId[it] } }
+    val next = remember(key, chats) { StoryProgress.next(ctx, chats, app.todayKey, app.currentLevel) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(if (chats) "chats 💬" else "stories ✦", style = street(22.sp), color = Street.c.text)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            stories.forEach { s ->
-                // daily stories are never locked; others unlock one level above yours
-                val locked = s.date.isEmpty() && s.level.toInt() > app.currentLevel + 1
-                StoryCard(s, locked = locked, done = s.id in done) {
-                    if (!locked) {
-                        prefetchStory(ctx, s)
-                        nav.show { StoryPlayer(s) { nav.close() } }
-                    }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (chats) "chats 💬" else "stories ✦", style = street(22.sp), color = Street.c.text, modifier = Modifier.weight(1f))
+            Text("${history.size} / ${all.size} read", fontSize = 12.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
+        }
+        if (next != null) {
+            Row(Modifier.fillMaxWidth().block(Street.night()).clickable { prefetchStory(ctx, next); nav.show { StoryPlayer(next) { nav.close() } } }.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(if (chats) "💬" else "📖", fontSize = 40.sp, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.1f)).padding(12.dp))
+                HSpacer(14.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(if (chats) "a new message" else "your next story", style = street(20.sp), color = Color.White)
+                    Text("HSK ${next.level} · it's a surprise ✦", fontSize = 13.sp, color = Color.White.copy(alpha = 0.75f))
+                }
+                Text("→", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFC6FF3D)).padding(horizontal = 14.dp, vertical = 8.dp))
+            }
+        } else {
+            Text(if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
+                color = Street.c.secondary, modifier = Modifier.fillMaxWidth().card().padding(16.dp))
+        }
+        if (history.isNotEmpty()) {
+            Text("history", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                history.forEach { s ->
+                    StoryCard(s, locked = false, done = true) { prefetchStory(ctx, s); nav.show { StoryPlayer(s) { nav.close() } } }
                 }
             }
         }
     }
 }
 
-/** Story-of-the-day card for the Today screen. */
+/** Today: the day's dated story as a surprise card (no cover until it's read). */
 @Composable
 fun StoryOfTheDayCard() {
     val app = LocalApp.current
     val nav = LocalNav.current
+    val ctx = LocalContext.current
     val s = remember(ContentSync.generation, app.todayKey) { storyOfTheDay(app.todayKey, app.currentLevel.toUByte()) } ?: return
-    Box(Modifier.fillMaxWidth().block(Street.night()).clickable { nav.show { StoryPlayer(s) { nav.close() } } }) {
-        StoryImageView(s.cover, 190.dp, fill = true)
-        Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))))
-        Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
-            Text("story of the day ✦", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.8f))
-            Text("${s.emoji} ${s.title}", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            Text(s.titleEn.lowercase(), fontSize = 14.sp, color = Color.White.copy(alpha = 0.85f))
+    if (s.date != app.todayKey) return
+    val read = remember(nav.content == null) { StoryProgress.isRead(ctx, s.id) }
+    Row(Modifier.fillMaxWidth().block(Street.pink()).clickable { prefetchStory(ctx, s); nav.show { StoryPlayer(s) { nav.close() } } }.padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(if (read) "✅" else if (s.style == "chat") "💬" else "🎁", fontSize = 38.sp,
+            modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.12f)).padding(12.dp))
+        HSpacer(14.dp)
+        Column {
+            Text("today's story ✦", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.85f))
+            Text(if (read) s.title else "open it to find out", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            Text(if (read) "read ✓ · tap to read again" else "a new one every day", fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
         }
     }
 }
@@ -214,6 +271,7 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
     var confetti by remember { mutableIntStateOf(0) }
     var zoomed by remember { mutableStateOf<StoryImage?>(null) }
     var typing by remember { mutableStateOf(false) }
+    val revisit = remember { StoryProgress.isRead(ctx, story.id) }   // read before: no XP this time
     // chat stories: messages added by your replies (+ reactions) per panel, and which pictures were revealed
     val sent = remember { androidx.compose.runtime.mutableStateMapOf<Int, List<StoryLine>>() }
     val triedWrong = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
@@ -234,7 +292,7 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         if (finished) {
-            StoryResults(story, correct, close)
+            StoryResults(story, correct, revisit, close)
         } else Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CloseButton(close); HSpacer(12.dp)
@@ -315,8 +373,10 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
                     !linesDone -> shown++
                     panel + 1 < story.panels.size -> { panel++; shown = 1; picked = null; Sfx.play(Sfx.Sound.Swoosh) }
                     else -> {
-                        StoryProgress.markDone(ctx, story.id)
-                        app.addXP(20 + correct * 5)
+                        if (!revisit) {
+                            StoryProgress.markRead(ctx, story.id)
+                            app.addXP(20 + correct * 5)
+                        }
                         finished = true; confetti++
                         Sfx.play(Sfx.Sound.Win)
                     }
@@ -368,7 +428,7 @@ private fun Question(q: StoryQuestion, picked: Int?, onPick: (Int) -> Unit) {
 }
 
 @Composable
-private fun StoryResults(story: Story, correct: Int, close: () -> Unit) {
+private fun StoryResults(story: Story, correct: Int, revisit: Boolean, close: () -> Unit) {
     val app = LocalApp.current
     val fresh = remember { storyWordIds(story).mapNotNull { Words[it] }.filter { app.cards[it.id] == null && !it.isSwear } }
     var added by remember { mutableStateOf(false) }
@@ -378,7 +438,7 @@ private fun StoryResults(story: Story, correct: Int, close: () -> Unit) {
         StoryImageView(story.cover, 180.dp, Modifier.padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)), fill = true)
         Text("故事读完了！", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.text)
         Text("story finished · $correct/$questions questions right", color = Street.c.secondary)
-        Text("+${20 + correct * 5} XP", style = street(26.sp), color = Street.c.gold)
+        Text(if (revisit) "replay · no XP" else "+${20 + correct * 5} XP", style = street(26.sp), color = if (revisit) Street.c.secondary else Street.c.gold)
         if (fresh.isNotEmpty()) {
             Text(if (added) "added ${fresh.size} words ✓" else "＋ add ${fresh.size} new words to review", fontWeight = FontWeight.Bold, color = Street.c.jade,
                 modifier = Modifier.clip(RoundedCornerShape(50)).background(Street.c.jade.copy(alpha = 0.15f))

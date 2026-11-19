@@ -301,6 +301,30 @@ pub fn shelf_stories(day_key: String) -> Vec<Story> {
     all_stories().into_iter().filter(|s| s.date.is_empty() || s.date <= day_key).collect()
 }
 
+/// The next unread story (or chat) for a learner, picked at random so it's a surprise. Never repeats a
+/// story in `read`; prefers stories at or one above the learner's level, then any unread one.
+/// `None` when everything has been read. Daily stories whose day hasn't come yet are skipped.
+#[uniffi::export]
+pub fn next_story(chat: bool, day_key: String, max_level: u8, read: Vec<String>, seed: u64) -> Option<Story> {
+    let unread: Vec<Story> = shelf_stories(day_key)
+        .into_iter()
+        .filter(|s| (s.style == "chat") == chat && !read.contains(&s.id))
+        .collect();
+    let fits: Vec<Story> = unread.iter().filter(|s| s.level <= max_level.max(1) + 1).cloned().collect();
+    let pool = if fits.is_empty() { unread } else { fits };
+    if pool.is_empty() {
+        return None;
+    }
+    let mut rng = fastrand::Rng::with_seed(seed);
+    Some(pool[rng.usize(..pool.len())].clone())
+}
+
+/// How many stories (or chats) are available right now, read or not.
+#[uniffi::export]
+pub fn story_count_for(chat: bool, day_key: String) -> u32 {
+    shelf_stories(day_key).iter().filter(|s| (s.style == "chat") == chat).count() as u32
+}
+
 /// Every picture a story uses (cover, panels, sent pictures), to preload when it opens.
 #[uniffi::export]
 pub fn story_image_urls(story: Story) -> Vec<String> {
@@ -372,6 +396,11 @@ mod daily_tests {
         assert_eq!(today.style, "chat");
         assert_eq!(today.panels[0].lines[0].image.as_ref().unwrap().url, "https://x/p.jpg");
         assert_eq!(story_of_the_day("2026-12-01".into(), 1).unwrap().id, "a", "no daily: undated pick");
+        // next_story: chats only, never something already read, nothing from the future
+        assert_eq!(next_story(true, "2026-11-20".into(), 1, vec![], 1).unwrap().id, "d1");
+        assert!(next_story(true, "2026-11-20".into(), 1, vec!["d1".into()], 1).is_none(), "all chats read");
+        assert_eq!(next_story(false, "2026-11-20".into(), 1, vec![], 9).unwrap().id, "a", "d2 is still in the future");
+        assert_eq!(story_count_for(false, "2026-11-21".into()), 2);
         let shelf: Vec<String> = shelf_stories("2026-11-20".into()).into_iter().map(|s| s.id).collect();
         assert!(shelf.contains(&"d1".to_string()) && !shelf.contains(&"d2".to_string()), "future dailies hidden");
         let json2 = r#"{"stories":[{"id":"r","title":"R","level":1,"style":"chat","me":"我","panels":[{"lines":[{"who":"丽丽","zh":"你好吗？"}],

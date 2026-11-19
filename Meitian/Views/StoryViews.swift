@@ -1,16 +1,47 @@
 import SwiftUI
 
+/// Reading history (ordered, oldest first) and the current "next story" surprise for each kind.
 enum StoryProgress {
-    static let key = "storiesDone"
+    private static let readKey = "storiesRead"
+    private static let legacyKey = "storiesDone"
 
-    static func done() -> Set<String> {
-        Set((UserDefaults.standard.string(forKey: key) ?? "").split(separator: ",").map(String.init))
+    static func read() -> [String] {
+        let d = UserDefaults.standard
+        if d.string(forKey: readKey) == nil, let old = d.string(forKey: legacyKey) { d.set(old, forKey: readKey) }
+        return (d.string(forKey: readKey) ?? "").split(separator: ",").map(String.init)
     }
 
-    static func markDone(_ id: String) {
-        var d = done()
-        d.insert(id)
-        UserDefaults.standard.set(d.sorted().joined(separator: ","), forKey: key)
+    static func isRead(_ id: String) -> Bool { read().contains(id) }
+
+    static func markRead(_ id: String) {
+        var r = read()
+        guard !r.contains(id) else { return }
+        r.append(id)
+        UserDefaults.standard.set(r.joined(separator: ","), forKey: readKey)
+    }
+
+    /// Kept for older call sites.
+    static func done() -> Set<String> { Set(read()) }
+    static func markDone(_ id: String) { markRead(id) }
+
+    private static func pickKey(_ chat: Bool) -> String { chat ? "nextChat" : "nextStory" }
+
+    /// The surprise waiting for this learner: stays the same until it's read (so reopening doesn't reroll),
+    /// then a new random unread one. nil when everything has been read.
+    static func next(chat: Bool, dayKey: String, level: Int) -> Story? {
+        let d = UserDefaults.standard
+        let readIds = read()
+        if let id = d.string(forKey: pickKey(chat)), !readIds.contains(id), let s = storyById(id: id),
+           (s.style == "chat") == chat, s.date.isEmpty || s.date <= dayKey {
+            return s
+        }
+        guard let s = nextStory(chat: chat, dayKey: dayKey, maxLevel: UInt8(clamping: level), read: readIds,
+                                seed: UInt64.random(in: 0...UInt64.max)) else {
+            d.removeObject(forKey: pickKey(chat))
+            return nil
+        }
+        d.set(s.id, forKey: pickKey(chat))
+        return s
     }
 }
 
@@ -150,45 +181,87 @@ struct FullScreenImage: View {
     }
 }
 
-/// Horizontal shelf of stories (Practice tab).
-struct StoryShelf: View {
-    /// true: the SMS chat stories; false: picture stories.
+/// Practice tab: a mystery "next story" (no cover, no title: a surprise, like Duolingo), plus the
+/// history of stories already read, which can be revisited (no XP the second time).
+struct StoryHub: View {
+    /// true: SMS chats; false: picture stories.
     var chats = false
     @Environment(AppStore.self) private var store
     @Environment(ContentSync.self) private var content
     @State private var open: StoryRef?
+    @State private var next: Story?
+    @State private var history: [Story] = []
+    @State private var total = 0
 
     var body: some View {
-        let all = content.generation >= 0 ? shelfStories(dayKey: store.todayKey) : []
-        let stories = all.filter { ($0.style == "chat") == chats }
-        if !stories.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(chats ? "chats 💬" : "stories").font(.rounded(.title3, weight: .bold))
-                    Sparkle(size: 12, color: chats ? Theme.sky : Theme.hot)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(chats ? "chats 💬" : "stories").font(.rounded(.title3, weight: .bold))
+                Sparkle(size: 12, color: chats ? Theme.sky : Theme.hot)
+                Spacer()
+                if total > 0 {
+                    Text("\(history.count) / \(total) read").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
                 }
+            }
+            mysteryCard
+            if !history.isEmpty {
+                Text("history").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
-                    HStack(spacing: 14) {
-                        ForEach(stories, id: \.id) { s in
-                            // daily stories are never locked; others unlock one level above yours
-                            let locked = s.date.isEmpty && Int(s.level) > store.currentLevel + 1
-                            Button {
-                                ImagePrefetch.run(s)
-                                open = StoryRef(story: s)
-                            } label: { StoryCard(story: s, locked: locked) }
-                                .buttonStyle(PressableStyle())
-                                .disabled(locked)
-                                .accessibilityHint(locked ? "Unlocks at HSK \(Int(s.level) - 1)" : "")
+                    HStack(spacing: 12) {
+                        ForEach(history, id: \.id) { s in
+                            Button { ImagePrefetch.run(s); open = StoryRef(story: s) } label: {
+                                StoryCard(story: s, width: 160)
+                            }
+                            .buttonStyle(PressableStyle())
                         }
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 4)
                 }
                 .scrollIndicators(.hidden)
             }
-            .fullScreenCover(item: $open) { ref in
-                StoryPlayer(story: ref.story).environment(store)
-            }
         }
+        .task(id: "\(content.generation)-\(store.todayKey)") { refresh() }
+        .fullScreenCover(item: $open, onDismiss: refresh) { ref in
+            StoryPlayer(story: ref.story).environment(store)
+        }
+    }
+
+    @ViewBuilder
+    private var mysteryCard: some View {
+        if let next {
+            Button { ImagePrefetch.run(next); open = StoryRef(story: next) } label: {
+                HStack(spacing: 16) {
+                    Text(chats ? "💬" : "📖").font(.system(size: 44))
+                        .frame(width: 72, height: 72)
+                        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(chats ? "a new message" : "your next story").font(.rounded(.title3, weight: .heavy))
+                        Text("HSK \(next.level) · it's a surprise ✦").font(.rounded(.subheadline, weight: .medium)).opacity(0.75)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.right").font(.headline.weight(.bold))
+                        .frame(width: 40, height: 40)
+                        .background(Color(red: 0.78, green: 1.0, blue: 0.24), in: Circle())
+                        .foregroundStyle(.black)
+                }
+                .foregroundStyle(.white)
+                .streetBlock(Theme.nightGradient, padding: 18)
+            }
+            .buttonStyle(PressableStyle(scale: 0.98))
+        } else if total > 0 {
+            Text(chats ? "You've read every chat ✦ new ones arrive soon." : "You've read every story ✦ new ones arrive soon.")
+                .font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardSurface(padding: 16)
+        }
+    }
+
+    private func refresh() {
+        let all = shelfStories(dayKey: store.todayKey).filter { ($0.style == "chat") == chats }
+        total = all.count
+        let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        history = StoryProgress.read().reversed().compactMap { byId[$0] }   // most recent first
+        next = StoryProgress.next(chat: chats, dayKey: store.todayKey, level: store.currentLevel)
     }
 }
 
@@ -203,7 +276,7 @@ struct StoryCard: View {
     var width: CGFloat = 200
 
     var body: some View {
-        let done = StoryProgress.done().contains(story.id)
+        let done = StoryProgress.isRead(story.id)
         VStack(alignment: .leading, spacing: 0) {
             StoryImageView(image: story.cover, height: 130, fill: true)
                 .overlay(alignment: .topLeading) {
@@ -269,6 +342,8 @@ struct StoryPlayer: View {
     @State private var added = false
     @State private var zoomed: ImageRef?
     @State private var typing = false
+    /// Read before: no XP this time.
+    @State private var revisit = false
     /// Chat stories: messages added by your replies (and the reactions), per panel.
     @State private var sent: [Int: [StoryLine]] = [:]
     @State private var triedWrong: Set<Int> = []
@@ -352,6 +427,7 @@ struct StoryPlayer: View {
             ConfettiView(trigger: confetti)
         }
         .onAppear {
+            revisit = StoryProgress.isRead(story.id)
             ImagePrefetch.run(story)
             speakCurrentLine()
         }
@@ -645,8 +721,10 @@ struct StoryPlayer: View {
             SFX.shared.play(.swoosh)
             speakCurrentLine()
         } else {
-            StoryProgress.markDone(story.id)
-            store.addXP(20 + correct * 5)
+            if !revisit {
+                StoryProgress.markRead(story.id)
+                store.addXP(20 + correct * 5)
+            }
             withAnimation(Theme.bouncy) { finished = true }
             confetti += 1
             SFX.shared.play(.win)
@@ -671,7 +749,8 @@ struct StoryPlayer: View {
                 .padding(.horizontal, 30)
             Text("故事读完了！").font(.hanzi(34, weight: .heavy))
             Text("story finished · \(correct)/\(questions) questions right").font(.rounded(.subheadline)).foregroundStyle(.secondary)
-            Text("+\(20 + correct * 5) XP").font(.rounded(.title2, weight: .heavy)).foregroundStyle(Theme.gold)
+            Text(revisit ? "replay · no XP" : "+\(20 + correct * 5) XP")
+                .font(.rounded(.title2, weight: .heavy)).foregroundStyle(revisit ? Color.secondary : Theme.gold)
             if !fresh.isEmpty {
                 Button {
                     store.addToReview(fresh)
@@ -694,34 +773,37 @@ struct StoryPlayer: View {
     }
 }
 
-/// Story-of-the-day card for the Today screen.
+/// Today: the day's story (when there is a dated daily one), as a surprise card without its cover.
 struct StoryOfTheDayCard: View {
     @Environment(AppStore.self) private var store
     @Environment(ContentSync.self) private var content
     @State private var open: StoryRef?
+    @State private var refreshTick = 0
 
     var body: some View {
-        let s = content.generation >= 0 ? storyOfTheDay(dayKey: store.todayKey, maxLevel: UInt8(clamping: store.currentLevel)) : nil
-        if let s {
+        let s = content.generation >= 0 && refreshTick >= 0 ? storyOfTheDay(dayKey: store.todayKey, maxLevel: UInt8(clamping: store.currentLevel)) : nil
+        if let s, s.date == store.todayKey {
+            let read = StoryProgress.isRead(s.id)
             Button { ImagePrefetch.run(s); open = StoryRef(story: s) } label: {
-                ZStack(alignment: .bottomLeading) {
-                    StoryImageView(image: s.cover, height: 190, fill: true)
-                    LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
+                HStack(spacing: 16) {
+                    Text(read ? "✅" : (s.style == "chat" ? "💬" : "🎁")).font(.system(size: 40))
+                        .frame(width: 66, height: 66)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Text("story of the day").font(.rounded(.caption, weight: .bold)).foregroundStyle(.white.opacity(0.8))
-                            Sparkle(size: 10, color: Theme.lime)
+                            Text("today's story").font(.rounded(.caption, weight: .bold)).opacity(0.85)
+                            Sparkle(size: 10, color: .white)
                         }
-                        Text("\(s.emoji) \(s.title)").font(.hanzi(24, weight: .heavy)).foregroundStyle(.white)
-                        Text(s.titleEn.lowercased()).font(.rounded(.subheadline)).foregroundStyle(.white.opacity(0.85))
+                        Text(read ? s.title : "open it to find out").font(.hanzi(20, weight: .heavy))
+                        Text(read ? "read ✓ · tap to read again" : "a new one every day").font(.rounded(.caption)).opacity(0.8)
                     }
-                    .padding(18)
+                    Spacer(minLength: 0)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radius + 4, style: .continuous))
-                .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+                .foregroundStyle(.white)
+                .streetBlock(Theme.pinkGradient, padding: 18)
             }
             .buttonStyle(PressableStyle(scale: 0.98))
-            .fullScreenCover(item: $open) { ref in
+            .fullScreenCover(item: $open, onDismiss: { refreshTick += 1 }) { ref in
                 StoryPlayer(story: ref.story).environment(store)
             }
         }
