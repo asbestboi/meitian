@@ -39,6 +39,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.LocalApp
+import kotlinx.coroutines.launch
+import com.asbestboi.meitian.data.ContentSync
 import com.asbestboi.meitian.LocalNav
 import com.asbestboi.meitian.data.Question
 import com.asbestboi.meitian.data.Words
@@ -365,6 +367,8 @@ fun ProgressScreen() {
             ToggleRow("Swear words 🤬", "Adds the street deck: one swear a day, Swear Sprint, rude cosmetics. Battles only match players with the same setting.", s.swears) {
                 set(s.copy(swears = it))
             }
+            HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
+            LessonDownloads()
         }
         SectionTitle("Profile")
         Column(Modifier.fillMaxWidth().card().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -395,3 +399,46 @@ fun ToggleRow(title: String, subtitle: String?, value: Boolean, onChange: (Boole
 
 @Suppress("unused")
 private val unusedHeight = Modifier.height(0.dp)
+
+@Composable
+private fun LessonDownloads() {
+    val app = LocalApp.current
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val st = ContentSync.stats
+    var all by remember { mutableStateOf(ContentSync.allLevels(context)) }
+    var confirmClear by remember { mutableStateOf(false) }
+    val level = app.profile.confirmedLevel + 1
+    val status = when (val x = ContentSync.status) {
+        ContentSync.Status.Idle -> if (st.sentences > 0u) "Downloaded" else "Not downloaded yet"
+        ContentSync.Status.Checking -> "Checking for new lessons…"
+        is ContentSync.Status.Downloading -> "Downloading ${x.done + 1} of ${x.total}…"
+        ContentSync.Status.Ready -> "Up to date"
+        is ContentSync.Status.Failed -> x.message
+    }
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("📥 Lessons", fontWeight = FontWeight.Bold, color = Street.c.text)
+        Text("${st.words} words · ${st.sentences} sentences · ${st.stories} stories", fontWeight = FontWeight.SemiBold, color = Street.c.text, fontSize = 14.sp)
+        Text(status, fontSize = 12.sp, color = Street.c.secondary)
+    }
+    HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
+    ToggleRow("Download every level", "Otherwise only the HSK levels around yours (saves space).", all) {
+        all = it
+        ContentSync.setAllLevels(context, it)
+        scope.launch { ContentSync.refresh(context, level) }
+    }
+    HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
+    Row(Modifier.fillMaxWidth().padding(16.dp)) {
+        Text("↻ Update now", fontWeight = FontWeight.Black, color = Street.c.red,
+            modifier = Modifier.weight(1f).clickable { scope.launch { ContentSync.refresh(context, level) } })
+        val mb = "%.1f MB".format(ContentSync.cacheBytes(context) / 1_048_576.0)
+        Text(if (confirmClear) "Tap again to delete" else "🗑️ Delete ($mb)", fontWeight = FontWeight.Black, color = Street.c.red,
+            modifier = Modifier.clickable { if (confirmClear) { ContentSync.clear(context); confirmClear = false } else confirmClear = true })
+    }
+    if (ContentSync.credits.isNotEmpty()) {
+        HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ContentSync.credits.forEach { Text(it, fontSize = 11.sp, color = Street.c.secondary) }
+        }
+    }
+}

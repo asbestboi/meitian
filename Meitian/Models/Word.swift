@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 struct Word: Identifiable, Hashable, Codable {
     let id: String
@@ -68,17 +69,39 @@ enum Prefs {
     }
 }
 
-/// The built-in vocabulary, compiled into the shared Rust core: HSK 1–4 plus the opt-in street deck.
+/// Live word lists: the bundled words plus downloaded content packs. Observable, so views that read
+/// `WordBank.all` refresh when a pack finishes loading.
+@Observable
+final class WordStore {
+    private(set) var all: [Word] = []
+    private(set) var swears: [Word] = []
+    private(set) var byId: [String: Word] = [:]
+    private(set) var levels: [Int] = [1, 2, 3, 4]
+
+    init() { reload() }
+
+    /// Re-reads the Rust word bank (call on the main thread after loading content).
+    func reload() {
+        all = allWords().map(Word.init)
+        swears = swearWords().map(Word.init)
+        byId = Dictionary((all + swears).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let l = wordLevels().map(Int.init)
+        levels = l.isEmpty ? [1, 2, 3, 4] : l
+    }
+}
+
+/// The vocabulary from the shared Rust core: bundled basics, downloaded HSK 1–6 packs and the opt-in street deck.
 enum WordBank {
-    static let streetLevel = 5
+    static let store = WordStore()
+    static let streetLevel = Int(Meitian.streetLevel())
     /// Regular vocabulary only. Street words live in `swears`.
-    static let all: [Word] = allWords().map(Word.init)
-    static let swears: [Word] = swearWords().map(Word.init)
-    static let byId: [String: Word] = Dictionary(uniqueKeysWithValues: (all + swears).map { ($0.id, $0) })
-    static let levels = [1, 2, 3, 4]
+    static var all: [Word] { store.all }
+    static var swears: [Word] { store.swears }
+    static var levels: [Int] { store.levels }
+    static var maxLevel: Int { store.levels.last ?? 4 }
 
     static func words(level: Int) -> [Word] { level == streetLevel ? swears : all.filter { $0.level == level } }
-    static func word(_ id: String) -> Word? { byId[id] }
+    static func word(_ id: String) -> Word? { store.byId[id] }
 
     /// Words a learner with the given swear setting may see.
     static func visible(swears on: Bool) -> [Word] { on ? all + swears : all }
@@ -89,8 +112,9 @@ enum WordBank {
         2: "Sprout",
         3: "Bamboo",
         4: "Dragon",
-        5: "Street",
+        5: "Phoenix",
+        6: "Master",
     ]
 
-    static func levelTitle(_ level: Int) -> String { levelNames[level] ?? "Dragon" }
+    static func levelTitle(_ level: Int) -> String { level == streetLevel ? "Street" : levelNames[min(level, 6)] ?? "Dragon" }
 }

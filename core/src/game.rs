@@ -35,12 +35,12 @@ pub fn match_coins(outcome: Outcome, bonus: u32, streak: u32) -> u32 {
     }
 }
 
-/// Word ids for a battle: regular words up to the lower player's level, plus the street deck if both
+/// Word ids for a battle (bundled words only, so both phones know them): regular words up to the lower player's level, plus the street deck if both
 /// players have swears on.
 #[uniffi::export]
 pub fn battle_pool(level_a: u8, level_b: u8, swears_a: bool, swears_b: bool) -> Vec<String> {
     let level = level_a.min(level_b).max(1);
-    let mut ids: Vec<String> = all_words().into_iter().filter(|w| w.level <= level).map(|w| w.id).collect();
+    let mut ids: Vec<String> = bundled_words().into_iter().filter(|w| w.level <= level).map(|w| w.id).collect();
     if swears_a && swears_b {
         ids.extend(swear_words().into_iter().map(|w| w.id));
     }

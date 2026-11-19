@@ -1,10 +1,17 @@
 //! The built-in vocabulary (compiled into the library) and quiz option building.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-/// Street words (swears) live on this level.
-pub const STREET_LEVEL: u8 = 5;
+/// Street words (swears) use this level so they never collide with HSK bands 1–6.
+/// (Their ids keep the historical "5-" prefix so saved progress still matches.)
+pub const STREET_LEVEL: u8 = 99;
+
+/// The UI filter value for the street deck.
+#[uniffi::export]
+pub fn street_level() -> u8 {
+    STREET_LEVEL
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
 pub struct CoreWord {
@@ -29,7 +36,7 @@ impl CoreWord {
     }
 }
 
-fn parse(text: &str) -> Vec<CoreWord> {
+fn parse(text: &str, street: bool) -> Vec<CoreWord> {
     text.lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .filter_map(|line| {
@@ -37,10 +44,10 @@ fn parse(text: &str) -> Vec<CoreWord> {
             if f.len() < 7 {
                 return None;
             }
-            let level: u8 = f[0].parse().ok()?;
+            let file_level: u8 = f[0].parse().ok()?;
             Some(CoreWord {
-                id: format!("{}-{}", level, f[1]),
-                level,
+                id: format!("{}-{}", file_level, f[1]),
+                level: if street { STREET_LEVEL } else { file_level },
                 hanzi: f[1].into(),
                 pinyin: f[2].into(),
                 meaning: f[3].into(),
@@ -53,26 +60,76 @@ fn parse(text: &str) -> Vec<CoreWord> {
         .collect()
 }
 
-struct Bank {
-    regular: Vec<CoreWord>,
-    swears: Vec<CoreWord>,
-    by_id: HashMap<String, CoreWord>,
+/// Built-in words plus whatever content packs were loaded at runtime.
+pub(crate) struct Bank {
+    /// Regular vocabulary: the bundled words first, then downloaded ones.
+    pub regular: Vec<CoreWord>,
+    /// How many of `regular` are bundled (identical on every install, so battles use only these).
+    pub bundled: usize,
+    pub swears: Vec<CoreWord>,
+    pub by_id: HashMap<String, CoreWord>,
+    pub by_hanzi: HashMap<String, String>,
 }
 
-fn bank() -> &'static Bank {
-    static BANK: OnceLock<Bank> = OnceLock::new();
-    BANK.get_or_init(|| {
-        let regular = parse(include_str!("../data/words.tsv"));
-        let swears = parse(include_str!("../data/swears.tsv"));
-        let by_id = regular.iter().chain(swears.iter()).map(|w| (w.id.clone(), w.clone())).collect();
-        Bank { regular, swears, by_id }
-    })
+impl Bank {
+    fn bundled() -> Bank {
+        let regular = parse(include_str!("../data/words.tsv"), false);
+        let swears = parse(include_str!("../data/swears.tsv"), true);
+        let mut b = Bank { bundled: regular.len(), regular, swears, by_id: HashMap::new(), by_hanzi: HashMap::new() };
+        b.reindex();
+        b
+    }
+
+    fn reindex(&mut self) {
+        self.by_id = self.regular.iter().chain(self.swears.iter()).map(|w| (w.id.clone(), w.clone())).collect();
+        self.by_hanzi = self.regular.iter().map(|w| (w.hanzi.clone(), w.id.clone())).collect();
+    }
+
+    /// Adds downloaded words, skipping characters the bank already has. Returns how many were new.
+    pub(crate) fn add(&mut self, words: Vec<CoreWord>) -> u32 {
+        let mut added = 0;
+        for w in words {
+            if self.by_hanzi.contains_key(&w.hanzi) || self.by_id.contains_key(&w.id) {
+                continue;
+            }
+            self.by_hanzi.insert(w.hanzi.clone(), w.id.clone());
+            self.by_id.insert(w.id.clone(), w.clone());
+            self.regular.push(w);
+            added += 1;
+        }
+        added
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.regular.truncate(self.bundled);
+        self.reindex();
+    }
 }
 
-/// Regular vocabulary (HSK 1–4).
+fn lock() -> &'static RwLock<Bank> {
+    static BANK: OnceLock<RwLock<Bank>> = OnceLock::new();
+    BANK.get_or_init(|| RwLock::new(Bank::bundled()))
+}
+
+pub(crate) fn bank() -> RwLockReadGuard<'static, Bank> {
+    lock().read().unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn bank_mut() -> RwLockWriteGuard<'static, Bank> {
+    lock().write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Regular vocabulary: bundled HSK 1–4 basics plus downloaded HSK 1–6 packs.
 #[uniffi::export]
 pub fn all_words() -> Vec<CoreWord> {
     bank().regular.clone()
+}
+
+/// Only the words compiled into the app — the same on every phone (used for battles).
+#[uniffi::export]
+pub fn bundled_words() -> Vec<CoreWord> {
+    let b = bank();
+    b.regular[..b.bundled].to_vec()
 }
 
 /// The opt-in street deck.
@@ -84,6 +141,21 @@ pub fn swear_words() -> Vec<CoreWord> {
 #[uniffi::export]
 pub fn word_by_id(id: String) -> Option<CoreWord> {
     bank().by_id.get(&id).cloned()
+}
+
+/// The word id for some characters, if they're in the bank.
+#[uniffi::export]
+pub fn word_id_for_hanzi(hanzi: String) -> Option<String> {
+    bank().by_hanzi.get(&hanzi).cloned()
+}
+
+/// HSK levels that currently have words, ascending.
+#[uniffi::export]
+pub fn word_levels() -> Vec<u8> {
+    let mut l: Vec<u8> = bank().regular.iter().map(|w| w.level).collect();
+    l.sort_unstable();
+    l.dedup();
+    l
 }
 
 /// Words visible with the given swear setting.

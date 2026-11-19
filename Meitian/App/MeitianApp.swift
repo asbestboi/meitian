@@ -4,6 +4,7 @@ import SwiftUI
 struct MeitianApp: App {
     @State private var store = AppStore()
     @State private var arena = ArenaStore()
+    @State private var content = ContentSync()
     @Environment(\.scenePhase) private var phase
 
     init() {
@@ -19,6 +20,12 @@ struct MeitianApp: App {
             RootView()
                 .environment(store)
                 .environment(arena)
+                .environment(content)
+                .task { await content.start(level: store.profile.confirmedLevel + 1) }
+                // a new placement result may need other level packs
+                .onChange(of: store.profile.confirmedLevel) { _, _ in
+                    Task { await content.refresh(level: store.profile.confirmedLevel + 1) }
+                }
                 .onChange(of: phase) { _, p in
                     if p == .active { store.refreshDay() }
                     if p == .background { store.save(); arena.save() }

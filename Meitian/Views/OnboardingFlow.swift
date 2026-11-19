@@ -154,6 +154,8 @@ struct OnboardingFlow: View {
         ("🎋", "Basic conversations", "I can order food and chat a bit"),
         ("🐼", "Getting comfortable", "I can talk about my day and plans"),
         ("🐉", "Pretty confident", "I hold real conversations"),
+        ("🦅", "Advanced", "I read articles and watch shows"),
+        ("👑", "Near fluent", "I just want to keep sharp"),
     ]
 
     private var claimStep: some View {
@@ -286,8 +288,9 @@ struct OnboardingFlow: View {
     }
 
     private var resultSubtitle: String {
-        let start = min(confirmed + 1, 4)
-        if confirmed >= 4 { return "You know all four levels. We'll keep you sharp with level 4 words and reviews." }
+        let top = WordBank.maxLevel
+        let start = min(confirmed + 1, top)
+        if confirmed >= top { return "You know every level we have. We'll keep you sharp with HSK \(top) words and reviews." }
         return "You'll get new words from level \(start) (\(WordBank.levelTitle(start))) and climb from there."
     }
 

@@ -98,7 +98,7 @@ pub struct PlacementAnswer {
 #[uniffi::export]
 pub fn placement_level(answers: Vec<PlacementAnswer>) -> u8 {
     let mut confirmed = 0;
-    for level in 1..=4u8 {
+    for level in 1..=6u8 {
         let right = answers.iter().filter(|a| a.level == level && a.right).count();
         if right >= 2 {
             confirmed = level;

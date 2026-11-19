@@ -27,6 +27,9 @@ pub fn day_seed(day_key: String) -> u32 {
 
 #[uniffi::export]
 pub fn daily_challenge(day_key: String, words: Vec<CoreWord>, friend: Friend) -> Option<CoreChallenge> {
+    // Challenges are built around the word's example sentence, so prefer words that have one.
+    let with_example: Vec<CoreWord> = words.iter().filter(|w| !w.example.is_empty()).cloned().collect();
+    let words = if with_example.is_empty() { words } else { with_example };
     if words.is_empty() {
         return None;
     }

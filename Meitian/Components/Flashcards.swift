@@ -57,17 +57,19 @@ struct WordCardFace: View {
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top) {
-                    RubyText(hanzi: word.example, pinyin: word.examplePinyin, size: 22, alwaysShow: true)
-                    Spacer()
-                    SpeakButton(text: word.example, size: 36, tint: Theme.jade)
+            if !word.example.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top) {
+                        RubyText(hanzi: word.example, pinyin: word.examplePinyin, size: 22, alwaysShow: true)
+                        Spacer()
+                        SpeakButton(text: word.example, size: 36, tint: Theme.jade)
+                    }
+                    Text(word.exampleMeaning).font(.rounded(.subheadline, weight: .medium))
                 }
-                Text(word.exampleMeaning).font(.rounded(.subheadline, weight: .medium))
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .padding(26)
         .padding(.top, 10)

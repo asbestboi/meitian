@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.data.AppState
+import com.asbestboi.meitian.data.ContentSync
 import com.asbestboi.meitian.data.Sfx
 import com.asbestboi.meitian.data.Speaker
 import com.asbestboi.meitian.ui.ArenaScreen
@@ -89,6 +90,11 @@ fun Root() {
     val app = LocalApp.current
     Sfx.enabled = app.settings.sounds
     val overlay = remember { Overlay() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Downloaded lessons: load the cache, refresh daily, and again when the placement level changes.
+    androidx.compose.runtime.LaunchedEffect(app.profile.confirmedLevel) {
+        ContentSync.start(context.applicationContext, app.profile.confirmedLevel + 1)
+    }
     Box(Modifier.fillMaxSize().background(Street.c.paper)) {
         CompositionLocalProvider(LocalNav provides overlay) {
             if (!app.profile.onboarded) {

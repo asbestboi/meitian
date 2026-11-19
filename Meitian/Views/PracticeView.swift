@@ -2,11 +2,13 @@ import SwiftUI
 
 struct PracticeView: View {
     @Environment(AppStore.self) private var store
+    @Environment(ContentSync.self) private var content
     @State private var session: PracticeSession.Mode?
     @State private var search = ""
     @State private var levelFilter = 0
     @State private var selected: Word?
     @State private var sprint = false
+    @State private var sentences = false
     @AppStorage(Prefs.swears) private var swears = false
     @AppStorage(Prefs.listening) private var listeningOn = true
     @AppStorage(Prefs.speaking) private var speakingOn = true
@@ -16,6 +18,7 @@ struct PracticeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     reviewHero
+                    sentenceTile
                     if swears { sprintTile }
                     HStack(spacing: 12) {
                         gameTile("Listening", "ear.fill", Theme.skyGradient,
@@ -42,6 +45,9 @@ struct PracticeView: View {
         }
         .fullScreenCover(item: $session) { mode in
             PracticeSession(mode: mode).environment(store)
+        }
+        .fullScreenCover(isPresented: $sentences) {
+            SentenceSession().environment(store)
         }
         .fullScreenCover(isPresented: $sprint) {
             SwearSprintView().environment(store)
@@ -91,6 +97,29 @@ struct PracticeView: View {
         }
         .foregroundStyle(.white)
         .streetBlock(Theme.skyGradient)
+    }
+
+    private var sentenceTile: some View {
+        let count = Int(content.stats.sentences)
+        return Button { sentences = true } label: {
+            HStack(spacing: 14) {
+                Text("💬").font(.system(size: 40))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Sentences").font(.rounded(.title3, weight: .bold))
+                    Text(count > 0 ? "Build, fill and translate real sentences at your level."
+                                   : "Downloading sentence lessons… needs internet once.")
+                        .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.headline.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.primary)
+            .cardSurface(padding: 16)
+            .opacity(count > 0 ? 1 : 0.6)
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(count == 0)
     }
 
     private var sprintTile: some View {
@@ -148,7 +177,7 @@ struct PracticeView: View {
             Text("Word library").font(.rounded(.title3, weight: .bold)).padding(.top, 6)
             Picker("Level", selection: $levelFilter) {
                 Text("All").tag(0)
-                ForEach(WordBank.levels, id: \.self) { Text("HSK \($0)").tag($0) }
+                ForEach(WordBank.levels, id: \.self) { Text(WordBank.levels.count > 4 ? "\($0)" : "HSK \($0)").tag($0) }
                 if swears { Text("🤬").tag(WordBank.streetLevel) }
             }
             .pickerStyle(.segmented)
@@ -208,16 +237,19 @@ struct WordDetail: View {
                     .buttonStyle(PressableStyle(scale: 0.9))
                     .accessibilityLabel("Play slowly")
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .top) {
-                        RubyText(hanzi: word.example, pinyin: word.examplePinyin, size: 22, alwaysShow: true)
-                        Spacer()
-                        SpeakButton(text: word.example, size: 36, tint: Theme.jade)
+                if !word.example.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top) {
+                            RubyText(hanzi: word.example, pinyin: word.examplePinyin, size: 22, alwaysShow: true)
+                            Spacer()
+                            SpeakButton(text: word.example, size: 36, tint: Theme.jade)
+                        }
+                        Text(word.exampleMeaning).font(.rounded(.subheadline, weight: .medium))
                     }
-                    Text(word.exampleMeaning).font(.rounded(.subheadline, weight: .medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardSurface()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .cardSurface()
+                ExampleSentences(word: word)
                 if let s = store.cards[word.id] {
                     HStack {
                         Label("Box \(s.box) of 6", systemImage: "archivebox.fill")

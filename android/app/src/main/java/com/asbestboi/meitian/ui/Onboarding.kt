@@ -42,11 +42,14 @@ private val claims = listOf(
     Triple("🎋", "Basic conversations", "I can order food and chat a bit"),
     Triple("🐼", "Getting comfortable", "I can talk about my day and plans"),
     Triple("🐉", "Pretty confident", "I hold real conversations"),
+    Triple("🦅", "Advanced", "I read articles and watch shows"),
+    Triple("👑", "Near fluent", "I just want to keep sharp"),
 )
 
 private fun placementQuestions(): List<Question> = Words.levels.flatMap { level ->
     val pool = Words.level(level)
-    pool.shuffled().take(3).mapIndexed { i, w -> Question.make(w, if (i == 1) Kind.MeaningToHanzi else Kind.HanziToMeaning, pool) }
+    // common words first, so the test checks the core of each level
+    pool.take(60).shuffled().take(3).mapIndexed { i, w -> Question.make(w, if (i == 1) Kind.MeaningToHanzi else Kind.HanziToMeaning, pool) }
 }
 
 /** Welcome → name → claimed level → placement quiz → result → daily goal. Also used to retake the quiz. */
@@ -162,9 +165,10 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                         },
                         fontSize = 22.sp, fontWeight = FontWeight.Black, color = Street.c.text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                     )
-                    val start = minOf(confirmed + 1, 4)
+                    val top = Words.maxLevel
+                    val start = minOf(confirmed + 1, top)
                     Text(
-                        if (confirmed >= 4) "You know all four levels. We'll keep you sharp with reviews."
+                        if (confirmed >= top) "You know every level we have. We'll keep you sharp with HSK $top words and reviews."
                         else "You'll get new words from level $start and climb from there.",
                         color = Street.c.secondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                     )

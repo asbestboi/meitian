@@ -18,27 +18,42 @@ import uniffi.meitian_core.playerLevel
 import uniffi.meitian_core.quizOptions
 import uniffi.meitian_core.srsGrade
 import uniffi.meitian_core.srsIsMastered
+import uniffi.meitian_core.streetLevel
 import uniffi.meitian_core.swearWords
+import uniffi.meitian_core.wordLevels
 import java.time.LocalDate
 import java.util.UUID
 
 // ---------- words (from the shared Rust core) ----------
 
-const val STREET_LEVEL = 5
+/** Street words use their own level so they never collide with HSK 1–6. */
+val STREET_LEVEL: Int = streetLevel().toInt()
 
 val CoreWord.lvl: Int get() = level.toInt()
 val CoreWord.isSwear: Boolean get() = lvl == STREET_LEVEL
 val CoreWord.shortMeaning: String get() = meaning.split(",").first().trim()
 val CoreWord.levelLabel: String get() = if (isSwear) "STREET 🤬" else "HSK $lvl"
 
+/** Bundled words plus downloaded content packs. Compose-observable: reload() after a pack loads. */
 object Words {
-    val all: List<CoreWord> by lazy { allWords() }
-    val swears: List<CoreWord> by lazy { swearWords() }
-    val byId: Map<String, CoreWord> by lazy { (all + swears).associateBy { it.id } }
-    val levels = listOf(1, 2, 3, 4)
+    private class Data(val all: List<CoreWord>, val swears: List<CoreWord>, val levels: List<Int>) {
+        val byId: Map<String, CoreWord> = (all + swears).associateBy { it.id }
+    }
+
+    private fun read() = Data(allWords(), swearWords(), wordLevels().map { it.toInt() }.ifEmpty { listOf(1, 2, 3, 4) })
+
+    private var data by mutableStateOf(read())
+
+    val all: List<CoreWord> get() = data.all
+    val swears: List<CoreWord> get() = data.swears
+    val levels: List<Int> get() = data.levels
+    val maxLevel: Int get() = data.levels.lastOrNull() ?: 4
     fun level(l: Int): List<CoreWord> = if (l == STREET_LEVEL) swears else all.filter { it.lvl == l }
     fun visible(swears: Boolean): List<CoreWord> = if (swears) all + this.swears else all
-    operator fun get(id: String): CoreWord? = byId[id]
+    operator fun get(id: String): CoreWord? = data.byId[id]
+
+    /** Call on the main thread after content was loaded into the core. */
+    fun reload() { data = read() }
 }
 
 enum class Kind { HanziToMeaning, MeaningToHanzi, Listen, Speak }
@@ -162,16 +177,16 @@ class AppState(private val context: Context) {
 
     // ----- words of the day -----
 
-    val startLevel get() = (profile.confirmedLevel + 1).coerceIn(1, 4)
+    val startLevel get() = (profile.confirmedLevel + 1).coerceIn(1, Words.maxLevel)
 
     val currentLevel: Int
-        get() = Words.levels.firstOrNull { l -> l >= startLevel && Words.level(l).any { cards[it.id] == null } } ?: 4
+        get() = Words.levels.firstOrNull { l -> l >= startLevel && Words.level(l).any { cards[it.id] == null } } ?: Words.maxLevel
 
     fun todaysWords(): List<CoreWord> {
         if (today.newWordIds.isNotEmpty()) return today.newWordIds.mapNotNull { Words[it] }
         val picked = mutableListOf<CoreWord>()
         var level = startLevel
-        while (picked.size < profile.dailyGoal && level <= 4) {
+        while (picked.size < profile.dailyGoal && level <= Words.maxLevel) {
             picked += Words.level(level).filter { cards[it.id] == null && it !in picked }.take(profile.dailyGoal - picked.size)
             level++
         }

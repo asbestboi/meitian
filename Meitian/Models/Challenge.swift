@@ -76,7 +76,8 @@ enum Placement {
         for level in WordBank.levels {
             let pool = WordBank.words(level: level)
             let kinds: [QuizQuestion.Kind] = [.hanziToMeaning, .meaningToHanzi, .hanziToMeaning]
-            for (i, w) in pool.shuffled().prefix(3).enumerated() {
+            // common words first, so the test checks the core of each level
+            for (i, w) in pool.prefix(60).shuffled().prefix(3).enumerated() {
                 qs.append(QuizQuestion.make(for: w, kind: kinds[i], pool: pool))
             }
         }

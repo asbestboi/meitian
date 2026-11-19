@@ -128,14 +128,14 @@ final class AppStore {
     // MARK: daily words
 
     /// Placement confirmed levels are already known, so new words start one above.
-    var startLevel: Int { min(max(profile.confirmedLevel + 1, 1), 4) }
+    var startLevel: Int { min(max(profile.confirmedLevel + 1, 1), WordBank.maxLevel) }
 
     /// The level the learner is currently pulling new words from.
     var currentLevel: Int {
         for level in WordBank.levels where level >= startLevel {
             if WordBank.words(level: level).contains(where: { cards[$0.id] == nil }) { return level }
         }
-        return 4
+        return WordBank.maxLevel
     }
 
     /// Today's new words, picked once per day and then fixed.
@@ -145,7 +145,7 @@ final class AppStore {
         }
         var picked: [Word] = []
         var level = startLevel
-        while picked.count < profile.dailyGoal && level <= 4 {
+        while picked.count < profile.dailyGoal && level <= WordBank.maxLevel {
             let fresh = WordBank.words(level: level).filter { cards[$0.id] == nil && !picked.contains($0) }
             picked.append(contentsOf: fresh.prefix(profile.dailyGoal - picked.count))
             level += 1

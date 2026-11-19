@@ -2,6 +2,9 @@ import SwiftUI
 
 struct StatsView: View {
     @Environment(AppStore.self) private var store
+    @Environment(ContentSync.self) private var content
+    @AppStorage(ContentSync.allLevelsKey) private var allLevels = false
+    @State private var confirmClear = false
     @Environment(ArenaStore.self) private var arena
     @State private var retake = false
     @State private var confirmReset = false
@@ -266,8 +269,73 @@ struct StatsView: View {
             }
             .tint(Theme.pink)
             .padding(16)
+            Divider().padding(.leading, 16)
+            downloads
         }
         .sensoryFeedback(.selection, trigger: swears)
+    }
+
+    private var statusText: String {
+        switch content.status {
+        case .idle: return content.stats.sentences > 0 ? "Downloaded" : "Not downloaded yet"
+        case .checking: return "Checking for new lessons…"
+        case .downloading(let done, let total): return "Downloading \(done + 1) of \(total)…"
+        case .ready: return "Up to date"
+        case .failed(let message): return message
+        }
+    }
+
+    @ViewBuilder
+    private var downloads: some View {
+        let st = content.stats
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Lessons", systemImage: "arrow.down.circle.fill")
+            Text("\(st.words) words · \(st.sentences) sentences · \(st.stories) stories")
+                .font(.rounded(.subheadline, weight: .semibold))
+            Text(statusText).font(.rounded(.caption)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        Divider().padding(.leading, 16)
+        Toggle(isOn: $allLevels) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Download every level", systemImage: "square.stack.3d.up.fill")
+                Text("Otherwise only the HSK levels around yours (saves space).")
+                    .font(.rounded(.caption)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .onChange(of: allLevels) { _, _ in
+            Task { await content.refresh(level: store.profile.confirmedLevel + 1) }
+        }
+        Divider().padding(.leading, 16)
+        HStack {
+            Button {
+                Task { await content.refresh(level: store.profile.confirmedLevel + 1, force: false) }
+            } label: {
+                Label("Update now", systemImage: "arrow.clockwise")
+            }
+            Spacer()
+            Button(role: .destructive) { confirmClear = true } label: {
+                Text("Delete (\(ByteCountFormatter.string(fromByteCount: content.cacheBytes, countStyle: .file)))")
+            }
+            .confirmationDialog("Delete downloaded lessons?", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Delete downloads", role: .destructive) { content.clear() }
+            } message: {
+                Text("Your progress stays. Words you learned from downloads come back after the next download.")
+            }
+        }
+        .font(.rounded(.subheadline, weight: .bold))
+        .padding(16)
+        if !content.credits.isEmpty {
+            Divider().padding(.leading, 16)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(content.credits, id: \.self) { Text($0) }
+            }
+            .font(.rounded(.caption2))
+            .foregroundStyle(.secondary)
+            .padding(16)
+        }
     }
 
     private var settings: some View {

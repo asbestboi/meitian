@@ -2,6 +2,7 @@ package com.asbestboi.meitian.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.LocalApp
 import com.asbestboi.meitian.LocalNav
+import com.asbestboi.meitian.data.ContentSync
 import com.asbestboi.meitian.data.Kind
 import com.asbestboi.meitian.data.Question
 import com.asbestboi.meitian.data.STREET_LEVEL
@@ -61,7 +63,7 @@ fun PracticeScreen() {
     val learned = app.learnedWords
     val due = app.dueWords.size
 
-    val shown = remember(search, filter, app.settings.swears) {
+    val shown = remember(search, filter, app.settings.swears, Words.all.size) {
         val q = search.trim().lowercase()
         Words.visible(app.settings.swears).filter { w ->
             (filter == 0 || w.lvl == filter) &&
@@ -77,6 +79,19 @@ fun PracticeScreen() {
                 Text(if (due > 0) "Spaced repetition: review right before you'd forget." else "Come back tomorrow, or play a game below. ${app.masteredCount} mastered.",
                     color = Color.White.copy(alpha = 0.9f))
                 if (due > 0) BigButton("Start review", brush = Street.ink()) { nav.show { PracticeSession(PracticeMode.Review) { nav.close() } } }
+            }
+        }
+        item {
+            val count = ContentSync.stats.sentences.toInt()
+            Row(Modifier.fillMaxWidth().card().clickable(enabled = count > 0) { nav.show { SentenceSession { nav.close() } } }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("💬", fontSize = 38.sp); HSpacer(12.dp)
+                Column(Modifier.weight(1f)) {
+                    Text("SENTENCES", style = street(24.sp), color = Street.c.text)
+                    Text(if (count > 0) "Build, fill and translate real sentences at your level." else "Downloading sentence lessons… needs internet once.",
+                        fontSize = 13.sp, color = Street.c.secondary)
+                }
+                Text("›", style = street(28.sp), color = Street.c.secondary)
             }
         }
         if (app.settings.swears) item {
@@ -107,7 +122,7 @@ fun PracticeScreen() {
             Text("WORD LIBRARY", style = street(24.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp))
             OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search hanzi, pinyin or English") }, singleLine = true)
             Gap(8.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 (listOf(0 to "All") + Words.levels.map { it to "HSK $it" } + if (app.settings.swears) listOf(STREET_LEVEL to "🤬") else emptyList()).forEach { (l, label) ->
                     Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (filter == l) Street.c.red else Street.c.card).clickable { filter = l }
                         .padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -138,7 +153,7 @@ fun WordDetail(w: CoreWord, close: () -> Unit) {
     val app = LocalApp.current
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = close), contentAlignment = Alignment.BottomCenter) {
         Column(Modifier.fillMaxWidth().background(Street.c.paper, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).clickable(enabled = false) {}
-            .padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            .verticalScroll(rememberScrollState()).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Pill(w.levelLabel, Street.levelColor(w.lvl))
             RubyText(w.hanzi, w.pinyin, 70.sp, FontWeight.SemiBold, center = true)
             PinyinText(w.pinyin, 24.sp, FontWeight.Black)
@@ -147,10 +162,11 @@ fun WordDetail(w: CoreWord, close: () -> Unit) {
                 SpeakButton(w.hanzi, 56.dp)
                 Box(Modifier.clickable { Speaker.say(w.hanzi, true) }.padding(14.dp)) { Text("🐢", fontSize = 26.sp) }
             }
-            Column(Modifier.fillMaxWidth().card().padding(14.dp)) {
+            if (w.example.isNotEmpty()) Column(Modifier.fillMaxWidth().card().padding(14.dp)) {
                 RubyText(w.example, w.examplePinyin, 22.sp, alwaysShow = true)
                 Text(w.exampleMeaning, color = Street.c.text)
             }
+            ExampleSentences(w)
             app.cards[w.id]?.let { Text("Box ${it.box} of 6 · ✓ ${it.correct} ✗ ${it.wrong}", color = Street.c.secondary, fontWeight = FontWeight.Bold) }
             BigButton("Close", brush = Street.ink(), onClick = close)
         }
