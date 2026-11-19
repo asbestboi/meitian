@@ -101,6 +101,9 @@ object StoryProgress {
 
     fun done(c: Context): Set<String> = read(c).toSet()
 
+    /** Forget everything read and the waiting surprises (reset all progress). */
+    fun reset(c: Context) = prefs(c).edit().clear().apply()
+
     /** The surprise waiting for this learner: stays the same until read, then a new random unread one. */
     fun next(c: Context, chat: Boolean, dayKey: String, level: Int): Story? {
         val key = if (chat) "nextChat" else "nextStory"

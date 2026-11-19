@@ -386,7 +386,7 @@ struct StatsView: View {
                     arena.reset()
                 }
             } message: {
-                Text("Your words, streak, XP, challenges, coins and cosmetics will be deleted. This can't be undone.")
+                Text("Your words, streak, XP, challenges, story history, coins and cosmetics will be deleted. This can't be undone.")
             }
         }
         .font(.rounded(.body))

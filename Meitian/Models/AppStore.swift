@@ -120,6 +120,11 @@ final class AppStore {
         cards = [:]
         days = [:]
         xp = 0
+        milestoneQueue.removeAll()
+        // progress kept outside the save file
+        StoryProgress.reset()
+        UserDefaults.standard.removeObject(forKey: "sprintBest")
+        UserDefaults.standard.set(false, forKey: Prefs.swears)
         save()
     }
 

@@ -26,6 +26,12 @@ enum StoryProgress {
 
     private static func pickKey(_ chat: Bool) -> String { chat ? "nextChat" : "nextStory" }
 
+    /// Forget everything read and the waiting surprises (reset all progress).
+    static func reset() {
+        let d = UserDefaults.standard
+        for key in [readKey, legacyKey, pickKey(true), pickKey(false)] { d.removeObject(forKey: key) }
+    }
+
     /// The surprise waiting for this learner: stays the same until it's read (so reopening doesn't reroll),
     /// then a new random unread one. nil when everything has been read.
     static func next(chat: Bool, dayKey: String, level: Int) -> Story? {

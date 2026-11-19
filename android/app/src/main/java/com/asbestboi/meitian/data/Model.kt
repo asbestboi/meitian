@@ -377,7 +377,11 @@ class AppState(private val context: Context) {
     fun resetAll() {
         val id = arena.playerId
         profile = Profile(); settings = settings.copy(swears = false); arena = Arena(playerId = id); xp = 0
-        cards.clear(); days.clear(); save()
+        cards.clear(); days.clear(); milestoneQueue.clear()
+        // progress kept outside the save: story history (ui.StoryProgress) and the sprint best
+        context.getSharedPreferences("stories", Context.MODE_PRIVATE).edit().clear().apply()
+        prefs.edit().remove("sprintBest").apply()
+        save()
     }
 
     // ----- persistence -----
