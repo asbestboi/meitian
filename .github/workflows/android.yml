@@ -34,7 +34,8 @@ jobs:
         run: |
           cd android
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
-          ./gradlew --no-daemon assembleRelease
+          # retry once: Maven Central sometimes fails to serve artifacts for a minute
+          ./gradlew --no-daemon assembleRelease || (sleep 60 && ./gradlew --no-daemon --refresh-dependencies assembleRelease)
           cp app/build/outputs/apk/release/app-release.apk ../Meitian.apk
           ls -la ../Meitian.apk
       - uses: actions/upload-artifact@v4

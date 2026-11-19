@@ -1,6 +1,6 @@
 [package]
 name = "meitian_core"
-version = "1.8.0"
+version = "1.8.1"
 edition = "2021"
 description = "Shared logic for the Měitiān iOS and Android apps: words, pinyin, spaced repetition, quizzes, battles."
 publish = false

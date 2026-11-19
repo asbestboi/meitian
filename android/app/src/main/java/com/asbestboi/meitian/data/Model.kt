@@ -106,8 +106,11 @@ data class DayLog(
     val reviewed: Int = 0,
     val xp: Int = 0,
     val challenge: ChallengeLog? = null,
+    /** The other friend type's challenge on the same day (bonus). */
+    val bonus: ChallengeLog? = null,
 ) {
     val active get() = learnedDone || reviewed > 0 || challenge != null
+    fun challengeFor(friend: String): ChallengeLog? = listOfNotNull(challenge, bonus).firstOrNull { it.friend == friend }
 }
 
 data class Profile(
@@ -237,12 +240,19 @@ class AppState(private val context: Context) {
     }
 
     fun completeChallenge(word: CoreWord, friend: Friend, mood: Int?, note: String) {
-        val first = today.challenge == null
-        today = today.copy(
-            challenge = ChallengeLog(word.id, if (friend == Friend.CHINESE) "chinese" else "nonChinese", mood, note, System.currentTimeMillis()),
-            xp = today.xp + if (first) 50 else 0,
-        )
-        if (first) xp += 50
+        val kind = if (friend == Friend.CHINESE) "chinese" else "nonChinese"
+        val log = ChallengeLog(word.id, kind, mood, note, System.currentTimeMillis())
+        val t = today
+        today = if (t.challenge == null || t.challenge.friend == kind) {
+            val gained = if (t.challenge == null) 50 else 0
+            xp += gained
+            t.copy(challenge = log, xp = t.xp + gained)
+        } else {
+            // second challenge of the day, with the other kind of friend
+            val gained = if (t.bonus == null) 30 else 0
+            xp += gained
+            t.copy(bonus = log, xp = t.xp + gained)
+        }
         save()
     }
 
@@ -349,6 +359,11 @@ class AppState(private val context: Context) {
                             put("w", c.wordId); put("f", c.friend); put("m", c.mood ?: -1); put("n", c.note); put("t", c.at)
                         })
                     }
+                    d.bonus?.let { c ->
+                        put("ch2", JSONObject().apply {
+                            put("w", c.wordId); put("f", c.friend); put("m", c.mood ?: -1); put("n", c.note); put("t", c.at)
+                        })
+                    }
                 })
             }
         })
@@ -391,10 +406,10 @@ class AppState(private val context: Context) {
                 d.keys().forEach { k ->
                     val x = d.getJSONObject(k)
                     val ids = x.optJSONArray("ids")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
-                    val ch = x.optJSONObject("ch")?.let { c ->
-                        ChallengeLog(c.getString("w"), c.getString("f"), c.optInt("m", -1).takeIf { it >= 0 }, c.optString("n"), c.optLong("t"))
-                    }
-                    days[k] = DayLog(ids, x.optBoolean("done"), x.optInt("rev"), x.optInt("xp"), ch)
+                    fun log(c: JSONObject) = ChallengeLog(c.getString("w"), c.getString("f"), c.optInt("m", -1).takeIf { it >= 0 }, c.optString("n"), c.optLong("t"))
+                    val ch = x.optJSONObject("ch")?.let(::log)
+                    val ch2 = x.optJSONObject("ch2")?.let(::log)
+                    days[k] = DayLog(ids, x.optBoolean("done"), x.optInt("rev"), x.optInt("xp"), ch, ch2)
                 }
             }
             o.optJSONObject("arena")?.let { a ->

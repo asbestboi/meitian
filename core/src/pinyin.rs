@@ -147,7 +147,21 @@ pub fn toneless(text: String) -> String {
         .map(base)
         .map(|c| if c == 'ü' { 'u' } else { c })
         .filter(|c| c.is_alphabetic() && c.is_ascii())
+        .map(|c| c.to_ascii_lowercase())
         .collect()
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            cur.push((prev[j] + usize::from(ca != *cb)).min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
 }
 
 /// Did the learner say the word? `heard_hanzi` is the recognizer's text, `heard_latin` the same text
@@ -160,7 +174,26 @@ pub fn speech_matches(heard_hanzi: String, heard_latin: String, target_hanzi: St
         return true;
     }
     let want = toneless(target_pinyin);
-    !want.is_empty() && toneless(heard_latin).contains(&want)
+    if want.is_empty() {
+        return false;
+    }
+    let got = toneless(heard_latin);
+    if got.contains(&want) {
+        return true;
+    }
+    // Longer words: one sound off still counts (zh/z, ing/in… learners and recognizers both slip).
+    let n = want.chars().count();
+    if n >= 5 {
+        let g: Vec<char> = got.chars().collect();
+        for len in n.saturating_sub(1)..=n + 1 {
+            for start in 0..=g.len().saturating_sub(len) {
+                if start + len <= g.len() && edit_distance(&g[start..start + len].iter().collect::<String>(), &want) <= 1 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -196,5 +229,8 @@ mod tests {
         assert!(speech_matches("你好".into(), "nǐ hǎo".into(), "你好".into(), "nǐ hǎo".into()));
         assert!(speech_matches("拟好".into(), "nǐ hǎo".into(), "你好".into(), "nǐ hǎo".into()));
         assert!(!speech_matches("再见".into(), "zài jiàn".into(), "你好".into(), "nǐ hǎo".into()));
+        assert!(speech_matches("".into(), "Nǐ Hǎo".into(), "你好".into(), "nǐ hǎo".into()), "case-insensitive");
+        assert!(speech_matches("".into(), "xi huang".into(), "喜欢".into(), "xǐhuan".into()), "one sound off");
+        assert!(!speech_matches("".into(), "ma".into(), "妈".into(), "bā".into()));
     }
 }

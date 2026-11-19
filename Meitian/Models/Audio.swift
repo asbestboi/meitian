@@ -159,6 +159,7 @@ final class SpeechListener {
 
     private func begin() {
         guard let recognizer, recognizer.isAvailable else { state = .unavailable; return }
+        Speaker.shared.stop() // don't record our own text-to-speech
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
@@ -167,7 +168,8 @@ final class SpeechListener {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        // Don't force on-device: the Chinese offline model often isn't installed and then every try fails.
+        req.taskHint = .search
         req.contextualStrings = target.map { [$0.hanzi] } ?? []
         request = req
 
@@ -194,7 +196,11 @@ final class SpeechListener {
                     }
                     if result.isFinal { self.finish(.missed) }
                 }
-                if error != nil { self.finish(.missed) }
+                if error != nil {
+                    // the last partial result may already be right
+                    if let w = self.target, !self.heard.isEmpty, SpeechListener.matches(self.heard, word: w) { self.finish(.matched) }
+                    else { self.finish(.missed) }
+                }
             }
         }
         let work = DispatchWorkItem { [weak self] in
@@ -202,7 +208,7 @@ final class SpeechListener {
             self.finish(.missed)
         }
         timeout = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7, execute: work)
     }
 
     private func finish(_ result: State) {

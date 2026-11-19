@@ -14,27 +14,114 @@ enum StoryProgress {
     }
 }
 
-/// Illustration from the story pack, with a soft placeholder while it loads.
+/// Illustration from the story pack. The whole picture is shown (fit) over a blurred, filled copy of
+/// itself, so wide images never push the layout off screen and nothing gets cropped away.
 struct StoryImageView: View {
     let image: StoryImage?
     var height: CGFloat = 240
+    /// Cards and covers fill and crop; story panels show the whole picture.
+    var fill = false
 
     var body: some View {
-        ZStack {
-            Rectangle().fill(Theme.chrome.opacity(0.5))
-            if let image, let url = URL(string: image.url) {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
-                    switch phase {
-                    case .success(let img): img.resizable().scaledToFill().transition(.opacity)
-                    case .failure: Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary)
-                    default: ProgressView()
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .background(Theme.chrome.opacity(0.5))
+            .overlay {
+                if let image, let url = URL(string: image.url) {
+                    AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
+                        switch phase {
+                        case .success(let img):
+                            if fill {
+                                img.resizable().scaledToFill()
+                            } else {
+                                ZStack {
+                                    img.resizable().scaledToFill().blur(radius: 24).opacity(0.7)
+                                    img.resizable().scaledToFit()
+                                }
+                            }
+                        case .failure: Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary)
+                        default: ProgressView()
+                        }
                     }
                 }
             }
+            .clipped()
+            .contentShape(Rectangle())
+    }
+}
+
+struct ImageRef: Identifiable {
+    let image: StoryImage
+    var id: String { image.url }
+}
+
+/// Full-screen picture: pinch or double-tap to zoom, drag to pan, swipe down or ✕ to close.
+struct FullScreenImage: View {
+    let image: StoryImage
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var scale: CGFloat = 1
+    @State private var baseScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var baseOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+                .opacity(scale <= 1 ? max(0.4, 1 - abs(offset.height) / 500) : 1)
+            AsyncImage(url: URL(string: image.url)) { phase in
+                if case .success(let img) = phase {
+                    img.resizable().scaledToFit()
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .scaleEffect(scale)
+            .offset(offset)
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { v in scale = min(max(baseScale * v.magnification, 1), 5) }
+                    .onEnded { _ in
+                        baseScale = scale
+                        if scale <= 1 { withAnimation(Theme.spring) { offset = .zero; baseOffset = .zero } }
+                    }
+                    .simultaneously(with: DragGesture()
+                        .onChanged { v in
+                            offset = CGSize(width: baseOffset.width + v.translation.width, height: baseOffset.height + v.translation.height)
+                        }
+                        .onEnded { v in
+                            if scale <= 1 {
+                                if abs(v.translation.height) > 140 { dismiss(); return }
+                                withAnimation(Theme.spring) { offset = .zero }
+                            }
+                            baseOffset = offset
+                        })
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(Theme.spring) {
+                    if scale > 1 { scale = 1; offset = .zero } else { scale = 2.5 }
+                    baseScale = scale
+                    baseOffset = offset
+                }
+            }
+            VStack {
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.headline.weight(.bold)).foregroundStyle(.white)
+                            .frame(width: 44, height: 44).background(.white.opacity(0.18), in: Circle())
+                    }
+                    .accessibilityLabel("Close")
+                }
+                Spacer()
+                Button { if let u = URL(string: image.source) { openURL(u) } } label: {
+                    Text("art: \(image.artist)").font(.rounded(.caption)).foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .padding(20)
         }
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-        .clipped()
+        .statusBarHidden()
     }
 }
 
@@ -83,7 +170,7 @@ struct StoryCard: View {
     var body: some View {
         let done = StoryProgress.done().contains(story.id)
         VStack(alignment: .leading, spacing: 0) {
-            StoryImageView(image: story.cover, height: 130)
+            StoryImageView(image: story.cover, height: 130, fill: true)
                 .overlay(alignment: .topLeading) {
                     Text(story.emoji).font(.title2).padding(8)
                 }
@@ -131,6 +218,7 @@ struct StoryPlayer: View {
     @State private var showEnglish = false
     @State private var confetti = 0
     @State private var added = false
+    @State private var zoomed: ImageRef?
 
     private var current: StoryPanel { story.panels[panel] }
     private var linesDone: Bool { shown >= current.lines.count }
@@ -171,6 +259,7 @@ struct StoryPlayer: View {
             ConfettiView(trigger: confetti)
         }
         .onAppear { speakCurrentLine() }
+        .fullScreenCover(item: $zoomed) { ref in FullScreenImage(image: ref.image) }
     }
 
     private var header: some View {
@@ -199,9 +288,17 @@ struct StoryPlayer: View {
 
     private var image: some View {
         VStack(alignment: .leading, spacing: 6) {
-            StoryImageView(image: current.image, height: 250)
+            StoryImageView(image: current.image, height: 280)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
                 .shadow(color: .black.opacity(0.1), radius: 16, y: 8)
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption.weight(.bold)).foregroundStyle(.white)
+                        .padding(8).background(.black.opacity(0.35), in: Circle()).padding(10)
+                }
+                .onTapGesture { if let img = current.image { zoomed = ImageRef(image: img) } }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Show picture full screen")
             if let img = current.image {
                 Button {
                     if let u = URL(string: img.source) { openURL(u) }
@@ -315,7 +412,7 @@ struct StoryPlayer: View {
         let questions = story.panels.filter { $0.question != nil }.count
         return VStack(spacing: 18) {
             Spacer()
-            StoryImageView(image: story.cover, height: 180)
+            StoryImageView(image: story.cover, height: 180, fill: true)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
                 .padding(.horizontal, 30)
             Text("故事读完了！").font(.hanzi(34, weight: .heavy))
@@ -354,7 +451,7 @@ struct StoryOfTheDayCard: View {
         if let s {
             Button { open = StoryRef(story: s) } label: {
                 ZStack(alignment: .bottomLeading) {
-                    StoryImageView(image: s.cover, height: 190)
+                    StoryImageView(image: s.cover, height: 190, fill: true)
                     LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {

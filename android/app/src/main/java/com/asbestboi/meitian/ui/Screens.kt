@@ -204,7 +204,7 @@ fun ChallengeScreen() {
     var mood by remember { mutableStateOf<Int?>(null) }
     var note by remember { mutableStateOf("") }
     var confetti by remember { mutableIntStateOf(0) }
-    val log = app.today.challenge
+    val log = app.today.challengeFor(if (friendIsChinese) "chinese" else "nonChinese")
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -213,7 +213,7 @@ fun ChallengeScreen() {
                 listOf(true to "🐼 Chinese friend", false to "🌍 Non‑Chinese friend").forEach { (chinese, label) ->
                     val on = friendIsChinese == chinese
                     Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) Street.c.red else Color.Transparent)
-                        .clickable(enabled = log == null) { app.profile = app.profile.copy(friend = if (chinese) "chinese" else "nonChinese"); app.save() }
+                        .clickable { app.profile = app.profile.copy(friend = if (chinese) "chinese" else "nonChinese"); app.save() }
                         .padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                         Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (on) Color.White else Street.c.text)
                     }

@@ -42,6 +42,15 @@ struct DayLog: Codable, Hashable {
     var reviewed = 0
     var xp = 0
     var challenge: ChallengeLog?
+    /// The other friend type's challenge on the same day (bonus).
+    var bonusChallenge: ChallengeLog?
+
+    /// The day's challenge log for one friend type.
+    func challenge(for friend: FriendKind) -> ChallengeLog? {
+        if challenge?.friend == friend { return challenge }
+        if bonusChallenge?.friend == friend { return bonusChallenge }
+        return nil
+    }
 
     var active: Bool { learnedDone || reviewed > 0 || challenge != nil }
 }
@@ -229,9 +238,15 @@ final class AppStore {
 
     func completeChallenge(word: Word, friend: FriendKind, mood: Int?, note: String) {
         var t = today
-        let first = t.challenge == nil
-        t.challenge = ChallengeLog(wordId: word.id, friend: friend, mood: mood, note: note, completedAt: .now)
-        if first { t.xp += 50; xp += 50 }
+        let log = ChallengeLog(wordId: word.id, friend: friend, mood: mood, note: note, completedAt: .now)
+        if t.challenge == nil || t.challenge?.friend == friend {
+            if t.challenge == nil { t.xp += 50; xp += 50 }
+            t.challenge = log
+        } else {
+            // second challenge of the day, with the other kind of friend
+            if t.bonusChallenge == nil { t.xp += 30; xp += 30 }
+            t.bonusChallenge = log
+        }
         today = t
         save()
     }
@@ -239,12 +254,14 @@ final class AppStore {
     struct DatedChallenge: Identifiable {
         let day: String
         let log: ChallengeLog
-        var id: String { day }
+        var id: String { "\(day)-\(log.friend.rawValue)" }
     }
 
     var challengeHistory: [DatedChallenge] {
-        days.compactMap { entry in entry.value.challenge.map { DatedChallenge(day: entry.key, log: $0) } }
-            .sorted { $0.day > $1.day }
+        days.flatMap { entry in
+            [entry.value.challenge, entry.value.bonusChallenge].compactMap { $0 }.map { DatedChallenge(day: entry.key, log: $0) }
+        }
+        .sorted { ($0.day, $0.log.completedAt) > ($1.day, $1.log.completedAt) }
     }
 
     // MARK: stats

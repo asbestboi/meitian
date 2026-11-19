@@ -22,7 +22,7 @@ struct ChallengeView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     friendPicker
                     if let c = Challenge.make(dayKey: store.todayKey, words: pool, friend: friend) {
-                        if let log = store.today.challenge {
+                        if let log = store.today.challenge(for: friend) {
                             completed(log, challenge: c)
                         } else {
                             mission(c)
@@ -70,7 +70,6 @@ struct ChallengeView: View {
                     }
                 }
                 .buttonStyle(PressableStyle(scale: 0.97))
-                .disabled(store.today.challenge != nil)
             }
         }
         .padding(5)

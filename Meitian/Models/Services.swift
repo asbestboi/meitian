@@ -10,6 +10,10 @@ final class Speaker {
         return zh.max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: "zh-CN")
     }()
 
+    func stop() {
+        if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
+    }
+
     func say(_ text: String, slow: Bool = false) {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true)

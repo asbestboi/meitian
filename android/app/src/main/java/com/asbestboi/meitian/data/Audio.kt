@@ -151,7 +151,13 @@ class SpeechListener(private val context: Context) {
         r.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) = handle(results, word, final = true)
             override fun onPartialResults(partial: Bundle?) = handle(partial, word, final = false)
-            override fun onError(error: Int) { if (state == State.Listening) finish(State.Missed) }
+            override fun onError(error: Int) {
+                if (state != State.Listening) return
+                // a partial result may already contain the word
+                if (heard.isNotEmpty() && matches(heard, word)) { finish(State.Matched); return }
+                finish(if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) State.Unavailable else State.Missed)
+            }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
@@ -164,6 +170,11 @@ class SpeechListener(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+            // short words: give people a moment before deciding they're done
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 800L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         }
         Sfx.play(Sfx.Sound.MicOn)
         state = State.Listening

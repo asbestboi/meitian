@@ -368,6 +368,22 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
     var correct by remember { mutableIntStateOf(0) }
     var tries by remember { mutableIntStateOf(0) }
     val listener = remember { SpeechListener(context) }
+    var micDenied by remember { mutableStateOf(false) }
+    var pendingWord by remember { mutableStateOf<CoreWord?>(null) }
+    // the microphone is a runtime permission: ask the first time the mic is tapped
+    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { ok ->
+        micDenied = !ok
+        val w = pendingWord
+        pendingWord = null
+        if (ok && w != null) listener.start(w)
+    }
+    fun startListening(w: CoreWord) {
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) listener.start(w) else { pendingWord = w; micPermission.launch(android.Manifest.permission.RECORD_AUDIO) }
+    }
     val haptic = LocalHapticFeedback.current
     val q = items.getOrNull(index) ?: return
 
@@ -428,11 +444,11 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                 val listening = listener.state == SpeechListener.State.Listening
                 Box(
                     Modifier.size(104.dp).clip(CircleShape).background(if (listening) Street.c.red else Street.c.card).border(3.dp, Street.c.ink, CircleShape)
-                        .clickable(enabled = answered == null) { if (listening) listener.stop() else listener.start(q.word) },
+                        .clickable(enabled = answered == null) { if (listening) listener.stop() else startListening(q.word) },
                     contentAlignment = Alignment.Center,
                 ) { Text(if (listening) "〰️" else "🎙️", fontSize = 40.sp) }
                 Text(
-                    when (listener.state) {
+                    if (micDenied) "Allow the microphone in Settings to use speaking." else when (listener.state) {
                         SpeechListener.State.Listening -> if (listener.heard.isEmpty()) "Listening… say “${q.word.hanzi}”" else "Heard: ${listener.heard}"
                         SpeechListener.State.Missed -> if (listener.heard.isEmpty()) "Didn't catch that. Try again." else "Heard “${listener.heard}”. Try again!"
                         SpeechListener.State.Unavailable -> "Speech recognition isn't available on this phone."
@@ -440,7 +456,7 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                     },
                     color = if (listener.state == SpeechListener.State.Missed) Street.c.red else Street.c.secondary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 )
-                if (answered == null && (tries >= 2 || listener.state == SpeechListener.State.Unavailable)) {
+                if (answered == null && (tries >= 2 || micDenied || listener.state == SpeechListener.State.Unavailable)) {
                     Text("Skip this one", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { answer(false) })
                 }
             }

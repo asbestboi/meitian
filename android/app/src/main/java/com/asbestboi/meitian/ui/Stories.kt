@@ -39,6 +39,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -72,11 +78,53 @@ object StoryProgress {
     fun markDone(c: Context, id: String) = prefs(c).edit().putStringSet("done", done(c) + id).apply()
 }
 
+/** Story picture. Panels show the whole image (fit) over a blurred filled copy; cards fill and crop. */
 @Composable
-fun StoryImageView(image: StoryImage?, height: Dp, modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().height(height).background(Street.chrome()), contentAlignment = Alignment.Center) {
+fun StoryImageView(image: StoryImage?, height: Dp, modifier: Modifier = Modifier, fill: Boolean = false, onClick: (() -> Unit)? = null) {
+    Box(
+        modifier.fillMaxWidth().height(height).background(Street.chrome()).clipToBounds()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
         if (image != null) {
-            AsyncImage(model = image.url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (fill) {
+                AsyncImage(model = image.url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                AsyncImage(model = image.url, contentDescription = null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().blur(24.dp).alpha(0.7f))
+                AsyncImage(model = image.url, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
+        }
+        if (onClick != null) Text("⤢", fontSize = 16.sp, color = Color.White,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.35f)).padding(horizontal = 8.dp, vertical = 2.dp))
+    }
+}
+
+/** Full-screen picture: pinch / double-tap to zoom, drag to pan, tap ✕ or back to close. */
+@Composable
+fun FullScreenImage(image: StoryImage, close: () -> Unit) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = close, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            AsyncImage(
+                model = image.url, contentDescription = null, contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            offset = if (scale > 1f) offset + pan else androidx.compose.ui.geometry.Offset.Zero
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = { if (scale > 1f) { scale = 1f; offset = androidx.compose.ui.geometry.Offset.Zero } else scale = 2.5f })
+                    }
+                    .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y },
+            )
+            Text("✕", fontSize = 20.sp, color = Color.White, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.18f))
+                    .clickable(onClick = close).padding(horizontal = 14.dp, vertical = 8.dp))
+            Text("art: ${image.artist}", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp))
         }
     }
 }
@@ -87,7 +135,7 @@ private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () 
         Modifier.width(200.dp).card().clickable(onClick = onClick).alpha(if (locked) 0.55f else 1f),
     ) {
         Box {
-            StoryImageView(story.cover, 130.dp)
+            StoryImageView(story.cover, 130.dp, fill = true)
             Text(story.emoji, fontSize = 24.sp, modifier = Modifier.padding(8.dp))
             if (done) Text("✅", fontSize = 20.sp, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
             if (locked) Text("🔒", fontSize = 30.sp, modifier = Modifier.align(Alignment.Center))
@@ -128,7 +176,7 @@ fun StoryOfTheDayCard() {
     val nav = LocalNav.current
     val s = remember(ContentSync.generation, app.todayKey) { storyOfTheDay(app.todayKey, app.currentLevel.toUByte()) } ?: return
     Box(Modifier.fillMaxWidth().block(Street.night()).clickable { nav.show { StoryPlayer(s) { nav.close() } } }) {
-        StoryImageView(s.cover, 190.dp)
+        StoryImageView(s.cover, 190.dp, fill = true)
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))))
         Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
             Text("story of the day ✦", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.8f))
@@ -150,6 +198,7 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
     var finished by remember { mutableStateOf(false) }
     var english by remember { mutableStateOf(false) }
     var confetti by remember { mutableIntStateOf(0) }
+    var zoomed by remember { mutableStateOf<StoryImage?>(null) }
     val p = story.panels[panel]
     val linesDone = shown >= p.lines.size
     val questionPending = linesDone && p.question != null && picked == null
@@ -177,7 +226,7 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
                 transitionSpec = { (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut()) }, label = "panel") { idx ->
                 val cur = story.panels[idx]
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StoryImageView(cur.image, 240.dp, Modifier.clip(RoundedCornerShape(24.dp)))
+                    StoryImageView(cur.image, 280.dp, Modifier.clip(RoundedCornerShape(24.dp)), onClick = cur.image?.let { img -> { zoomed = img } })
                     cur.image?.let { img ->
                         Text("art: ${img.artist}", fontSize = 11.sp, color = Street.c.secondary,
                             modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(img.source))) } })
@@ -208,6 +257,7 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
             }
         }
         Confetti(confetti, sound = false)
+        zoomed?.let { FullScreenImage(it) { zoomed = null } }
     }
 }
 
@@ -258,7 +308,7 @@ private fun StoryResults(story: Story, correct: Int, close: () -> Unit) {
     val questions = story.panels.count { it.question != null }
     Column(Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.weight(1f))
-        StoryImageView(story.cover, 180.dp, Modifier.padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)))
+        StoryImageView(story.cover, 180.dp, Modifier.padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)), fill = true)
         Text("故事读完了！", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.text)
         Text("story finished · $correct/$questions questions right", color = Street.c.secondary)
         Text("+${20 + correct * 5} XP", style = street(26.sp), color = Street.c.gold)
