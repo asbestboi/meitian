@@ -4,14 +4,15 @@ import Observation
 // MARK: - Cosmetics
 
 enum CosmeticKind: String, Codable, CaseIterable, Identifiable {
-    case avatar, frame, title, effect
+    case avatar, frame, title, effect, sticker
     var id: String { rawValue }
     var label: String {
         switch self {
         case .avatar: return "Avatars"
-        case .frame: return "Card frames"
+        case .frame: return "Frames"
         case .title: return "Titles"
-        case .effect: return "Hit effects"
+        case .effect: return "Hits"
+        case .sticker: return "Stickers"
         }
     }
 }
@@ -23,6 +24,8 @@ struct Cosmetic: Identifiable, Hashable {
     /// Emoji for avatars/effects, Chinese text for titles.
     let symbol: String
     let price: Int
+    /// Only shown (and usable) with swear words turned on.
+    var swear = false
 }
 
 enum Catalog {
@@ -65,10 +68,53 @@ enum Catalog {
         Cosmetic(id: "fx.envelope", kind: .effect, name: "Red Envelope", symbol: "🧧", price: 150),
         Cosmetic(id: "fx.blossom", kind: .effect, name: "Blossom", symbol: "🌸", price: 150),
         Cosmetic(id: "fx.dragon", kind: .effect, name: "Dragon Strike", symbol: "🐉", price: 400),
+        // street drop
+        Cosmetic(id: "av.skull", kind: .avatar, name: "Skull", symbol: "💀", price: 140),
+        Cosmetic(id: "av.gorilla", kind: .avatar, name: "Gorilla", symbol: "🦍", price: 160),
+        Cosmetic(id: "av.rat", kind: .avatar, name: "Street Rat", symbol: "🐀", price: 90),
+        Cosmetic(id: "av.oni", kind: .avatar, name: "Oni Mask", symbol: "👹", price: 220),
+        Cosmetic(id: "av.alien", kind: .avatar, name: "Alien", symbol: "👽", price: 180),
+        Cosmetic(id: "av.robot", kind: .avatar, name: "Robot", symbol: "🤖", price: 180),
+        Cosmetic(id: "av.cool", kind: .avatar, name: "Too Cool", symbol: "😎", price: 110),
+        Cosmetic(id: "av.angry", kind: .avatar, name: "Rage", symbol: "🤬", price: 120, swear: true),
+        Cosmetic(id: "fr.concrete", kind: .frame, name: "Concrete", symbol: "", price: 90),
+        Cosmetic(id: "fr.acid", kind: .frame, name: "Acid", symbol: "", price: 160),
+        Cosmetic(id: "fr.graffiti", kind: .frame, name: "Graffiti", symbol: "", price: 220),
+        Cosmetic(id: "fr.neon", kind: .frame, name: "Neon Night", symbol: "", price: 260),
+        Cosmetic(id: "fr.camo", kind: .frame, name: "Camo", symbol: "", price: 180),
+        Cosmetic(id: "fr.hazard", kind: .frame, name: "Hazard", symbol: "", price: 240),
+        Cosmetic(id: "ti.street", kind: .title, name: "Street Kid", symbol: "街头小子", price: 90),
+        Cosmetic(id: "ti.boss", kind: .title, name: "Big Boss", symbol: "老大", price: 250),
+        Cosmetic(id: "ti.flat", kind: .title, name: "Lying Flat", symbol: "躺平", price: 80),
+        Cosmetic(id: "ti.owl", kind: .title, name: "Night Owl", symbol: "夜猫子", price: 110),
+        Cosmetic(id: "ti.drone", kind: .title, name: "Office Drone", symbol: "社畜", price: 70),
+        Cosmetic(id: "ti.legend", kind: .title, name: "Legend", symbol: "传奇", price: 500),
+        Cosmetic(id: "ti.hooligan", kind: .title, name: "Hooligan", symbol: "流氓", price: 160, swear: true),
+        Cosmetic(id: "ti.swearking", kind: .title, name: "Swear King", symbol: "脏话王", price: 350, swear: true),
+        Cosmetic(id: "fx.bomb", kind: .effect, name: "Bomb", symbol: "💣", price: 120),
+        Cosmetic(id: "fx.glove", kind: .effect, name: "Knockout", symbol: "🥊", price: 140),
+        Cosmetic(id: "fx.firecracker", kind: .effect, name: "Firecracker", symbol: "🧨", price: 160),
+        Cosmetic(id: "fx.tomato", kind: .effect, name: "Tomato", symbol: "🍅", price: 90),
+        Cosmetic(id: "fx.mic", kind: .effect, name: "Mic Drop", symbol: "🎤", price: 200),
+        Cosmetic(id: "fx.poop", kind: .effect, name: "Poop", symbol: "💩", price: 130, swear: true),
+        // stickers (slapped on your card)
+        Cosmetic(id: "st.none", kind: .sticker, name: "No sticker", symbol: "", price: 0),
+        Cosmetic(id: "st.fire", kind: .sticker, name: "On Fire", symbol: "🔥", price: 60),
+        Cosmetic(id: "st.crown", kind: .sticker, name: "Crown", symbol: "👑", price: 200),
+        Cosmetic(id: "st.lantern", kind: .sticker, name: "Lantern", symbol: "🏮", price: 80),
+        Cosmetic(id: "st.skate", kind: .sticker, name: "Skate", symbol: "🛹", price: 100),
+        Cosmetic(id: "st.cap", kind: .sticker, name: "Snapback", symbol: "🧢", price: 100),
+        Cosmetic(id: "st.tape", kind: .sticker, name: "Mixtape", symbol: "📼", price: 120),
+        Cosmetic(id: "st.spray", kind: .sticker, name: "Spray Can", symbol: "🎨", price: 120),
+        Cosmetic(id: "st.devil", kind: .sticker, name: "Devil", symbol: "😈", price: 150),
+        Cosmetic(id: "st.dice", kind: .sticker, name: "Lucky Dice", symbol: "🎲", price: 90),
+        Cosmetic(id: "st.finger", kind: .sticker, name: "Rude Hand", symbol: "🖕", price: 180, swear: true),
     ]
 
     static let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
-    static func items(_ kind: CosmeticKind) -> [Cosmetic] { all.filter { $0.kind == kind } }
+    static func items(_ kind: CosmeticKind, swears: Bool = false) -> [Cosmetic] {
+        all.filter { $0.kind == kind && (swears || !$0.swear) }
+    }
     static func item(_ id: String) -> Cosmetic? { byId[id] }
 
     static func frameGradient(_ id: String) -> LinearGradient {
@@ -82,6 +128,16 @@ enum Catalog {
         case "fr.ink": return g(Color(red: 0.32, green: 0.32, blue: 0.36), Color(red: 0.08, green: 0.08, blue: 0.10))
         case "fr.sakura": return g(Color(red: 1.0, green: 0.72, blue: 0.84), Color(red: 0.93, green: 0.40, blue: 0.62))
         case "fr.gold": return g(Color(red: 1.0, green: 0.86, blue: 0.45), Color(red: 0.85, green: 0.55, blue: 0.10))
+        case "fr.concrete": return g(Color(red: 0.62, green: 0.61, blue: 0.58), Color(red: 0.36, green: 0.36, blue: 0.35))
+        case "fr.acid": return g(Color(red: 0.72, green: 0.95, blue: 0.10), Color(red: 0.20, green: 0.70, blue: 0.20))
+        case "fr.graffiti": return LinearGradient(colors: [Color(red: 1.0, green: 0.20, blue: 0.55), Color(red: 1.0, green: 0.60, blue: 0.0),
+                                                           Color(red: 0.20, green: 0.70, blue: 1.0)],
+                                                  startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "fr.neon": return g(Color(red: 0.05, green: 0.90, blue: 0.95), Color(red: 0.75, green: 0.10, blue: 0.95))
+        case "fr.camo": return LinearGradient(colors: [Color(red: 0.33, green: 0.40, blue: 0.22), Color(red: 0.50, green: 0.45, blue: 0.28),
+                                                       Color(red: 0.22, green: 0.26, blue: 0.16)],
+                                              startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "fr.hazard": return g(Color(red: 1.0, green: 0.82, blue: 0.0), Color(red: 0.95, green: 0.50, blue: 0.0))
         case "fr.galaxy": return LinearGradient(colors: [Color(red: 0.15, green: 0.10, blue: 0.40), Color(red: 0.55, green: 0.20, blue: 0.75),
                                                          Color(red: 0.95, green: 0.40, blue: 0.60)],
                                                 startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -103,7 +159,15 @@ struct PlayerCard: Codable, Hashable {
     var frame: String
     var title: String
     var effect: String
+    /// Added in 1.3 (optional so older phones' cards still decode).
+    var sticker: String? = nil
+    var swears: Bool? = nil
 
+    var swearsOn: Bool { swears ?? false }
+    var stickerSymbol: String? {
+        guard let s = sticker, let item = Catalog.item(s), !item.symbol.isEmpty else { return nil }
+        return item.symbol
+    }
     var avatarSymbol: String { Catalog.item(avatar)?.symbol ?? "🐣" }
     var titleItem: Cosmetic? { Catalog.item(title) }
     var effectSymbol: String { Catalog.item(effect)?.symbol ?? "💥" }
@@ -150,17 +214,19 @@ private struct ArenaSave: Codable {
     var fastestMs: Int?
     var totalDamage: Int
     var rivals: [String: Rival]
+    var sticker: String?
 }
 
 @Observable
 final class ArenaStore {
     var playerId = UUID().uuidString
     var coins = 0
-    var owned: Set<String> = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom"]
+    var owned: Set<String> = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none"]
     var avatar = "av.chick"
     var frame = "fr.lantern"
     var title = "ti.newbie"
     var effect = "fx.boom"
+    var sticker = "st.none"
     var wins = 0
     var losses = 0
     var draws = 0
@@ -180,6 +246,8 @@ final class ArenaStore {
             avatar = s.avatar; frame = s.frame; title = s.title; effect = s.effect
             wins = s.wins; losses = s.losses; draws = s.draws; streak = s.streak; bestStreak = s.bestStreak
             fastestMs = s.fastestMs; totalDamage = s.totalDamage; rivals = s.rivals
+            sticker = s.sticker ?? "st.none"
+            owned.insert("st.none")
         } else {
             save()
         }
@@ -188,22 +256,29 @@ final class ArenaStore {
     func save() {
         let s = ArenaSave(playerId: playerId, coins: coins, owned: owned, avatar: avatar, frame: frame, title: title,
                           effect: effect, wins: wins, losses: losses, draws: draws, streak: streak, bestStreak: bestStreak,
-                          fastestMs: fastestMs, totalDamage: totalDamage, rivals: rivals)
+                          fastestMs: fastestMs, totalDamage: totalDamage, rivals: rivals, sticker: sticker)
         if let data = try? JSONEncoder().encode(s) { try? data.write(to: url, options: .atomic) }
     }
 
     func reset() {
         let id = playerId
-        coins = 0; owned = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom"]
-        avatar = "av.chick"; frame = "fr.lantern"; title = "ti.newbie"; effect = "fx.boom"
+        coins = 0; owned = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none"]
+        avatar = "av.chick"; frame = "fr.lantern"; title = "ti.newbie"; effect = "fx.boom"; sticker = "st.none"
         wins = 0; losses = 0; draws = 0; streak = 0; bestStreak = 0; fastestMs = nil; totalDamage = 0; rivals = [:]
         playerId = id
         save()
     }
 
     func card(name: String, level: Int, wordsLearned: Int) -> PlayerCard {
-        PlayerCard(id: playerId, name: name.isEmpty ? "Player" : name, level: level, wordsLearned: wordsLearned,
-                   wins: wins, losses: losses, avatar: avatar, frame: frame, title: title, effect: effect)
+        let swears = Prefs.swearsOn
+        // swear-only cosmetics are hidden from (and never shown to) players with swears off
+        func clean(_ id: String, _ fallback: String) -> String {
+            (Catalog.item(id)?.swear ?? false) && !swears ? fallback : id
+        }
+        return PlayerCard(id: playerId, name: name.isEmpty ? "Player" : name, level: level, wordsLearned: wordsLearned,
+                          wins: wins, losses: losses, avatar: clean(avatar, "av.chick"), frame: frame,
+                          title: clean(title, "ti.newbie"), effect: clean(effect, "fx.boom"),
+                          sticker: clean(sticker, "st.none"), swears: swears)
     }
 
     // MARK: shop
@@ -214,6 +289,7 @@ final class ArenaStore {
         case .frame: return frame
         case .title: return title
         case .effect: return effect
+        case .sticker: return sticker
         }
     }
 
@@ -224,6 +300,7 @@ final class ArenaStore {
         case .frame: frame = item.id
         case .title: title = item.id
         case .effect: effect = item.id
+        case .sticker: sticker = item.id
         }
         save()
     }

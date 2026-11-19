@@ -5,6 +5,8 @@ import SwiftUI
 /// Physics confetti burst. Change `trigger` to fire.
 struct ConfettiView: View {
     var trigger: Int
+    /// Celebration sound played with the burst (nil for silent).
+    var sound: SFX.Sound? = .win
 
     private struct Piece {
         var x, y, vx, vy, spin, angle, size: Double
@@ -41,6 +43,7 @@ struct ConfettiView: View {
     }
 
     private func fire() {
+        if let sound { SFX.shared.play(sound) }
         guard !reduceMotion else { return }
         let colors: [Color] = [Theme.red, Theme.gold, Theme.jade, Theme.sky, Theme.plum, .pink]
         start = .now

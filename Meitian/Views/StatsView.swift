@@ -8,6 +8,12 @@ struct StatsView: View {
     @State private var reminderTime = Date.now
     @AppStorage(PinyinPrefs.show) private var showPinyin = true
     @AppStorage(PinyinPrefs.toneColors) private var toneColors = true
+    @AppStorage(Prefs.swears) private var swears = false
+    @AppStorage(Prefs.sounds) private var sounds = true
+    @AppStorage(Prefs.listening) private var listening = true
+    @AppStorage(Prefs.speaking) private var speaking = true
+    @AppStorage(Prefs.noListenUntil) private var noListenUntil = 0.0
+    @AppStorage(Prefs.noSpeakUntil) private var noSpeakUntil = 0.0
 
     var body: some View {
         NavigationStack {
@@ -25,6 +31,8 @@ struct StatsView: View {
                     calendar
                     levels
                     pinyinSettings
+                    exerciseSettings
+                    contentSettings
                     settings
                 }
                 .padding(.horizontal, 20)
@@ -180,6 +188,86 @@ struct StatsView: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .animation(Theme.spring, value: toneColors)
         .sensoryFeedback(.selection, trigger: showPinyin)
+    }
+
+    private func settingsBlock<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased()).font(.rounded(.caption, weight: .black)).foregroundStyle(.secondary)
+                .padding(.leading, 4)
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .font(.rounded(.body))
+                .cardSurface(padding: 0)
+        }
+    }
+
+    private var exerciseSettings: some View {
+        let now = Date.now.timeIntervalSince1970
+        return settingsBlock("Sound & exercises") {
+            Toggle(isOn: $sounds) { Label("Sound effects", systemImage: "speaker.wave.3.fill") }
+                .padding(16)
+            Divider().padding(.leading, 16)
+            Toggle(isOn: $listening) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Listening exercises", systemImage: "ear.fill")
+                    if listening && noListenUntil > now {
+                        Text("Paused until \(Date(timeIntervalSince1970: noListenUntil).formatted(date: .omitted, time: .shortened))")
+                            .font(.rounded(.caption)).foregroundStyle(Theme.gold)
+                    }
+                }
+            }
+            .padding(16)
+            Divider().padding(.leading, 16)
+            Toggle(isOn: $speaking) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Speaking exercises", systemImage: "mic.fill")
+                    if speaking && noSpeakUntil > now {
+                        Text("Paused until \(Date(timeIntervalSince1970: noSpeakUntil).formatted(date: .omitted, time: .shortened))")
+                            .font(.rounded(.caption)).foregroundStyle(Theme.gold)
+                    } else {
+                        Text("Say words out loud, checked with speech recognition.")
+                            .font(.rounded(.caption)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(16)
+            if noListenUntil > now || noSpeakUntil > now {
+                Divider().padding(.leading, 16)
+                Button {
+                    noListenUntil = 0
+                    noSpeakUntil = 0
+                } label: {
+                    Label("I can listen & speak again", systemImage: "play.circle.fill")
+                }
+                .padding(16)
+            } else {
+                Divider().padding(.leading, 16)
+                HStack(spacing: 10) {
+                    Button { noListenUntil = now + 3600 } label: {
+                        Label("Can't listen 1h", systemImage: "speaker.slash.fill").font(.rounded(.subheadline, weight: .bold))
+                    }
+                    Spacer()
+                    Button { noSpeakUntil = now + 3600 } label: {
+                        Label("Can't speak 1h", systemImage: "mic.slash.fill").font(.rounded(.subheadline, weight: .bold))
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    private var contentSettings: some View {
+        settingsBlock("Content") {
+            Toggle(isOn: $swears) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Swear words 🤬", systemImage: "exclamationmark.bubble.fill")
+                    Text("Adds the street deck: one swear word a day, Swear Sprint, rude cosmetics. Battles only match players with the same setting.")
+                        .font(.rounded(.caption)).foregroundStyle(.secondary)
+                }
+            }
+            .tint(Theme.pink)
+            .padding(16)
+        }
+        .sensoryFeedback(.selection, trigger: swears)
     }
 
     private var settings: some View {

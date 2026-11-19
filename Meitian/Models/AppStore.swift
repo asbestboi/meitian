@@ -149,6 +149,10 @@ final class AppStore {
             picked.append(contentsOf: fresh.prefix(profile.dailyGoal - picked.count))
             level += 1
         }
+        // street mode: one swear word a day on top of the regular ones
+        if Prefs.swearsOn, let street = WordBank.swears.first(where: { cards[$0.id] == nil }) {
+            picked.append(street)
+        }
         if picked.isEmpty { // everything learned — recycle weakest words
             picked = cards.sorted { $0.value.box < $1.value.box }.prefix(profile.dailyGoal).compactMap { WordBank.word($0.key) }
         }
@@ -181,10 +185,30 @@ final class AppStore {
         return cards.filter { $0.value.due <= now }
             .sorted { $0.value.due < $1.value.due }
             .compactMap { WordBank.word($0.key) }
+            .filter { !$0.isSwear || Prefs.swearsOn }
     }
 
     var learnedWords: [Word] {
-        WordBank.all.filter { cards[$0.id] != nil }
+        WordBank.visible(swears: Prefs.swearsOn).filter { cards[$0.id] != nil }
+    }
+
+    /// Adds words to spaced repetition without the daily-words XP (used by Swear Sprint).
+    func addToReview(_ words: [Word]) {
+        for w in words where cards[w.id] == nil {
+            var s = CardState(learnedOn: todayKey)
+            s.due = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now)) ?? .now
+            cards[w.id] = s
+        }
+        save()
+    }
+
+    func addXP(_ amount: Int) {
+        var t = today
+        t.xp += amount
+        t.reviewed += 1 // counts as activity for the streak
+        today = t
+        xp += amount
+        save()
     }
 
     func grade(_ word: Word, right: Bool) {

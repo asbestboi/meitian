@@ -298,13 +298,33 @@ struct OnlineDuelView: View {
                 .stroke(.white, style: StrokeStyle(lineWidth: 5, dash: [30, 14]))
                 .frame(width: 250, height: 250)
             VStack {
+                HStack {
+                    Spacer()
+                    Button { scanning = false } label: {
+                        Image(systemName: "xmark")
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(.white)
+                            .frame(width: 48, height: 48)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 2))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9))
+                    .accessibilityLabel("Cancel scanning")
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
                 Text("Point at your friend's code")
                     .font(.rounded(.headline, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .background(.black.opacity(0.5), in: Capsule())
-                    .padding(.top, 40)
                 Spacer()
+                Button("Cancel") { scanning = false }
+                    .font(.rounded(.headline, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 28).padding(.vertical, 12)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .padding(.bottom, 40)
             }
         }
         .presentationDetents([.large])
@@ -360,12 +380,16 @@ private struct MatchScreen: View {
                 Spacer()
                 Color.clear.frame(width: 40, height: 40)
             }
-            switch match.phase {
-            case .lobby: lobby
+            if match.incompatible {
+                incompatible
+            } else {
+                switch match.phase {
+                case .lobby: lobby
             case .countdown(let n): countdown(n)
             case .playing, .roundResult:
                 if match.mode == .duel { duel } else { blitz }
-            case .finished: finished
+                case .finished: finished
+                }
             }
         }
         .padding(20)
@@ -374,6 +398,26 @@ private struct MatchScreen: View {
     }
 
     // MARK: lobby
+
+    private var incompatible: some View {
+        let opp = match.opponent
+        let mine = match.me.swearsOn
+        return VStack(spacing: 18) {
+            Spacer()
+            Text("🚫").font(.system(size: 80))
+            Text("CAN'T BATTLE").font(.street(48))
+            Text(mine
+                 ? "You have swear words ON, \(opp?.name ?? "your friend") has them OFF."
+                 : "You have swear words OFF, \(opp?.name ?? "your friend") has them ON.")
+                .font(.rounded(.headline, weight: .semibold))
+                .multilineTextAlignment(.center)
+            Text("Players can only battle with the same swear setting. One of you can change it in Progress → Content, then pair again.")
+                .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Spacer()
+            BigButton(title: "Close", systemImage: "xmark", gradient: Theme.inkGradient, action: close)
+        }
+        .onAppear { SFX.shared.play(.wrong) }
+    }
 
     private var lobby: some View {
         let opp = match.opponent!
@@ -667,7 +711,8 @@ struct LocalDuelView: View {
 
     private func start() {
         let level = max(1, store.currentLevel)
-        let pool = WordBank.all.filter { $0.level <= level }
+        var pool = WordBank.all.filter { $0.level <= level }
+        if Prefs.swearsOn { pool += WordBank.swears }
         questions = WireQuestion.make(pool: pool, count: 60).compactMap(\.question)
         index = 0
         hp = [DuelMatch.maxHP, DuelMatch.maxHP]
@@ -697,8 +742,10 @@ struct LocalDuelView: View {
             resolved = true
             hp[1 - p] = max(0, hp[1 - p] - damage)
             hitTick += 1
+            SFX.shared.play(.hit)
         } else {
             locked[p] = true
+            SFX.shared.play(.wrong)
             if locked[0] && locked[1] { resolved = true }
         }
         guard resolved else { return }

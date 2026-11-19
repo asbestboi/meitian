@@ -91,9 +91,8 @@ struct ChallengeView: View {
             SpeakButton(text: c.word.hanzi, size: 54, tint: .white)
         }
         .foregroundStyle(.white)
-        .padding(22)
-        .background(Theme.levelGradient(c.word.level), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: Theme.levelColor(c.word.level).opacity(0.35), radius: 16, y: 10)
+        .streetBlock(Theme.levelGradient(c.word.level), padding: 22)
+        .overlay(alignment: .topLeading) { TapeStrip(angle: -7).offset(x: 14, y: -10) }
     }
 
     private func mission(_ c: Challenge) -> some View {

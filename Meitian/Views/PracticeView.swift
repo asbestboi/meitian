@@ -6,15 +6,25 @@ struct PracticeView: View {
     @State private var search = ""
     @State private var levelFilter = 0
     @State private var selected: Word?
+    @State private var sprint = false
+    @AppStorage(Prefs.swears) private var swears = false
+    @AppStorage(Prefs.listening) private var listeningOn = true
+    @AppStorage(Prefs.speaking) private var speakingOn = true
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     reviewHero
+                    if swears { sprintTile }
                     HStack(spacing: 12) {
-                        gameTile("Listening", "ear.fill", Theme.skyGradient, enabled: store.learnedWords.count >= 1) {
+                        gameTile("Listening", "ear.fill", Theme.skyGradient,
+                                 enabled: store.learnedWords.count >= 1 && listeningOn) {
                             session = .listening
+                        }
+                        gameTile("Speaking", "mic.fill", Theme.pinkGradient,
+                                 enabled: store.learnedWords.count >= 1 && speakingOn) {
+                            session = .speaking
                         }
                         gameTile("Speed mix", "bolt.fill", Theme.goldGradient, enabled: store.learnedWords.count >= 1) {
                             session = .mixed
@@ -33,6 +43,10 @@ struct PracticeView: View {
         .fullScreenCover(item: $session) { mode in
             PracticeSession(mode: mode).environment(store)
         }
+        .fullScreenCover(isPresented: $sprint) {
+            SwearSprintView().environment(store)
+        }
+        .onChange(of: swears) { _, on in if !on && levelFilter == WordBank.streetLevel { levelFilter = 0 } }
         .sheet(item: $selected) { w in
             WordDetail(word: w)
                 .environment(store)
@@ -76,9 +90,27 @@ struct PracticeView: View {
             }
         }
         .foregroundStyle(.white)
-        .padding(20)
-        .background(Theme.skyGradient, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: Theme.sky.opacity(0.3), radius: 16, y: 10)
+        .streetBlock(Theme.skyGradient)
+    }
+
+    private var sprintTile: some View {
+        Button { sprint = true } label: {
+            HStack(spacing: 14) {
+                Text("🤬").font(.system(size: 44))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("SWEAR SPRINT").font(.street(30))
+                    Text("Learn street Chinese fast: flip cards, then 60 s of rapid fire. Combos multiply.")
+                        .font(.rounded(.caption, weight: .semibold)).opacity(0.9)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.headline.weight(.black))
+            }
+            .foregroundStyle(.white)
+            .streetBlock(Theme.inkGradient, padding: 18)
+            .overlay(alignment: .topTrailing) { Pill(text: "18+", color: Theme.pink, tilt: 6).offset(x: -14, y: -8) }
+        }
+        .buttonStyle(PressableStyle())
     }
 
     private func gameTile(_ title: String, _ icon: String, _ g: LinearGradient, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -103,7 +135,7 @@ struct PracticeView: View {
 
     private var filtered: [Word] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return WordBank.all.filter { w in
+        return WordBank.visible(swears: swears).filter { w in
             (levelFilter == 0 || w.level == levelFilter) &&
             (q.isEmpty || w.hanzi.contains(q) || w.meaning.lowercased().contains(q) ||
              w.pinyin.folding(options: .diacriticInsensitive, locale: nil).lowercased()
@@ -117,6 +149,7 @@ struct PracticeView: View {
             Picker("Level", selection: $levelFilter) {
                 Text("All").tag(0)
                 ForEach(WordBank.levels, id: \.self) { Text("HSK \($0)").tag($0) }
+                if swears { Text("🤬").tag(WordBank.streetLevel) }
             }
             .pickerStyle(.segmented)
             LazyVStack(spacing: 8) {
@@ -158,7 +191,7 @@ struct WordDetail: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                Pill(text: "HSK \(word.level)", color: Theme.levelColor(word.level))
+                Pill(text: word.levelLabel, color: Theme.levelColor(word.level))
                     .padding(.top, 24)
                 RubyText(hanzi: word.hanzi, pinyin: word.pinyin, size: word.hanzi.count > 3 ? 56 : 76,
                          weight: .semibold, alignment: .center)
@@ -204,7 +237,7 @@ struct WordDetail: View {
 
 /// Review / game session over learned words.
 struct PracticeSession: View {
-    enum Mode: String, Identifiable { case review, listening, mixed; var id: String { rawValue } }
+    enum Mode: String, Identifiable { case review, listening, speaking, mixed; var id: String { rawValue } }
     let mode: Mode
 
     @Environment(AppStore.self) private var store
@@ -228,7 +261,7 @@ struct PracticeSession: View {
                     .foregroundStyle(.primary)
                     .accessibilityLabel("Close")
                     Spacer()
-                    Text(mode == .review ? "Review" : mode == .listening ? "Listening" : "Speed mix")
+                    Text(mode == .review ? "Review" : mode == .listening ? "Listening" : mode == .speaking ? "Speaking" : "Speed mix")
                         .font(.rounded(.headline, weight: .bold))
                     Spacer()
                     Color.clear.frame(width: 40, height: 40)
@@ -257,12 +290,14 @@ struct PracticeSession: View {
         switch mode {
         case .review:
             let due = Array(store.dueWords.prefix(15))
-            let kinds: [QuizQuestion.Kind] = [.hanziToMeaning, .meaningToHanzi, .listenToHanzi]
-            return due.enumerated().map { i, w in QuizQuestion.make(for: w, kind: kinds[i % 3], pool: learned) }
+            let kinds = QuizQuestion.mixedKinds()
+            return due.enumerated().map { i, w in QuizQuestion.make(for: w, kind: kinds[i % kinds.count], pool: learned) }
         case .listening:
             return learned.shuffled().prefix(10).map { QuizQuestion.make(for: $0, kind: .listenToHanzi, pool: learned) }
+        case .speaking:
+            return learned.shuffled().prefix(8).map { QuizQuestion.make(for: $0, kind: .speak, pool: learned) }
         case .mixed:
-            let kinds: [QuizQuestion.Kind] = [.hanziToMeaning, .meaningToHanzi, .listenToHanzi]
+            let kinds = QuizQuestion.mixedKinds()
             return learned.shuffled().prefix(10).map { QuizQuestion.make(for: $0, kind: kinds.randomElement()!, pool: learned) }
         }
     }

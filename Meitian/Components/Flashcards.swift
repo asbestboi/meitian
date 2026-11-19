@@ -12,7 +12,7 @@ struct WordCardFace: View {
                 .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(alignment: .top) {
             Theme.levelGradient(word.level)
                 .frame(height: 8)
@@ -20,13 +20,14 @@ struct WordCardFace: View {
                 .padding(.horizontal, 60)
                 .padding(.top, 12)
         }
-        .shadow(color: .black.opacity(0.10), radius: 22, y: 12)
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Theme.ink, lineWidth: 3))
+        .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Theme.ink).offset(x: 5, y: 7))
         .rotation3DEffect(.degrees(flipped ? 180 : 0), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
     }
 
     private var front: some View {
         VStack(spacing: 18) {
-            Pill(text: "HSK \(word.level)", color: Theme.levelColor(word.level))
+            Pill(text: word.levelLabel, color: Theme.levelColor(word.level))
             Spacer()
             RubyText(hanzi: word.hanzi, pinyin: word.pinyin,
                      size: word.hanzi.count > 3 ? 56 : word.hanzi.count > 2 ? 68 : 96,
@@ -188,6 +189,7 @@ struct SwipeDeck: View {
     private func commit(_ word: Word, known: Bool, width: CGFloat, velocity: CGFloat) {
         let dir: CGFloat = known ? 1 : -1
         if known { feedbackKnown += 1 } else { feedbackAgain += 1 }
+        SFX.shared.play(.swoosh)
         onSwipe(word, known)
         let target = dir * (width + 200)
         let distance = max(abs(target - offset.width), 1)

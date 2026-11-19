@@ -38,6 +38,8 @@ final class DuelMatch {
 
     // result
     var winner: String?? = nil // nil = not finished, .some(nil) = draw
+    /// Set when the two players' swear-word settings differ: they can't battle.
+    var incompatible = false
     var coinsEarned = 0
     var fastestMs: Int?
     var damageDealt = 0
@@ -130,9 +132,11 @@ final class DuelMatch {
     // MARK: host actions
 
     func hostStart(mode: DuelMode) {
-        guard isHost, let opponent else { return }
+        guard isHost, !incompatible, let opponent else { return }
         let level = max(1, min(me.level, opponent.level))
-        let pool = WordBank.all.filter { $0.level <= level }
+        var pool = WordBank.all.filter { $0.level <= level }
+        // street words join the pool only when both players have them on
+        if me.swearsOn && opponent.swearsOn { pool += WordBank.swears }
         let list = WireQuestion.make(pool: pool, count: mode == .duel ? 40 : 80)
         connection.send(.start(mode: mode, questions: list))
         begin(mode: mode, wire: list)
@@ -154,6 +158,7 @@ final class DuelMatch {
     private func countdown(from n: Int) {
         let token = roundToken
         phase = .countdown(n)
+        SFX.shared.play(.tick)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             guard let self, token == self.roundToken else { return }
             if n > 1 { self.countdown(from: n - 1) }
@@ -195,6 +200,7 @@ final class DuelMatch {
         let correct = option.id == q.word.id
         let ms = Int(Date.now.timeIntervalSince(questionShownAt) * 1000)
         myPick = option
+        SFX.shared.play(correct ? .correct : .wrong)
         if mode == .blitz {
             blitzAnswer(correct: correct)
             return
@@ -254,7 +260,7 @@ final class DuelMatch {
         lastDamage = damage
         lastHitMs = ms
         if w == me.id { damageDealt += damage }
-        if w != nil { hitTick += 1 }
+        if w != nil { hitTick += 1; SFX.shared.play(.hit) }
         phase = .roundResult
     }
 
@@ -306,6 +312,7 @@ final class DuelMatch {
         let outcome: MatchOutcome = w == nil ? .draw : (w == me.id ? .win : .loss)
         let bonus = mode == .duel ? hp(of: me.id) / 5 : myScore
         coinsEarned = onFinish?(outcome, bonus, damageDealt, fastestMs) ?? 0
+        if outcome == .loss { SFX.shared.play(.lose) }
     }
 
     func backToLobby(notify: Bool = true) {
@@ -319,6 +326,11 @@ final class DuelMatch {
 
     private func handle(_ msg: DuelMessage) {
         switch msg {
+        case .hello(let card) where card.swearsOn != me.swearsOn:
+            // swears on and swears off don't mix: refuse the match on both phones
+            if opponent == nil { sayHello() }
+            opponent = card
+            incompatible = true
         case .hello(let card):
             let first = opponent == nil
             opponent = card

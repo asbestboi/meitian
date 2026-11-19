@@ -41,9 +41,15 @@ struct PlayerCardView: View {
             }
         }
         .foregroundStyle(.white)
-        .padding(compact ? 14 : 20)
-        .background(Catalog.frameGradient(card.frame), in: RoundedRectangle(cornerRadius: compact ? 22 : 28, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 14, y: 8)
+        .streetBlock(Catalog.frameGradient(card.frame), padding: compact ? 14 : 20)
+        .overlay(alignment: .topTrailing) {
+            if let s = card.stickerSymbol {
+                Text(s).font(.system(size: compact ? 30 : 40))
+                    .rotationEffect(.degrees(14))
+                    .offset(x: 6, y: -14)
+                    .accessibilityHidden(true)
+            }
+        }
     }
 }
 
@@ -78,9 +84,7 @@ struct ArenaView: View {
                             Image(systemName: "chevron.right").font(.headline)
                         }
                         .foregroundStyle(.white)
-                        .padding(20)
-                        .background(Theme.warmGradient, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                        .shadow(color: Theme.red.opacity(0.3), radius: 16, y: 10)
+                        .streetBlock(Theme.warmGradient)
                     }
                     .buttonStyle(PressableStyle())
 
@@ -211,10 +215,12 @@ struct ShopView: View {
     @State private var boughtTick = 0
     @State private var deniedTick = 0
     @State private var confetti = 0
+    @AppStorage(Prefs.swears) private var swears = false
 
     private var preview: PlayerCard {
         var c = card
         c.avatar = arena.avatar; c.frame = arena.frame; c.title = arena.title; c.effect = arena.effect
+        c.sticker = arena.sticker
         return c
     }
 
@@ -250,14 +256,14 @@ struct ShopView: View {
                 .pickerStyle(.segmented)
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        ForEach(Catalog.items(kind)) { item in itemTile(item) }
+                        ForEach(Catalog.items(kind, swears: swears)) { item in itemTile(item) }
                     }
                     .padding(.bottom, 20)
                 }
                 .scrollIndicators(.hidden)
             }
             .padding(20)
-            ConfettiView(trigger: confetti)
+            ConfettiView(trigger: confetti, sound: nil)
         }
         .sensoryFeedback(.success, trigger: boughtTick)
         .sensoryFeedback(.error, trigger: deniedTick)
@@ -273,8 +279,10 @@ struct ShopView: View {
             } else if arena.buy(item) {
                 boughtTick += 1
                 confetti += 1
+                SFX.shared.play(.coin)
             } else {
                 deniedTick += 1
+                SFX.shared.play(.wrong)
             }
         } label: {
             VStack(spacing: 10) {
@@ -309,6 +317,16 @@ struct ShopView: View {
         switch item.kind {
         case .avatar, .effect:
             Text(item.symbol).font(.system(size: 48))
+        case .sticker:
+            if item.symbol.isEmpty {
+                Image(systemName: "nosign").font(.system(size: 36, weight: .bold)).foregroundStyle(.secondary)
+            } else {
+                Text(item.symbol).font(.system(size: 44))
+                    .padding(8)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.ink, lineWidth: 2))
+                    .rotationEffect(.degrees(-8))
+            }
         case .frame:
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Catalog.frameGradient(item.id))

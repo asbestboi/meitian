@@ -84,7 +84,7 @@ struct Challenge {
 
 /// One multiple-choice question.
 struct QuizQuestion: Identifiable {
-    enum Kind { case hanziToMeaning, meaningToHanzi, listenToHanzi }
+    enum Kind { case hanziToMeaning, meaningToHanzi, listenToHanzi, speak }
     let id = UUID()
     let word: Word
     let kind: Kind
@@ -95,7 +95,27 @@ struct QuizQuestion: Identifiable {
         case .hanziToMeaning: return "What does this mean?"
         case .meaningToHanzi: return "Which one means…"
         case .listenToHanzi: return "Tap what you hear"
+        case .speak: return "Say it out loud"
         }
+    }
+
+    /// Question types to mix into a quiz, respecting "can't listen / speak now".
+    static func mixedKinds() -> [Kind] {
+        var k: [Kind] = [.hanziToMeaning, .meaningToHanzi]
+        if Prefs.canListen { k.append(.listenToHanzi) }
+        if Prefs.canSpeak { k.append(.speak) }
+        return k
+    }
+
+    /// The same question, swapped to a silent type if listening/speaking got paused meanwhile.
+    func adjusted() -> QuizQuestion {
+        if kind == .listenToHanzi && !Prefs.canListen {
+            return QuizQuestion(word: word, kind: .meaningToHanzi, options: options)
+        }
+        if kind == .speak && !Prefs.canSpeak {
+            return QuizQuestion(word: word, kind: .hanziToMeaning, options: options)
+        }
+        return self
     }
 
     func label(for option: Word) -> String {

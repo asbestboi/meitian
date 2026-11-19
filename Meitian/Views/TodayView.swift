@@ -106,9 +106,8 @@ struct TodayView: View {
             }
             .buttonStyle(PressableStyle())
         }
-        .padding(20)
-        .background(done ? Theme.jadeGradient : Theme.warmGradient, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: (done ? Theme.jade : Theme.red).opacity(0.3), radius: 18, y: 10)
+        .streetBlock(done ? Theme.jadeGradient : Theme.warmGradient)
+        .overlay(alignment: .topTrailing) { TapeStrip(angle: 8).offset(x: -10, y: -10) }
     }
 
     private var challengeCard: some View {
@@ -252,7 +251,7 @@ struct LearnSession: View {
 
     private func makeQuiz() -> [QuizQuestion] {
         let pool = store.learnedWords + words
-        let kinds: [QuizQuestion.Kind] = [.hanziToMeaning, .meaningToHanzi, .listenToHanzi]
+        let kinds = QuizQuestion.mixedKinds()
         return words.shuffled().enumerated().map { i, w in
             QuizQuestion.make(for: w, kind: kinds[i % kinds.count], pool: pool)
         }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Runs a list of multiple-choice questions, one at a time.
+/// Runs a list of questions one at a time: multiple choice, listening and speaking.
 struct QuizRunner: View {
     let questions: [QuizQuestion]
     var showProgress = true
@@ -11,42 +11,51 @@ struct QuizRunner: View {
     var shouldContinue: (Int) -> Bool = { _ in true }
     var onDone: (Int) -> Void
 
+    @State private var items: [QuizQuestion] = []
     @State private var index = 0
     @State private var picked: Word?
+    @State private var answered: Bool?
     @State private var correct = 0
     @State private var shake: CGFloat = 0
     @State private var rightTick = 0
     @State private var wrongTick = 0
+    @State private var listener = SpeechListener()
+    @State private var speakTries = 0
     @AppStorage(PinyinPrefs.show) private var showPinyin = true
 
     private var pinyinOn: Bool { allowPinyin && showPinyin }
-
-    private var q: QuizQuestion? { index < questions.count ? questions[index] : nil }
+    private var q: QuizQuestion? { index < items.count ? items[index] : nil }
 
     var body: some View {
-        VStack(spacing: 20) {
-            if showProgress {
-                ProgressView(value: Double(index), total: Double(max(questions.count, 1)))
-                    .tint(Theme.red)
-                    .animation(Theme.spring, value: index)
+        VStack(spacing: 18) {
+            HStack(spacing: 10) {
+                if showProgress {
+                    ProgressView(value: Double(index), total: Double(max(items.count, 1)))
+                        .tint(Theme.red)
+                        .animation(Theme.spring, value: index)
+                }
+                pauseButton
             }
             if let q {
-                VStack(spacing: 20) {
+                VStack(spacing: 18) {
                     Text(q.prompt)
-                        .font(.rounded(.headline, weight: .semibold))
+                        .font(.rounded(.headline, weight: .bold))
+                        .textCase(.uppercase)
                         .foregroundStyle(.secondary)
                     promptView(q)
                         .frame(maxWidth: .infinity, minHeight: 170)
                         .cardSurface()
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        ForEach(q.options) { option in
-                            optionButton(option, q: q)
+                    if q.kind == .speak {
+                        speakControls(q)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                            ForEach(q.options) { option in optionButton(option, q: q) }
                         }
+                        .modifier(ShakeEffect(amount: shake))
                     }
-                    .modifier(ShakeEffect(amount: shake))
                     Spacer(minLength: 0)
-                    if let picked {
-                        feedback(q, right: picked.id == q.word.id)
+                    if let answered {
+                        feedback(q, right: answered)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
@@ -57,21 +66,64 @@ struct QuizRunner: View {
         }
         .sensoryFeedback(.success, trigger: rightTick)
         .sensoryFeedback(.error, trigger: wrongTick)
-        .onAppear { autoplay() }
+        .onAppear {
+            if items.isEmpty { items = questions.map { $0.adjusted() } }
+            autoplay()
+        }
+        .onDisappear { listener.stop() }
+        .onChange(of: listener.state) { _, s in
+            guard let q, q.kind == .speak, answered == nil else { return }
+            if s == .matched { answer(q, right: true) }
+            if s == .missed { speakTries += 1 }
+        }
     }
+
+    // MARK: can't listen / speak now
+
+    @ViewBuilder
+    private var pauseButton: some View {
+        if let q, answered == nil, q.kind == .listenToHanzi || q.kind == .speak {
+            let listen = q.kind == .listenToHanzi
+            Button {
+                listener.reset()
+                if listen { Prefs.pauseListening() } else { Prefs.pauseSpeaking() }
+                // swap this and every later question to a silent type
+                withAnimation(Theme.spring) {
+                    for i in index..<items.count { items[i] = items[i].adjusted() }
+                }
+            } label: {
+                Label(listen ? "Can't listen now" : "Can't speak now",
+                      systemImage: listen ? "speaker.slash.fill" : "mic.slash.fill")
+                    .font(.rounded(.caption, weight: .bold))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Theme.card, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.ink, lineWidth: 1.5))
+            }
+            .buttonStyle(PressableStyle())
+            .foregroundStyle(.primary)
+            .accessibilityHint("Pauses \(listen ? "listening" : "speaking") exercises for an hour")
+        }
+    }
+
+    // MARK: prompt
 
     @ViewBuilder
     private func promptView(_ q: QuizQuestion) -> some View {
         switch q.kind {
-        case .hanziToMeaning:
+        case .hanziToMeaning, .speak:
             VStack(spacing: 10) {
                 if allowPinyin {
                     RubyText(hanzi: q.word.hanzi, pinyin: q.word.pinyin, size: q.word.hanzi.count > 3 ? 52 : 68,
-                             weight: .semibold, alignment: .center)
+                             weight: .semibold, alwaysShow: q.kind == .speak, alignment: .center)
                 } else {
                     Text(q.word.hanzi).font(.hanzi(72, weight: .semibold)).minimumScaleFactor(0.5).lineLimit(1)
                 }
-                SpeakButton(text: q.word.hanzi, size: 40)
+                HStack(spacing: 10) {
+                    SpeakButton(text: q.word.hanzi, size: 40)
+                    if q.kind == .speak {
+                        Text(q.word.shortMeaning).font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                }
             }
         case .meaningToHanzi:
             Text("“\(q.word.shortMeaning)”")
@@ -83,25 +135,63 @@ struct QuizRunner: View {
         }
     }
 
+    // MARK: speaking
+
+    private func speakControls(_ q: QuizQuestion) -> some View {
+        let listening = listener.state == .listening
+        return VStack(spacing: 14) {
+            Button {
+                if listening { listener.stop() } else { listener.start(for: q.word) }
+            } label: {
+                ZStack {
+                    Circle().fill(listening ? AnyShapeStyle(Theme.warmGradient) : AnyShapeStyle(Theme.card))
+                    Circle().stroke(Theme.ink, lineWidth: 3)
+                    Image(systemName: listening ? "waveform" : "mic.fill")
+                        .font(.system(size: 38, weight: .bold))
+                        .foregroundStyle(listening ? Color.white : Theme.red)
+                        .symbolEffect(.variableColor.iterative, isActive: listening)
+                }
+                .frame(width: 104, height: 104)
+                .scaleEffect(listening ? 1.08 : 1)
+                .animation(Theme.bouncy, value: listening)
+            }
+            .buttonStyle(PressableStyle(scale: 0.92))
+            .disabled(answered != nil)
+            .accessibilityLabel(listening ? "Stop listening" : "Start speaking")
+
+            Group {
+                switch listener.state {
+                case .listening: Text(listener.heard.isEmpty ? "Listening… say “\(q.word.hanzi)”" : "Heard: \(listener.heard)")
+                case .missed: Text(listener.heard.isEmpty ? "Didn't catch that. Tap and try again." : "Heard “\(listener.heard)”. Try again!")
+                case .denied: Text("Allow Microphone and Speech Recognition in Settings to use speaking.")
+                case .unavailable: Text("Speech recognition isn't available right now.")
+                default: Text("Tap the mic and say the word")
+                }
+            }
+            .font(.rounded(.subheadline, weight: .semibold))
+            .foregroundStyle(listener.state == .missed ? Theme.red : .secondary)
+            .multilineTextAlignment(.center)
+
+            if answered == nil && (speakTries >= 2 || listener.state == .denied || listener.state == .unavailable) {
+                Button("Skip this one") { answer(q, right: false) }
+                    .font(.rounded(.subheadline, weight: .bold))
+            }
+        }
+    }
+
+    // MARK: options
+
     private func optionButton(_ option: Word, q: QuizQuestion) -> some View {
         let isAnswer = option.id == q.word.id
         let isPicked = picked?.id == option.id
-        let revealed = picked != nil
-        let bg: Color = !revealed ? Theme.card : isAnswer ? Theme.jade.opacity(0.2) : isPicked ? Theme.red.opacity(0.18) : Theme.card
-        let border: Color = !revealed ? .primary.opacity(0.08) : isAnswer ? Theme.jade : isPicked ? Theme.red : .primary.opacity(0.05)
+        let revealed = answered != nil
+        let bg: Color = !revealed ? Theme.card : isAnswer ? Theme.jade.opacity(0.25) : isPicked ? Theme.red.opacity(0.22) : Theme.card
+        let border: Color = !revealed ? Theme.ink : isAnswer ? Theme.jade : isPicked ? Theme.red : Theme.ink.opacity(0.3)
         let isHanzi = q.kind != .hanziToMeaning
         return Button {
-            guard picked == nil else { return }
-            let right = isAnswer
+            guard answered == nil else { return }
             withAnimation(Theme.bouncy) { picked = option }
-            if right {
-                correct += 1
-                rightTick += 1
-            } else {
-                wrongTick += 1
-                withAnimation(.linear(duration: 0.4)) { shake += 1 }
-            }
-            onAnswer(q, right)
+            answer(q, right: isAnswer)
         } label: {
             VStack(spacing: 2) {
                 Text(q.label(for: option))
@@ -116,14 +206,30 @@ struct QuizRunner: View {
                         .minimumScaleFactor(0.7)
                 }
             }
-                .frame(maxWidth: .infinity, minHeight: 74)
-                .padding(.horizontal, 8)
-                .background(bg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(border, lineWidth: 2.5))
-                .opacity(revealed && !isAnswer && !isPicked ? 0.5 : 1)
-                .scaleEffect(revealed && isAnswer ? 1.04 : 1)
+            .frame(maxWidth: .infinity, minHeight: 74)
+            .padding(.horizontal, 8)
+            .background(bg, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).stroke(border, lineWidth: 2.5))
+            .opacity(revealed && !isAnswer && !isPicked ? 0.5 : 1)
+            .scaleEffect(revealed && isAnswer ? 1.04 : 1)
         }
         .buttonStyle(PressableStyle())
+    }
+
+    private func answer(_ q: QuizQuestion, right: Bool) {
+        guard answered == nil else { return }
+        listener.stop()
+        withAnimation(Theme.bouncy) { answered = right }
+        if right {
+            correct += 1
+            rightTick += 1
+            SFX.shared.play(.correct)
+        } else {
+            wrongTick += 1
+            SFX.shared.play(.wrong)
+            withAnimation(.linear(duration: 0.4)) { shake += 1 }
+        }
+        onAnswer(q, right)
     }
 
     private func feedback(_ q: QuizQuestion, right: Bool) -> some View {
@@ -145,28 +251,33 @@ struct QuizRunner: View {
                     Text(q.word.meaning).font(.rounded(.footnote)).foregroundStyle(.secondary)
                 }
             }
-            BigButton(title: index + 1 < questions.count ? "Continue" : "Finish",
+            BigButton(title: index + 1 < items.count ? "Continue" : "Finish",
                       gradient: right ? Theme.jadeGradient : Theme.warmGradient) { next() }
         }
         .padding(18)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius + 4, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius + 4, style: .continuous).stroke(Theme.ink, lineWidth: 2.5))
     }
 
     private func next() {
-        let answered = index + 1
-        if answered >= questions.count || !shouldContinue(answered) {
+        let answeredCount = index + 1
+        if answeredCount >= items.count || !shouldContinue(answeredCount) {
             onDone(correct)
             return
         }
+        listener.reset()
         withAnimation(Theme.spring) {
             picked = nil
+            answered = nil
+            speakTries = 0
             index += 1
+            items[index] = items[index].adjusted()
         }
         autoplay()
     }
 
     private func autoplay() {
-        if let q, q.kind == .listenToHanzi {
+        if let q, q.kind == .listenToHanzi, Prefs.canListen {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
                 Speaker.shared.say(q.word.hanzi)
