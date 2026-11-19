@@ -163,6 +163,7 @@ struct OnlineDuelView: View {
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var connection: DuelConnection?
     @State private var match: DuelMatch?
@@ -173,17 +174,33 @@ struct OnlineDuelView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            if let match, let connection, connection.state == .connected, match.opponent != nil {
+            if let match, let connection, match.opponent != nil {
                 MatchScreen(match: match, confetti: $confetti, close: close)
                     .transition(.opacity)
+                    .disabled(connection.state != .connected)
+                    .blur(radius: connection.state == .connected ? 0 : 6)
+                if connection.state != .connected {
+                    ReconnectOverlay(connection: connection, name: match.opponent?.name ?? "your friend", leave: close)
+                        .transition(.opacity)
+                }
             } else {
                 pairing
             }
             ConfettiView(trigger: confetti)
         }
         .animation(Theme.spring, value: match?.opponent)
-        .onAppear(perform: setUp)
-        .onDisappear { connection?.stop() }
+        .animation(Theme.spring, value: connection?.state)
+        .onAppear {
+            setUp()
+            UIApplication.shared.isIdleTimerDisabled = true // screen lock would cut the link
+        }
+        .onDisappear {
+            connection?.stop()
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
+        .onChange(of: scenePhase) { _, p in
+            if p == .active { connection?.wake() }
+        }
         .onChange(of: connection?.state) { _, s in
             if s == .connected { match?.sayHello() }
         }
@@ -213,7 +230,7 @@ struct OnlineDuelView: View {
         switch connection?.state ?? .idle {
         case .connecting: return ("Connecting… keep the phones close", Theme.gold)
         case .connected: return ("Connected! Saying hello…", Theme.jade)
-        case .lost: return ("Connection lost", Theme.red)
+        case .reconnecting: return ("Reconnecting…", Theme.gold)
         default: return ("Waiting for your friend", .secondary)
         }
     }
@@ -252,11 +269,6 @@ struct OnlineDuelView: View {
                 Text(scanMessage).font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.red)
             }
             Spacer(minLength: 0)
-            if connection?.state == .lost {
-                BigButton(title: "Reconnect", systemImage: "arrow.clockwise", gradient: Theme.skyGradient) {
-                    connection?.start()
-                }
-            }
             BigButton(title: "Scan friend's code", systemImage: "qrcode.viewfinder") {
                 scanMessage = nil
                 scanning = true
@@ -296,6 +308,37 @@ struct OnlineDuelView: View {
             }
         }
         .presentationDetents([.large])
+    }
+}
+
+/// Shown over the match while the phones find each other again.
+private struct ReconnectOverlay: View {
+    let connection: DuelConnection
+    let name: String
+    let leave: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { tl in
+            let waited = connection.reconnectingSince.map { tl.date.timeIntervalSince($0) } ?? 0
+            VStack(spacing: 14) {
+                ProgressView().controlSize(.large)
+                Text("Reconnecting to \(name)…").font(.rounded(.title3, weight: .bold))
+                Text("Keep both phones close with the app open. The match continues where it left off.")
+                    .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                if waited > 20 {
+                    Text("Still trying… check that Bluetooth and Wi‑Fi are on for both phones.")
+                        .font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.gold)
+                        .multilineTextAlignment(.center)
+                    Button("Leave match", role: .destructive, action: leave)
+                        .font(.rounded(.headline, weight: .bold))
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 340)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
+            .animation(Theme.spring, value: waited > 20)
+        }
     }
 }
 

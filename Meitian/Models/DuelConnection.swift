@@ -37,6 +37,19 @@ enum DuelMessage: Codable {
     case progress(score: Int, done: Bool)
     case finished(winner: String?)
     case backToLobby
+    /// Host → guest after a reconnect: the full game state, so both phones agree again.
+    case resume(MatchSnapshot)
+    case ping
+}
+
+struct MatchSnapshot: Codable {
+    var mode: DuelMode
+    var questions: [WireQuestion]
+    var index: Int
+    var hp: [String: Int]
+    var inGame: Bool
+    var finished: Bool
+    var winner: String?
 }
 
 /// QR payload: "meitian-duel:<player id>"
@@ -51,26 +64,40 @@ enum DuelQR {
 }
 
 /// Offline, server-free link between two phones (Bluetooth / peer-to-peer Wi‑Fi).
-/// Both phones advertise and browse. The phone that scanned the other's QR code sends the invitation,
-/// and it only gets accepted if it carries the scanned player's id, so strangers nearby can't join.
+///
+/// Pairing: the phone that scanned the other's QR code sends the invitation, and it is only accepted
+/// if it carries the scanned player's id, so strangers nearby can't join.
+///
+/// Staying connected: once paired, both phones remember each other. If the link drops (screen lock,
+/// app switch, radio hiccup) they rebuild the session and the player with the smaller id re-invites
+/// automatically, so a match can continue instead of ending.
 @Observable
 final class DuelConnection: NSObject {
-    enum State: Equatable { case idle, searching, connecting(String), connected, lost }
+    enum State: Equatable { case idle, searching, connecting(String), connected, reconnecting }
 
     static let serviceType = "meitian-duel"
 
     private(set) var state: State = .idle
-    var onMessage: ((DuelMessage) -> Void)?
+    /// Seconds spent reconnecting (drives the "still trying" UI).
+    private(set) var reconnectingSince: Date?
+    @ObservationIgnored var onMessage: ((DuelMessage) -> Void)?
+    @ObservationIgnored var onReconnected: (() -> Void)?
+    @ObservationIgnored var onDropped: (() -> Void)?
 
-    private let myId: String
-    private let peer: MCPeerID
-    private var session: MCSession?
-    private var advertiser: MCNearbyServiceAdvertiser?
-    private var browser: MCNearbyServiceBrowser?
-    private var targetId: String?
-    private var found: [String: MCPeerID] = [:] // player id → peer
-    private var invited: Set<String> = []
-    private var connectedPeer: MCPeerID?
+    @ObservationIgnored private let myId: String
+    @ObservationIgnored private let peer: MCPeerID
+    @ObservationIgnored private var session: MCSession?
+    @ObservationIgnored private var advertiser: MCNearbyServiceAdvertiser?
+    @ObservationIgnored private var browser: MCNearbyServiceBrowser?
+    /// Who we want to be connected to (from a QR scan, or remembered after pairing).
+    @ObservationIgnored private var targetId: String?
+    /// Set once paired: from then on drops are reconnected automatically.
+    @ObservationIgnored private(set) var partnerId: String?
+    @ObservationIgnored private var found: [String: MCPeerID] = [:] // player id → peer
+    @ObservationIgnored private var pendingInvite: String?
+    @ObservationIgnored private var inviteSentAt = Date.distantPast
+    @ObservationIgnored private var retryTimer: Timer?
+    @ObservationIgnored private var pingTimer: Timer?
 
     init(myId: String, name: String) {
         self.myId = myId
@@ -79,33 +106,33 @@ final class DuelConnection: NSObject {
         super.init()
     }
 
+    deinit {
+        retryTimer?.invalidate()
+        pingTimer?.invalidate()
+    }
+
+    // MARK: lifecycle
+
     func start() {
         stop()
-        let s = MCSession(peer: peer, securityIdentity: nil, encryptionPreference: .required)
-        s.delegate = self
-        session = s
-        let adv = MCNearbyServiceAdvertiser(peer: peer, discoveryInfo: ["id": myId], serviceType: Self.serviceType)
-        adv.delegate = self
-        adv.startAdvertisingPeer()
-        advertiser = adv
-        let br = MCNearbyServiceBrowser(peer: peer, serviceType: Self.serviceType)
-        br.delegate = self
-        br.startBrowsingForPeers()
-        browser = br
+        newSession()
+        startDiscovery()
         state = .searching
+        startRetryTimer()
     }
 
     func stop() {
-        advertiser?.stopAdvertisingPeer()
-        browser?.stopBrowsingForPeers()
+        retryTimer?.invalidate(); retryTimer = nil
+        pingTimer?.invalidate(); pingTimer = nil
+        stopDiscovery()
+        session?.delegate = nil
         session?.disconnect()
-        advertiser = nil
-        browser = nil
         session = nil
         found = [:]
-        invited = []
-        connectedPeer = nil
+        pendingInvite = nil
         targetId = nil
+        partnerId = nil
+        reconnectingSince = nil
         state = .idle
     }
 
@@ -113,9 +140,9 @@ final class DuelConnection: NSObject {
     func connect(to playerId: String) {
         guard playerId != myId else { return }
         targetId = playerId
-        if case .connected = state { return }
+        if state == .connected { return }
         state = .connecting(playerId)
-        inviteIfFound()
+        inviteIfNeeded()
     }
 
     func send(_ message: DuelMessage) {
@@ -124,32 +151,123 @@ final class DuelConnection: NSObject {
         try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
     }
 
-    private func inviteIfFound() {
-        guard let target = targetId, let p = found[target], let session, !invited.contains(target) else { return }
-        invited.insert(target)
-        browser?.invitePeer(p, to: session, withContext: Data(target.utf8), timeout: 20)
+    /// Remember who we're playing (from their hello), so reconnects know whom to look for.
+    func setPartner(_ id: String) {
+        guard id != myId else { return }
+        partnerId = id
+    }
+
+    /// Call when the app comes back to the foreground: the radio may have been suspended.
+    func wake() {
+        guard partnerId != nil, state != .connected else { return }
+        dropped()
+    }
+
+    // MARK: internals
+
+    private func newSession() {
+        session?.delegate = nil
+        session?.disconnect()
+        // No encryption: only game moves, names and avatar ids are sent, and encrypted
+        // Multipeer sessions are known to drop randomly during the TLS handshake.
+        let s = MCSession(peer: peer, securityIdentity: nil, encryptionPreference: .none)
+        s.delegate = self
+        session = s
+        pendingInvite = nil
+    }
+
+    private func startDiscovery() {
+        stopDiscovery()
+        let adv = MCNearbyServiceAdvertiser(peer: peer, discoveryInfo: ["id": myId], serviceType: Self.serviceType)
+        adv.delegate = self
+        adv.startAdvertisingPeer()
+        advertiser = adv
+        let br = MCNearbyServiceBrowser(peer: peer, serviceType: Self.serviceType)
+        br.delegate = self
+        br.startBrowsingForPeers()
+        browser = br
+    }
+
+    private func stopDiscovery() {
+        advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
+        browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+    }
+
+    /// Should this phone send the invitation? Before pairing: whoever scanned. After pairing: the smaller id,
+    /// so both phones never invite each other at the same time.
+    private var shouldInvite: Bool {
+        if let partner = partnerId { return myId < partner }
+        return targetId != nil
+    }
+
+    private func inviteIfNeeded() {
+        guard let target = targetId ?? partnerId, shouldInvite,
+              let p = found[target], let session, session.connectedPeers.isEmpty else { return }
+        // don't spam: one invitation in flight at a time
+        if pendingInvite == target && Date.now.timeIntervalSince(inviteSentAt) < 12 { return }
+        pendingInvite = target
+        inviteSentAt = .now
+        browser?.invitePeer(p, to: session, withContext: Data(target.utf8), timeout: 10)
+    }
+
+    private func startRetryTimer() {
+        retryTimer?.invalidate()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            guard let self, self.state != .connected else { return }
+            self.inviteIfNeeded()
+        }
+    }
+
+    private func startPing() {
+        pingTimer?.invalidate()
+        // tiny keep-alive so the radio link doesn't go idle between rounds
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self, self.state == .connected else { return }
+            self.send(.ping)
+        }
+    }
+
+    private func dropped() {
+        if state == .connected { onDropped?() }
+        pingTimer?.invalidate()
+        state = .reconnecting
+        if reconnectingSince == nil { reconnectingSince = .now }
+        newSession()
+        found = [:]
+        startDiscovery() // fresh discovery so we see the partner again
+        startRetryTimer()
+    }
+
+    private func didConnect(_ peerID: MCPeerID) {
+        let wasReconnecting = state == .reconnecting
+        if partnerId == nil, let id = targetId ?? found.first(where: { $0.value == peerID })?.key {
+            partnerId = id
+        }
+        state = .connected
+        reconnectingSince = nil
+        pendingInvite = nil
+        stopDiscovery()
+        startPing()
+        if wasReconnecting { onReconnected?() }
     }
 }
 
 extension DuelConnection: MCSessionDelegate {
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
         DispatchQueue.main.async {
-            guard session === self.session else { return }
+            guard session === self.session else { return } // events from an old session
             switch state {
             case .connected:
-                self.connectedPeer = peerID
-                self.state = .connected
-                // stay discoverable no longer
-                self.advertiser?.stopAdvertisingPeer()
-                self.browser?.stopBrowsingForPeers()
+                self.didConnect(peerID)
             case .notConnected:
-                if peerID == self.connectedPeer {
-                    self.connectedPeer = nil
-                    self.state = .lost
-                } else if case .connecting = self.state {
-                    // invitation failed: allow another try
-                    if let t = self.targetId { self.invited.remove(t) }
-                    self.inviteIfFound()
+                // A declined/expired duplicate invitation also reports .notConnected for the same peer.
+                // Only treat it as a real drop if nobody is connected anymore.
+                guard session.connectedPeers.isEmpty else { return }
+                if self.state == .connected {
+                    self.dropped()
+                } else {
+                    self.pendingInvite = nil
+                    self.inviteIfNeeded()
                 }
             case .connecting:
                 break
@@ -161,27 +279,36 @@ extension DuelConnection: MCSessionDelegate {
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let msg = try? JSONDecoder().decode(DuelMessage.self, from: data) else { return }
+        if case .ping = msg { return }
         DispatchQueue.main.async { self.onMessage?(msg) }
     }
 
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
     func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
     func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
+    func session(_ session: MCSession, didReceiveCertificate certificate: [Any]?, fromPeer peerID: MCPeerID,
+                 certificateHandler: @escaping (Bool) -> Void) {
+        certificateHandler(true)
+    }
 }
 
 extension DuelConnection: MCNearbyServiceAdvertiserDelegate {
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID,
                     withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
         DispatchQueue.main.async {
-            // only someone who scanned *my* code can join
+            // only someone who scanned *my* code (or my paired partner) can join
             guard let context, String(data: context, encoding: .utf8) == self.myId,
                   let session = self.session, session.connectedPeers.isEmpty else {
                 invitationHandler(false, nil)
                 return
             }
-            // both scanned at once: the invitation from the smaller id wins
-            if let inviter = self.found.first(where: { $0.value == peerID })?.key,
-               self.invited.contains(inviter), inviter > self.myId {
+            let inviter = self.found.first(where: { $0.value == peerID })?.key
+            if let partner = self.partnerId, let inviter, inviter != partner {
+                invitationHandler(false, nil) // someone else
+                return
+            }
+            // both scanned at once: keep only the invitation from the smaller id
+            if self.partnerId == nil, let inviter, self.pendingInvite == inviter, inviter > self.myId {
                 invitationHandler(false, nil)
                 return
             }
@@ -197,7 +324,7 @@ extension DuelConnection: MCNearbyServiceBrowserDelegate {
         DispatchQueue.main.async {
             guard let id = info?["id"] else { return }
             self.found[id] = peerID
-            self.inviteIfFound()
+            self.inviteIfNeeded()
         }
     }
 

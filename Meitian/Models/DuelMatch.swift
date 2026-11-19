@@ -17,6 +17,7 @@ final class DuelMatch {
     var phase: Phase = .lobby
     var mode: DuelMode = .duel
     private(set) var questions: [QuizQuestion] = []
+    @ObservationIgnored private var wire: [WireQuestion] = []
     private(set) var index = 0
     private(set) var hp: [String: Int] = [:]
 
@@ -53,6 +54,72 @@ final class DuelMatch {
         self.connection = connection
         self.me = me
         connection.onMessage = { [weak self] msg in self?.handle(msg) }
+        connection.onDropped = { [weak self] in self?.dropped() }
+        connection.onReconnected = { [weak self] in self?.reconnected() }
+    }
+
+    // MARK: connection drops
+
+    private var inGame: Bool {
+        switch phase {
+        case .countdown, .playing, .roundResult: return true
+        default: return false
+        }
+    }
+
+    /// Link dropped: freeze duel rounds so the host doesn't play on alone.
+    private func dropped() {
+        if mode == .duel && inGame { roundToken += 1 }
+    }
+
+    /// Link is back: host re-sends the whole game state, then restarts the current round.
+    private func reconnected() {
+        sayHello()
+        if mode == .blitz && inGame {
+            connection.send(.progress(score: myScore, done: myDone))
+        }
+        guard isHost else { return }
+        let finished = phase == .finished
+        connection.send(.resume(MatchSnapshot(mode: mode, questions: wire, index: index, hp: hp,
+                                              inGame: inGame, finished: finished, winner: winner ?? nil)))
+        if mode == .duel && inGame, let opp = opponent, let dead = hp.first(where: { $0.value <= 0 })?.key {
+            // the knockout landed right before the drop
+            let w = dead == me.id ? opp.id : me.id
+            connection.send(.finished(winner: w))
+            finish(winner: w)
+            return
+        }
+        if mode == .duel && inGame {
+            let token = roundToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self, token == self.roundToken, self.connection.state == .connected else { return }
+                self.hostNextRound(self.index)
+            }
+        }
+    }
+
+    private func applyResume(_ s: MatchSnapshot) {
+        guard !isHost else { return }
+        if s.finished {
+            if mode != s.mode { mode = s.mode }
+            finish(winner: s.winner)
+            return
+        }
+        guard s.inGame else {
+            if inGame { backToLobby(notify: false) }
+            return
+        }
+        // Blitz runs independently on each phone (own timer and question position); scores are re-sent separately.
+        guard s.mode == .duel else { return }
+        if wire != s.questions {
+            wire = s.questions
+            questions = s.questions.compactMap(\.question)
+        }
+        mode = s.mode
+        hp = s.hp
+        index = s.index
+        roundToken += 1
+        if mode == .duel { phase = .roundResult } // host is about to restart the round
     }
 
     func sayHello() { connection.send(.hello(me)) }
@@ -66,13 +133,14 @@ final class DuelMatch {
         guard isHost, let opponent else { return }
         let level = max(1, min(me.level, opponent.level))
         let pool = WordBank.all.filter { $0.level <= level }
-        let wire = WireQuestion.make(pool: pool, count: mode == .duel ? 40 : 80)
-        connection.send(.start(mode: mode, questions: wire))
-        begin(mode: mode, wire: wire)
+        let list = WireQuestion.make(pool: pool, count: mode == .duel ? 40 : 80)
+        connection.send(.start(mode: mode, questions: list))
+        begin(mode: mode, wire: list)
     }
 
     private func begin(mode: DuelMode, wire: [WireQuestion]) {
         self.mode = mode
+        self.wire = wire
         questions = wire.compactMap(\.question)
         index = 0
         hp = [me.id: DuelMatch.maxHP]
@@ -254,6 +322,7 @@ final class DuelMatch {
         case .hello(let card):
             let first = opponent == nil
             opponent = card
+            connection.setPartner(card.id)
             if first { sayHello() } // make sure they have mine too
         case .start(let mode, let wire):
             begin(mode: mode, wire: wire)
@@ -270,6 +339,10 @@ final class DuelMatch {
             finish(winner: w)
         case .backToLobby:
             backToLobby(notify: false)
+        case .resume(let snapshot):
+            applyResume(snapshot)
+        case .ping:
+            break
         }
     }
 }
