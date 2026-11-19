@@ -155,6 +155,10 @@ data class Profile(
     /** Streak freezes held, and the days they covered (day numbers). */
     val freezes: Int = 0,
     val frozenDays: List<Long> = emptyList(),
+    /** Daily reminder notification. */
+    val reminderOn: Boolean = false,
+    val reminderHour: Int = 19,
+    val reminderMinute: Int = 0,
 )
 
 data class Settings(
@@ -483,6 +487,7 @@ class AppState(private val context: Context) {
         val id = arena.playerId
         profile = Profile(); settings = settings.copy(swears = false); arena = Arena(playerId = id); xp = 0
         cards.clear(); days.clear(); milestoneQueue.clear(); freezeNotice = null
+        Reminders.cancel(context)
         // progress kept outside the save: story history (ui.StoryProgress) and the sprint best
         context.getSharedPreferences("stories", Context.MODE_PRIVATE).edit().clear().apply()
         prefs.edit().remove("sprintBest").apply()
@@ -498,6 +503,7 @@ class AppState(private val context: Context) {
             put("name", profile.name); put("claimed", profile.claimedLevel); put("confirmed", profile.confirmedLevel)
             put("goal", profile.dailyGoal); put("onboarded", profile.onboarded); put("friend", profile.friend)
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
+            put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
         })
         o.put("settings", JSONObject().apply {
             val s = settings
@@ -540,6 +546,34 @@ class AppState(private val context: Context) {
             }))
         })
         prefs.edit().putString("save", o.toString()).apply()
+        writeSnapshot()
+    }
+
+    /** What the reminder and the home-screen widget show, refreshed on every save. */
+    private fun writeSnapshot() {
+        runCatching {
+            val t = today
+            val m = milestoneProgress.next
+            val due = dueWords.size
+            val todo = when {
+                !profile.onboarded -> "set up Měitiān ✦"
+                !t.learnedDone -> "🎯 learn today's words"
+                levelComplete && canLevelUp -> "🎓 your HSK $currentLevel test is ready"
+                due > 0 -> "🃏 $due words to review"
+                nextLessonWords().isNotEmpty() -> "🎯 lesson ${lessonPath.lesson} of HSK $currentLevel is next"
+                else -> "all done today ✦ see you tomorrow"
+            }
+            Snapshot.write(context, Snapshot.Data(todayKey, profile.name, streak, t.xp, t.active, m.emoji, m.title, m.xp.toInt(), todo,
+                profile.reminderOn, profile.reminderHour, profile.reminderMinute))
+            com.asbestboi.meitian.MeitianWidget.update(context)
+        }
+    }
+
+    /** Turns the daily reminder on or off (permission is asked for by the screen). */
+    fun setReminder(on: Boolean, hour: Int = profile.reminderHour, minute: Int = profile.reminderMinute) {
+        profile = profile.copy(reminderOn = on, reminderHour = hour, reminderMinute = minute)
+        if (on) Reminders.schedule(context, hour, minute) else Reminders.cancel(context)
+        save()
     }
 
     private fun load() {
@@ -550,7 +584,8 @@ class AppState(private val context: Context) {
             o.optJSONObject("profile")?.let { p ->
                 profile = Profile(p.optString("name"), p.optInt("claimed"), p.optInt("confirmed"), p.optInt("goal", 5),
                     p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"),
-                    p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList())
+                    p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList(),
+                    p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0))
             }
             o.optJSONObject("settings")?.let { s ->
                 settings = Settings(s.optBoolean("pinyin", true), s.optBoolean("tones", true), s.optBoolean("swears"),

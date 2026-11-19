@@ -323,6 +323,10 @@ fun ProgressScreen() {
     val s = app.settings
     fun set(n: com.asbestboi.meitian.data.Settings) { app.settings = n; app.save() }
     var confirmReset by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Android 13+: ask before the first reminder can show
+    val notifyPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setReminder(granted) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ScreenTitle("Progress")
@@ -416,6 +420,19 @@ fun ProgressScreen() {
                 Text("New words a day: ${app.profile.dailyGoal}", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.weight(1f))
                 Text("−", style = street(28.sp), color = Street.c.red, modifier = Modifier.clickable { app.profile = app.profile.copy(dailyGoal = (app.profile.dailyGoal - 1).coerceAtLeast(1)); app.save() }.padding(horizontal = 12.dp))
                 Text("+", style = street(28.sp), color = Street.c.red, modifier = Modifier.clickable { app.profile = app.profile.copy(dailyGoal = (app.profile.dailyGoal + 1).coerceAtMost(15)); app.save() }.padding(horizontal = 12.dp))
+            }
+            ToggleRow("Daily reminder", "A nudge if you haven't practiced yet", app.profile.reminderOn) { on ->
+                if (on && !com.asbestboi.meitian.data.Reminders.canNotify(context) && android.os.Build.VERSION.SDK_INT >= 33)
+                    notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                else app.setReminder(on)
+            }
+            if (app.profile.reminderOn) {
+                Text("⏰ Remind me at %02d:%02d".format(app.profile.reminderHour, app.profile.reminderMinute),
+                    fontWeight = FontWeight.Bold, color = Street.c.text,
+                    modifier = Modifier.clickable {
+                        android.app.TimePickerDialog(context, { _, h, m -> app.setReminder(true, h, m) },
+                            app.profile.reminderHour, app.profile.reminderMinute, true).show()
+                    })
             }
             Text("✅ Retake placement quiz", fontWeight = FontWeight.Bold, color = Street.c.text,
                 modifier = Modifier.clickable { nav.show { OnboardingScreen(retakeOnly = true) { nav.close() } } })
