@@ -8,6 +8,8 @@ struct MeitianApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
+        // story pictures: keep plenty on disk so stories work offline after the first read
+        URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 300 << 20)
         // clean, heavy titles in navigation bars
         let large = UIFont.systemFont(ofSize: 36, weight: .heavy)
         let inline = UIFont.systemFont(ofSize: 17, weight: .bold)

@@ -17,6 +17,7 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     wordsCard
+                    StoryOfTheDayCard()
                     challengeCard
                     reviewCard
                     phraseOfTheDay

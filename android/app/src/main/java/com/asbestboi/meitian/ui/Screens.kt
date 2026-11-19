@@ -105,6 +105,7 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
                 Text(if (done) "practice them again ↻" else "learn today's words →", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.Black)
             }
         }
+        StoryOfTheDayCard()
         // challenge
         val challenge = dailyChallenge(app.todayKey, words, if (app.profile.friend == "chinese") Friend.CHINESE else Friend.NON_CHINESE)
         Row(Modifier.fillMaxWidth().card().clickable(onClick = goToChallenge).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

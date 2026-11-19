@@ -42,7 +42,7 @@ final class ParticleSystem {
         while emitDebt >= 1 {
             emitDebt -= 1
             let a = Double.random(in: 0..<(2 * .pi))
-            let q = CGPoint(x: p.x + cos(a) * radius, y: p.y + sin(a) * radius)
+            let q = CGPoint(x: p.x + CGFloat(Foundation.cos(a)) * radius, y: p.y + CGFloat(Foundation.sin(a)) * radius)
             spawn(spec, at: q, direction: a, speedScale: speedScale)
         }
     }

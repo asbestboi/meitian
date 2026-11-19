@@ -94,6 +94,7 @@ fun PracticeScreen() {
                 Text("›", style = street(28.sp), color = Street.c.secondary)
             }
         }
+        item { StoryShelf() }
         if (app.settings.swears) item {
             Row(Modifier.fillMaxWidth().block(Street.ink()).clickable { nav.show { SwearSprint { nav.close() } } }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("🤬", fontSize = 42.sp); HSpacer(12.dp)
