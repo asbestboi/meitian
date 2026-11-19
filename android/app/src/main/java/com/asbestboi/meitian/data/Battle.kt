@@ -246,7 +246,7 @@ data class WireQ(val wordId: String, val kind: Int, val options: List<String>) {
         val w = Words[wordId] ?: return null
         val opts = options.mapNotNull { Words[it] }
         if (opts.size != options.size) return null
-        return Question(w, if (kind == 0) Kind.HanziToMeaning else Kind.MeaningToHanzi, opts)
+        return Question(w, when (kind) { 0 -> Kind.HanziToMeaning; 2 -> Kind.Listen; else -> Kind.MeaningToHanzi }, opts)
     }
     fun json() = JSONObject().put("w", wordId).put("k", kind).put("o", JSONArray(options))
     companion object {
@@ -257,6 +257,22 @@ data class WireQ(val wordId: String, val kind: Int, val options: List<String>) {
 enum class Mode(val title: String, val emoji: String, val blurb: String) {
     Duel("Duel", "⚔️", "Same question for both. First right answer hits. Knock their HP to 0!"),
     Blitz("Blitz", "⚡", "45 seconds. Answer as many as you can. Most correct wins."),
+    Listen("Listen duel", "🎧", "No characters on screen: you only hear the word. First to tap it hits."),
+    Sudden("Sudden death", "☠️", "Three hits and you're out. Only 6 seconds per round."),
+    Survival("Survival", "❤️", "3 lives each. A wrong answer costs a life. Most correct before you run out wins.");
+
+    /** Round-based modes share a question and deal damage; race modes run on each phone separately. */
+    val isRounds get() = this == Duel || this == Listen || this == Sudden
+    val isRace get() = !isRounds
+    val roundMillis get() = if (this == Sudden) 6_000L else 10_000L
+    val raceMillis get() = if (this == Survival) 120_000L else 45_000L
+    val lives get() = if (this == Survival) 3 else 0
+    fun damage(ms: Int) = if (this == Sudden) 34 else duelDamage(ms.toUInt()).toInt()
+
+    companion object {
+        /** Same names as iOS on the wire; unknown modes fall back to a duel. */
+        fun of(name: String) = entries.firstOrNull { it.name == name } ?: Duel
+    }
 }
 
 /** Networked match. Host (smaller id) referees; reaction time is measured on each phone. */
@@ -282,6 +298,8 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
     var myDone by mutableStateOf(false)
     private var oppDone = false
     var blitzEnds by mutableStateOf(0L)
+    /** Survival: lives left. */
+    var lives by mutableIntStateOf(0)
     var winner by mutableStateOf<String?>(null)
     var finished by mutableStateOf(false)
     var coins by mutableIntStateOf(0)
@@ -300,7 +318,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
 
     init {
         link.onMessage = { handle(it) }
-        link.onDropped = { if (mode == Mode.Duel && inGame) token++ }
+        link.onDropped = { if (mode.isRounds && inGame) token++ }
         link.onReconnected = { reconnected() }
     }
 
@@ -314,7 +332,8 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         val o = opponent ?: return
         if (!isHost || incompatible) return
         val pool = battlePool(me.level.toUByte(), o.level.toUByte(), me.swearsOn, o.swearsOn)
-        val list = battleQuestions(pool, if (m == Mode.Duel) 40u else 80u).map { WireQ(it.wordId, it.kind.toInt(), it.optionIds) }
+        val list = battleQuestions(pool, if (m.isRounds) 40u else 80u)
+            .map { WireQ(it.wordId, if (m == Mode.Listen) 2 else it.kind.toInt(), it.optionIds) }  // listen: hear it, pick the characters
         send("start") { put("mode", m.name); put("q", JSONArray(list.map { it.json() })) }
         begin(m, list)
     }
@@ -322,6 +341,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
     private fun begin(m: Mode, list: List<WireQ>) {
         mode = m; wire = list; questions = list.mapNotNull { it.question() }; index = 0
         hp.clear(); hp[me.id] = 100; opponent?.let { hp[it.id] = 100 }
+        lives = m.lives
         myScore = 0; oppScore = 0; myDone = false; oppDone = false; winner = null; finished = false
         coins = 0; fastest = null; damageDealt = 0
         val t = ++token
@@ -329,7 +349,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         scope.launch {
             for (n in 3 downTo 1) { if (t != token) return@launch; count = n; Sfx.play(Sfx.Sound.Tick); delay(800) }
             if (t != token) return@launch
-            if (mode == Mode.Duel) { if (isHost) hostRound(0) } else startBlitz()
+            if (mode.isRounds) { if (isHost) hostRound(0) } else startBlitz()
         }
     }
 
@@ -337,7 +357,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         send("round") { put("i", i) }
         showRound(i)
         val t = token
-        scope.launch { delay(10_000); if (t == token && index == i && phase == Phase.Playing) resolve(i) }
+        scope.launch { delay(mode.roundMillis); if (t == token && index == i && phase == Phase.Playing) resolve(i) }
     }
 
     private fun showRound(i: Int) {
@@ -352,7 +372,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         val ms = (System.currentTimeMillis() - shownAt).toInt()
         myPick = o
         Sfx.play(if (right) Sfx.Sound.Correct else Sfx.Sound.Wrong)
-        if (mode == Mode.Blitz) { blitz(right); return }
+        if (mode.isRace) { blitz(right); return }
         if (!right) lockedOut = true else fastest = minOf(fastest ?: Int.MAX_VALUE, ms)
         if (isHost) receive(me.id, index, right, ms) else send("answer") { put("i", index); put("ok", right); put("ms", ms) }
     }
@@ -373,7 +393,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         val best = answers.filter { it.value.first }.minByOrNull { it.value.second }
         var dmg = 0
         if (best != null) {
-            dmg = duelDamage(best.value.second.toUInt()).toInt()
+            dmg = mode.damage(best.value.second)
             val target = if (best.key == me.id) o.id else me.id
             hp[target] = (hpOf(target) - dmg).coerceAtLeast(0)
         }
@@ -398,10 +418,10 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
 
     private fun startBlitz() {
         showRound(0)
-        blitzEnds = System.currentTimeMillis() + 45_000
+        blitzEnds = System.currentTimeMillis() + mode.raceMillis
         val t = token
         scope.launch {
-            delay(45_000)
+            delay(mode.raceMillis)
             if (t != token || myDone) return@launch
             myDone = true
             send("progress") { put("s", myScore); put("done", true) }
@@ -410,10 +430,19 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
     }
 
     private fun blitz(right: Boolean) {
-        if (right) { myScore++; send("progress") { put("s", myScore); put("done", false) } } else lockedOut = true
+        if (right) { myScore++; send("progress") { put("s", myScore); put("done", false) } } else {
+            lockedOut = true
+            if (mode == Mode.Survival && --lives <= 0) {
+                // out of lives: you're done, your score stands
+                myDone = true
+                send("progress") { put("s", myScore); put("done", true) }
+                checkBlitz()
+                return
+            }
+        }
         scope.launch {
             delay(if (right) 350 else 1000)
-            if (mode == Mode.Blitz && !myDone && phase == Phase.Playing) { index++; myPick = null; lockedOut = false }
+            if (mode.isRace && !myDone && phase == Phase.Playing) { index++; myPick = null; lockedOut = false }
         }
     }
 
@@ -429,7 +458,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         token++
         winner = w; finished = true; phase = Phase.Finished
         val outcome = when (w) { null -> Outcome.DRAW; me.id -> Outcome.WIN; else -> Outcome.LOSS }
-        val bonus = if (mode == Mode.Duel) hpOf(me.id) / 5 else myScore
+        val bonus = if (mode.isRounds) hpOf(me.id) / 5 else myScore
         coins = opponent?.let { onFinish(outcome, it, bonus, fastest) } ?: 0
         if (outcome == Outcome.LOSS) Sfx.play(Sfx.Sound.Lose)
     }
@@ -442,14 +471,14 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
 
     private fun reconnected() {
         hello()
-        if (mode == Mode.Blitz && inGame) send("progress") { put("s", myScore); put("done", myDone) }
+        if (mode.isRace && inGame) send("progress") { put("s", myScore); put("done", myDone) }
         if (!isHost) return
         send("resume") {
             put("mode", mode.name); put("q", JSONArray(wire.map { it.json() })); put("i", index); put("hp", JSONObject(hp.toMap()))
             put("inGame", inGame); put("finished", finished); put("w", winner ?: "")
         }
         val o = opponent ?: return
-        if (mode == Mode.Duel && inGame) {
+        if (mode.isRounds && inGame) {
             val dead = hp.entries.firstOrNull { it.value <= 0 }?.key
             if (dead != null) { val w = if (dead == me.id) o.id else me.id; send("finished") { put("w", w) }; finish(w); return }
             val t = token
@@ -466,7 +495,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
                 if (!canMatch(me.swearsOn, card.swearsOn)) incompatible = true else link.setPartner(card.id)
                 if (first) hello()
             }
-            "start" -> begin(Mode.valueOf(o.getString("mode")), o.getJSONArray("q").let { a -> (0 until a.length()).map { WireQ.from(a.getJSONObject(it)) } })
+            "start" -> begin(Mode.of(o.getString("mode")), o.getJSONArray("q").let { a -> (0 until a.length()).map { WireQ.from(a.getJSONObject(it)) } })
             "round" -> if (!isHost) showRound(o.getInt("i"))
             "answer" -> opponent?.let { receive(it.id, o.getInt("i"), o.getBoolean("ok"), o.getInt("ms")) }
             "result" -> if (!isHost) {
@@ -479,10 +508,11 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
             "resume" -> if (!isHost) {
                 if (o.getBoolean("finished")) { finish(o.optString("w").ifEmpty { null }); return }
                 if (!o.getBoolean("inGame")) { if (inGame) backToLobby(false); return }
-                if (Mode.valueOf(o.getString("mode")) != Mode.Duel) return
+                val resumed = Mode.of(o.getString("mode"))
+                if (!resumed.isRounds) return
                 val list = o.getJSONArray("q").let { a -> (0 until a.length()).map { WireQ.from(a.getJSONObject(it)) } }
                 if (list != wire) { wire = list; questions = list.mapNotNull { it.question() } }
-                mode = Mode.Duel
+                mode = resumed
                 val h = o.getJSONObject("hp"); h.keys().forEach { hp[it] = h.getInt(it) }
                 index = o.getInt("i"); token++; phase = Phase.RoundResult
             }

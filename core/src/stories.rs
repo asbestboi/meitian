@@ -35,11 +35,26 @@ pub struct StoryQuestion {
     pub answer: u32,
 }
 
+/// Chat stories: a message the learner can choose to send.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ReplyOption {
+    pub zh: String,
+    pub pinyin: String,
+    pub en: String,
+    pub tokens: Vec<Token>,
+    /// Does this reply fit the conversation?
+    pub correct: bool,
+    /// What the other person answers to it.
+    pub reaction: Option<StoryLine>,
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StoryPanel {
     pub image: Option<StoryImage>,
     pub lines: Vec<StoryLine>,
     pub question: Option<StoryQuestion>,
+    /// Chat stories: after the lines, pick what to send (empty = no choice).
+    pub reply: Vec<ReplyOption>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -91,7 +106,30 @@ struct RawQuestion {
 }
 
 #[derive(Deserialize)]
+struct RawOption {
+    zh: String,
+    #[serde(default)]
+    py: String,
+    #[serde(default)]
+    en: String,
+    #[serde(default)]
+    t: Vec<(String, String)>,
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    then: Option<RawLine>,
+}
+
+#[derive(Deserialize)]
+struct RawReply {
+    #[serde(default)]
+    options: Vec<RawOption>,
+}
+
+#[derive(Deserialize)]
 struct RawPanel {
+    #[serde(default)]
+    reply: Option<RawReply>,
     #[serde(default)]
     image: Option<RawImage>,
     #[serde(default)]
@@ -129,6 +167,19 @@ fn image(r: RawImage) -> StoryImage {
     StoryImage { url: r.url, artist: r.artist, source: r.source }
 }
 
+fn tokens(t: Vec<(String, String)>, zh: &str, py: &str) -> Vec<Token> {
+    if t.is_empty() {
+        // No tokenization in the pack: one tappable chunk.
+        vec![Token { text: zh.to_string(), pinyin: py.to_string(), word_id: None }]
+    } else {
+        t.into_iter().map(|(text, pinyin)| Token { text, pinyin, word_id: None }).collect()
+    }
+}
+
+fn line(l: RawLine) -> StoryLine {
+    StoryLine { speaker: l.who, image: l.image.map(image), tokens: tokens(l.t, &l.zh, &l.py), zh: l.zh, pinyin: l.py, en: l.en }
+}
+
 fn store() -> &'static RwLock<Vec<Story>> {
     static S: OnceLock<RwLock<Vec<Story>>> = OnceLock::new();
     S.get_or_init(|| RwLock::new(Vec::new()))
@@ -155,17 +206,19 @@ pub(crate) fn load_stories(json: &str) -> Result<u32, ContentError> {
                 .into_iter()
                 .map(|p| StoryPanel {
                     image: p.image.map(image),
-                    lines: p
-                        .lines
+                    lines: p.lines.into_iter().map(line).collect(),
+                    reply: p
+                        .reply
+                        .map(|r| r.options)
+                        .unwrap_or_default()
                         .into_iter()
-                        .map(|l| {
-                            let tokens = if l.t.is_empty() {
-                                // No tokenization in the pack: one tappable chunk per line.
-                                vec![Token { text: l.zh.clone(), pinyin: l.py.clone(), word_id: None }]
-                            } else {
-                                l.t.into_iter().map(|(text, pinyin)| Token { text, pinyin, word_id: None }).collect()
-                            };
-                            StoryLine { speaker: l.who, image: l.image.map(image), zh: l.zh, pinyin: l.py, en: l.en, tokens }
+                        .map(|o| ReplyOption {
+                            tokens: tokens(o.t, &o.zh, &o.py),
+                            zh: o.zh,
+                            pinyin: o.py,
+                            en: o.en,
+                            correct: o.ok,
+                            reaction: o.then.map(line),
                         })
                         .collect(),
                     question: p
@@ -192,10 +245,21 @@ pub(crate) fn story_count() -> u32 {
 
 fn resolve(mut s: Story) -> Story {
     let b = bank();
-    for line in s.panels.iter_mut().flat_map(|p| p.lines.iter_mut()) {
-        for t in line.tokens.iter_mut() {
+    let fill = |tokens: &mut Vec<Token>| {
+        for t in tokens.iter_mut() {
             if !t.pinyin.is_empty() {
                 t.word_id = b.by_hanzi.get(&t.text).cloned();
+            }
+        }
+    };
+    for p in s.panels.iter_mut() {
+        for l in p.lines.iter_mut() {
+            fill(&mut l.tokens);
+        }
+        for o in p.reply.iter_mut() {
+            fill(&mut o.tokens);
+            if let Some(r) = o.reaction.as_mut() {
+                fill(&mut r.tokens);
             }
         }
     }
@@ -310,5 +374,15 @@ mod daily_tests {
         assert_eq!(story_of_the_day("2026-12-01".into(), 1).unwrap().id, "a", "no daily: undated pick");
         let shelf: Vec<String> = shelf_stories("2026-11-20".into()).into_iter().map(|s| s.id).collect();
         assert!(shelf.contains(&"d1".to_string()) && !shelf.contains(&"d2".to_string()), "future dailies hidden");
+        let json2 = r#"{"stories":[{"id":"r","title":"R","level":1,"style":"chat","me":"我","panels":[{"lines":[{"who":"丽丽","zh":"你好吗？"}],
+          "reply":{"options":[{"zh":"我很好！","ok":true,"t":[["我","wǒ"],["很","hěn"],["好","hǎo"],["！",""]],"then":{"who":"丽丽","zh":"太好了！"}},
+                              {"zh":"再见。","ok":false}]}}]}]}"#;
+        load_stories(json2).unwrap();
+        let r = story_by_id("r".into()).unwrap();
+        let opts = &r.panels[0].reply;
+        assert_eq!(opts.len(), 2);
+        assert!(opts[0].correct && !opts[1].correct);
+        assert_eq!(opts[0].reaction.as_ref().unwrap().zh, "太好了！");
+        assert_eq!(opts[0].tokens.len(), 4);
     }
 }

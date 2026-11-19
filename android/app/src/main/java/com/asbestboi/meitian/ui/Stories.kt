@@ -159,15 +159,15 @@ private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () 
 
 /** Horizontal shelf of stories (Practice tab). */
 @Composable
-fun StoryShelf() {
+fun StoryShelf(chats: Boolean = false) {
     val app = LocalApp.current
     val nav = LocalNav.current
     val ctx = LocalContext.current
-    val stories = remember(ContentSync.generation, app.todayKey) { shelfStories(app.todayKey) }
+    val stories = remember(ContentSync.generation, app.todayKey, chats) { shelfStories(app.todayKey).filter { (it.style == "chat") == chats } }
     if (stories.isEmpty()) return
     val done = remember(ContentSync.generation, nav.content) { StoryProgress.done(ctx) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("stories ✦", style = street(22.sp), color = Street.c.text)
+        Text(if (chats) "chats 💬" else "stories ✦", style = street(22.sp), color = Street.c.text)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             stories.forEach { s ->
                 // daily stories are never locked; others unlock one level above yours
@@ -214,12 +214,18 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
     var confetti by remember { mutableIntStateOf(0) }
     var zoomed by remember { mutableStateOf<StoryImage?>(null) }
     var typing by remember { mutableStateOf(false) }
+    // chat stories: messages added by your replies (+ reactions) per panel, and which pictures were revealed
+    val sent = remember { androidx.compose.runtime.mutableStateMapOf<Int, List<StoryLine>>() }
+    val triedWrong = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
+    val replyDone = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
+    val revealed = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val isChat = story.style == "chat"
     LaunchedEffect(story.id) { prefetchStory(ctx, story) }
     val p = story.panels[panel]
     val linesDone = shown >= p.lines.size
-    val questionPending = linesDone && p.question != null && picked == null
+    val replyPending = linesDone && p.reply.isNotEmpty() && panel !in replyDone
+    val questionPending = replyPending || (linesDone && p.question != null && picked == null)
 
     LaunchedEffect(panel, shown) {
         val line = p.lines.getOrNull(shown - 1) ?: return@LaunchedEffect
@@ -241,9 +247,9 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
                         .clickable { english = !english }.padding(horizontal = 12.dp, vertical = 8.dp))
             }
             if (isChat) Box(Modifier.weight(1f)) {
-                ChatThread(story, panel, shown, typing, english, onImage = { zoomed = it })
+                ChatThread(story, panel, shown, sent, typing, english, revealed, onImage = { zoomed = it })
                 val q = p.question
-                if (q != null && linesDone) Box(Modifier.align(Alignment.BottomCenter)) {
+                if (q != null && linesDone && !replyPending) Box(Modifier.align(Alignment.BottomCenter)) {
                     Question(q, picked) { i ->
                         if (picked == null) {
                             picked = i
@@ -272,7 +278,35 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
                     }
                 }
             }
-            BigButton(if (!linesDone) "continue" else if (panel + 1 < story.panels.size) "next" else "finish", enabled = !questionPending) {
+            if (replyPending) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // choose what you send; a reply that doesn't fit gets a reaction and you try again
+                Text("your reply", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
+                p.reply.forEachIndexed { i, option ->
+                    val tried = i in triedWrong
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .background(if (tried) Street.c.red.copy(alpha = 0.12f) else Street.c.sky.copy(alpha = 0.14f))
+                        .clickable(enabled = !tried && !typing) {
+                            val pi = panel
+                            sent[pi] = (sent[pi] ?: emptyList()) + StoryLine(story.me, null, option.zh, option.pinyin, option.en, option.tokens)
+                            Sfx.play(Sfx.Sound.Swoosh); Speaker.say(option.zh)
+                            if (option.correct) { if (triedWrong.isEmpty()) correct++ } else triedWrong.add(i)
+                            scope.launch {
+                                option.reaction?.let { r ->
+                                    typing = true; delay(900); typing = false
+                                    sent[pi] = (sent[pi] ?: emptyList()) + r
+                                    Sfx.play(if (option.correct) Sfx.Sound.Correct else Sfx.Sound.Wrong)
+                                }
+                                if (option.correct) { replyDone.add(pi); triedWrong.clear() }
+                            }
+                        }
+                        .alpha(if (tried) 0.5f else 1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Text(option.zh, fontSize = 18.sp, color = Street.c.text,
+                            textDecoration = if (tried) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                        Text(option.pinyin, fontSize = 12.sp, color = Street.c.secondary)
+                        if (english) Text(option.en, fontSize = 12.sp, color = Street.c.secondary)
+                    }
+                }
+            } else BigButton(if (!linesDone) "continue" else if (panel + 1 < story.panels.size) "next" else "finish", enabled = !questionPending) {
                 when {
                     !linesDone && isChat -> if (!typing) scope.launch {
                         // "…" first, like a real chat
@@ -363,12 +397,14 @@ fun prefetchStory(ctx: android.content.Context, story: Story) {
 
 /** An SMS thread: earlier panels stay visible, my messages on the right, pictures inside bubbles. */
 @Composable
-private fun ChatThread(story: Story, panel: Int, shown: Int, typing: Boolean, english: Boolean, onImage: (StoryImage) -> Unit) {
+private fun ChatThread(story: Story, panel: Int, shown: Int, sent: Map<Int, List<StoryLine>>, typing: Boolean, english: Boolean,
+                       revealed: MutableList<String>, onImage: (StoryImage) -> Unit) {
     val items = buildList {
         for (pi in 0..panel) {
             val lines = story.panels[pi].lines
             val n = if (pi < panel) lines.size else minOf(shown, lines.size)
             for (i in 0 until n) add("$pi-$i" to lines[i])
+            sent[pi]?.forEachIndexed { j, l -> add("$pi-s$j" to l) }
         }
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -376,7 +412,7 @@ private fun ChatThread(story: Story, panel: Int, shown: Int, typing: Boolean, en
     androidx.compose.foundation.lazy.LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 200.dp)) {
         items(items.size, key = { items[it].first }) { idx ->
-            ChatBubble(items[idx].second, story.me, english, onImage)
+            ChatBubble(items[idx].second, story.me, english, revealed, onImage)
         }
         if (typing) item(key = "typing") {
             Text("•••", fontSize = 18.sp, color = Street.c.secondary,
@@ -388,7 +424,7 @@ private fun ChatThread(story: Story, panel: Int, shown: Int, typing: Boolean, en
 }
 
 @Composable
-private fun ChatBubble(line: StoryLine, me: String, english: Boolean, onImage: (StoryImage) -> Unit) {
+private fun ChatBubble(line: StoryLine, me: String, english: Boolean, revealed: MutableList<String>, onImage: (StoryImage) -> Unit) {
     if (line.speaker.isEmpty()) {
         Text(if (english) "${line.zh} · ${line.en}" else line.zh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Street.c.secondary,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
@@ -399,7 +435,13 @@ private fun ChatBubble(line: StoryLine, me: String, english: Boolean, onImage: (
         Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = if (mine) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (!mine) Text(line.speaker, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.pink, modifier = Modifier.padding(start = 6.dp))
             line.image?.let { img ->
-                StoryImageView(img, 170.dp, Modifier.width(230.dp).clip(RoundedCornerShape(18.dp)), fill = true, onClick = { onImage(img) })
+                // hidden until tapped: the surprise
+                val visible = img.url in revealed
+                Box(Modifier.width(230.dp).clip(RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+                    StoryImageView(img, 170.dp, if (visible) Modifier else Modifier.blur(22.dp), fill = true,
+                        onClick = { if (visible) onImage(img) else { revealed.add(img.url); Sfx.play(Sfx.Sound.Coin) } })
+                    if (!visible) Text("👀 tap to see", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
             }
             if (line.zh.isNotEmpty()) {
                 val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp)

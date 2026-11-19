@@ -20,6 +20,7 @@ struct PracticeView: View {
                     reviewHero
                     sentenceTile
                     StoryShelf()
+                    StoryShelf(chats: true)
                     if swears { sprintTile }
                     HStack(spacing: 12) {
                         gameTile("Listening", "ear.fill", Theme.skyGradient,

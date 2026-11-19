@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
@@ -459,10 +460,13 @@ private fun MatchScreen(m: Match, close: () -> Unit, celebrate: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 if (m.isHost) {
                     Text("pick a game", style = street(20.sp), color = Street.c.text)
-                    Mode.entries.forEach { mode ->
-                        Row(Modifier.fillMaxWidth().block(if (mode == Mode.Duel) Street.warm() else Street.sky()).clickable { m.hostStart(mode) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(mode.emoji, fontSize = 30.sp); HSpacer(12.dp)
-                            Column { Text(mode.title.lowercase(), style = street(22.sp), color = Color.White); Text(mode.blurb, fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f)) }
+                    Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Mode.entries.forEach { mode ->
+                            val brush = when (mode) { Mode.Duel -> Street.warm(); Mode.Blitz -> Street.sky(); Mode.Listen -> Street.jade(); Mode.Sudden -> Street.night(); Mode.Survival -> Street.pink() }
+                            Row(Modifier.fillMaxWidth().block(brush).clickable { m.hostStart(mode) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(mode.emoji, fontSize = 28.sp); HSpacer(12.dp)
+                                Column { Text(mode.title.lowercase(), style = street(20.sp), color = Color.White); Text(mode.blurb, fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f), maxLines = 2) }
+                            }
                         }
                     }
                 } else Text("${opp.name} is picking a game…", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 40.dp))
@@ -480,7 +484,7 @@ private fun MatchScreen(m: Match, close: () -> Unit, celebrate: () -> Unit) {
                     Text(if (draw) "píngjú" else if (won) "shènglì" else "shībài", color = Street.c.secondary)
                     Badge("+${m.coins} 🪙")
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (m.mode == Mode.Duel) {
+                        if (m.mode.isRounds) {
                             StatBox("${m.damageDealt}", "damage", modifier = Modifier.weight(1f))
                             StatBox(m.fastest?.let { "%.1fs".format(it / 1000.0) } ?: "–", "fastest", modifier = Modifier.weight(1f))
                         } else {
@@ -493,7 +497,7 @@ private fun MatchScreen(m: Match, close: () -> Unit, celebrate: () -> Unit) {
                     Text("Done", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.clickable(onClick = close).padding(8.dp))
                 }
             }
-            m.mode == Mode.Duel -> {
+            m.mode.isRounds -> {
                 HealthBar(opp.name, opp.avatarSymbol, m.hpOf(opp.id), Street.c.sky, opp.aura)
                 Spacer(Modifier.weight(1f))
                 m.current?.let { FastQuestion(it, m.myPick, m.lockedOut || m.phase == Match.Phase.RoundResult, m.phase == Match.Phase.RoundResult) { o -> m.pick(o) } }
@@ -525,12 +529,14 @@ private fun MatchScreen(m: Match, close: () -> Unit, celebrate: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 if (m.myDone) Text("Waiting for ${opp.name} to finish…", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.align(Alignment.CenterHorizontally))
                 else m.current?.let { FastQuestion(it, m.myPick, m.lockedOut, m.lockedOut) { o -> m.pick(o) } }
-                if (m.lockedOut) Text("Oops! 1 s penalty", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
+                if (m.mode == Mode.Survival) Text((0 until m.mode.lives).joinToString(" ") { if (it < m.lives) "❤️" else "🤍" },
+                    fontSize = 22.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+                if (m.lockedOut) Text(if (m.mode == Mode.Survival) "Ouch! -1 life" else "Oops! 1 s penalty", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
                 Spacer(Modifier.weight(1f))
             }
         }
     }
-    if (m.mode == Mode.Duel && !m.incompatible) {
+    if (m.mode.isRounds && !m.incompatible) {
         val iWon = m.roundWinner == m.me.id
         HitEffect(if (iWon) m.me.effect else opp.effect, m.hitTick,
             androidx.compose.ui.geometry.Offset(0.5f, if (iWon) 0.9f else 0.1f), androidx.compose.ui.geometry.Offset(0.5f, if (iWon) 0.1f else 0.9f),

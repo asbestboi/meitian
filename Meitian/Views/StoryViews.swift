@@ -152,17 +152,20 @@ struct FullScreenImage: View {
 
 /// Horizontal shelf of stories (Practice tab).
 struct StoryShelf: View {
+    /// true: the SMS chat stories; false: picture stories.
+    var chats = false
     @Environment(AppStore.self) private var store
     @Environment(ContentSync.self) private var content
     @State private var open: StoryRef?
 
     var body: some View {
-        let stories = content.generation >= 0 ? shelfStories(dayKey: store.todayKey) : []
+        let all = content.generation >= 0 ? shelfStories(dayKey: store.todayKey) : []
+        let stories = all.filter { ($0.style == "chat") == chats }
         if !stories.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("stories").font(.rounded(.title3, weight: .bold))
-                    Sparkle(size: 12, color: Theme.hot)
+                    Text(chats ? "chats 💬" : "stories").font(.rounded(.title3, weight: .bold))
+                    Sparkle(size: 12, color: chats ? Theme.sky : Theme.hot)
                 }
                 ScrollView(.horizontal) {
                     HStack(spacing: 14) {
@@ -266,6 +269,12 @@ struct StoryPlayer: View {
     @State private var added = false
     @State private var zoomed: ImageRef?
     @State private var typing = false
+    /// Chat stories: messages added by your replies (and the reactions), per panel.
+    @State private var sent: [Int: [StoryLine]] = [:]
+    @State private var triedWrong: Set<Int> = []
+    @State private var replyDone: Set<Int> = []
+    /// Chat pictures stay hidden until tapped (the surprise).
+    @State private var revealed: Set<String> = []
 
     private var isChat: Bool { story.style == "chat" }
     private var current: StoryPanel { story.panels[panel] }
@@ -282,11 +291,13 @@ struct StoryPlayer: View {
             let lines = story.panels[p].lines
             let n = p < panel ? lines.count : min(shown, lines.count)
             for i in 0..<n { out.append(ChatItem(id: "\(p)-\(i)", line: lines[i])) }
+            for (j, l) in (sent[p] ?? []).enumerated() { out.append(ChatItem(id: "\(p)-s\(j)", line: l)) }
         }
         return out
     }
     private var linesDone: Bool { shown >= current.lines.count }
-    private var questionPending: Bool { linesDone && current.question != nil && picked == nil }
+    private var replyPending: Bool { linesDone && !current.reply.isEmpty && !replyDone.contains(panel) }
+    private var questionPending: Bool { replyPending || (linesDone && current.question != nil && picked == nil) }
 
     var body: some View {
         ZStack {
@@ -314,7 +325,7 @@ struct StoryPlayer: View {
                                             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                                     }
                                 }
-                                if linesDone, let q = current.question { question(q).id("q") }
+                                if linesDone && !replyPending, let q = current.question { question(q).id("q") }
                             }
                             .padding(.horizontal, 20)
                             .padding(.bottom, 20)
@@ -330,6 +341,9 @@ struct StoryPlayer: View {
                             }
                         }
                         .onChange(of: typing) { _, t in if t { withAnimation(Theme.spring) { proxy.scrollTo("typing", anchor: .bottom) } } }
+                        .onChange(of: chatItems.count) { _, _ in
+                            if isChat { withAnimation(Theme.spring) { proxy.scrollTo(chatItems.last?.id ?? "", anchor: .bottom) } }
+                        }
                         .onChange(of: linesDone) { _, d in if d { withAnimation(Theme.spring) { proxy.scrollTo("q", anchor: .bottom) } } }
                     }
                     footer.padding(20)
@@ -433,12 +447,30 @@ struct StoryPlayer: View {
                             Text(line.speaker).font(.hanzi(12, weight: .bold)).foregroundStyle(Theme.hot).padding(.leading, 6)
                         }
                         if let img = line.image {
+                            let visible = revealed.contains(img.url)
                             StoryImageView(image: img, height: 170, fill: true)
                                 .frame(width: 230)
+                                .blur(radius: visible ? 0 : 22)
+                                .overlay {
+                                    if !visible {
+                                        VStack(spacing: 4) {
+                                            Image(systemName: "eye.slash.fill").font(.title2)
+                                            Text("tap to see").font(.rounded(.caption, weight: .bold))
+                                        }
+                                        .foregroundStyle(.white)
+                                        .shadow(radius: 4)
+                                    }
+                                }
                                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                .onTapGesture { zoomed = ImageRef(image: img) }
+                                .onTapGesture {
+                                    if visible { zoomed = ImageRef(image: img) }
+                                    else {
+                                        withAnimation(.easeOut(duration: 0.45)) { _ = revealed.insert(img.url) }
+                                        SFX.shared.play(.coin)
+                                    }
+                                }
                                 .accessibilityAddTraits(.isButton)
-                                .accessibilityLabel("Sent picture, tap to enlarge")
+                                .accessibilityLabel(visible ? "Sent picture, tap to enlarge" : "Hidden picture, tap to reveal")
                         }
                         if !line.zh.isEmpty {
                             VStack(alignment: .leading, spacing: 4) {
@@ -511,7 +543,77 @@ struct StoryPlayer: View {
         return Theme.card
     }
 
+    @ViewBuilder
     private var footer: some View {
+        if replyPending {
+            replyPicker
+        } else {
+            nextButton
+        }
+    }
+
+    /// Chat stories: choose what you send. A reply that doesn't fit gets a reaction and you try again.
+    private var replyPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("your reply").font(.rounded(.caption, weight: .bold)).foregroundStyle(.secondary)
+            ForEach(Array(current.reply.enumerated()), id: \.offset) { i, option in
+                let tried = triedWrong.contains(i)
+                Button { sendReply(i) } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(option.zh).font(.hanzi(18, weight: .medium))
+                        Text(option.pinyin).font(.rounded(.caption)).foregroundStyle(.secondary)
+                        if showEnglish { Text(option.en).font(.rounded(.caption)).foregroundStyle(.secondary) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(tried ? Theme.red.opacity(0.12) : Theme.sky.opacity(0.14),
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .strikethrough(tried)
+                    .opacity(tried ? 0.5 : 1)
+                }
+                .buttonStyle(PressableStyle(scale: 0.98))
+                .foregroundStyle(.primary)
+                .disabled(tried || typing)
+            }
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func sendReply(_ i: Int) {
+        let option = current.reply[i]
+        let p = panel
+        let mine = StoryLine(speaker: story.me, image: nil, zh: option.zh, pinyin: option.pinyin, en: option.en, tokens: option.tokens)
+        withAnimation(Theme.bouncy) { sent[p, default: []].append(mine) }
+        SFX.shared.play(.swoosh)
+        Speaker.shared.say(option.zh)
+        if option.correct {
+            if triedWrong.isEmpty { correct += 1 }
+        } else {
+            triedWrong.insert(i)
+        }
+        guard let reaction = option.reaction else {
+            if option.correct { finishReply(p) }
+            return
+        }
+        withAnimation(Theme.spring) { typing = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            withAnimation(Theme.bouncy) {
+                typing = false
+                sent[p, default: []].append(reaction)
+            }
+            SFX.shared.play(option.correct ? .correct : .wrong)
+            if option.correct { finishReply(p) }
+        }
+    }
+
+    private func finishReply(_ p: Int) {
+        withAnimation(Theme.spring) {
+            replyDone.insert(p)
+            triedWrong = []
+        }
+    }
+
+    private var nextButton: some View {
         BigButton(title: linesDone ? (panel + 1 < story.panels.count ? "next" : "finish") : "continue",
                   systemImage: "arrow.right", enabled: !questionPending) { advance() }
     }
@@ -561,7 +663,7 @@ struct StoryPlayer: View {
     private var results: some View {
         let ids = storyWordIds(story: story)
         let fresh = ids.compactMap(WordBank.word).filter { store.cards[$0.id] == nil && !$0.isSwear }
-        let questions = story.panels.filter { $0.question != nil }.count
+        let questions = story.panels.filter { $0.question != nil }.count + story.panels.filter { !$0.reply.isEmpty }.count
         return VStack(spacing: 18) {
             Spacer()
             StoryImageView(image: story.cover, height: 180, fill: true)

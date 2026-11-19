@@ -203,13 +203,65 @@ struct Rival: Codable, Hashable, Identifiable {
 }
 
 enum DuelMode: String, Codable, CaseIterable, Identifiable {
-    case duel, blitz
+    case duel, blitz, listen, sudden, survival
     var id: String { rawValue }
-    var title: String { self == .duel ? "Duel" : "Blitz" }
-    var emoji: String { self == .duel ? "⚔️" : "⚡️" }
+    var title: String {
+        switch self {
+        case .duel: return "Duel"
+        case .blitz: return "Blitz"
+        case .listen: return "Listen duel"
+        case .sudden: return "Sudden death"
+        case .survival: return "Survival"
+        }
+    }
+    var emoji: String {
+        switch self {
+        case .duel: return "⚔️"
+        case .blitz: return "⚡️"
+        case .listen: return "🎧"
+        case .sudden: return "☠️"
+        case .survival: return "❤️"
+        }
+    }
     var blurb: String {
-        self == .duel ? "Same question for both. First right answer hits. Knock their HP to 0!"
-                      : "45 seconds. Answer as many as you can. Most correct wins."
+        switch self {
+        case .duel: return "Same question for both. First right answer hits. Knock their HP to 0!"
+        case .blitz: return "45 seconds. Answer as many as you can. Most correct wins."
+        case .listen: return "No characters on screen: you only hear the word. First to tap it hits."
+        case .sudden: return "Three hits and you're out. Only 6 seconds per round."
+        case .survival: return "3 lives each. A wrong answer costs a life. Most correct before you run out wins."
+        }
+    }
+    /// Round-based modes share a question and deal damage; race modes run on each phone separately.
+    var isRounds: Bool { self == .duel || self == .listen || self == .sudden }
+    var isRace: Bool { !isRounds }
+    var roundSeconds: Double { self == .sudden ? 6 : 10 }
+    var raceSeconds: Int { self == .survival ? 120 : 45 }
+    var lives: Int { self == .survival ? 3 : 0 }
+    func damage(reactionMs: Int) -> Int {
+        self == .sudden ? 34 : Int(duelDamage(reactionMs: UInt32(clamping: reactionMs)))
+    }
+    var gradient: LinearGradient {
+        switch self {
+        case .duel: return Theme.warmGradient
+        case .blitz: return Theme.skyGradient
+        case .listen: return Theme.jadeGradient
+        case .sudden: return Theme.nightGradient
+        case .survival: return Theme.pinkGradient
+        }
+    }
+    /// Name on the iPhone ↔ Android wire (same as the Android enum).
+    var wireName: String {
+        switch self {
+        case .duel: return "Duel"
+        case .blitz: return "Blitz"
+        case .listen: return "Listen"
+        case .sudden: return "Sudden"
+        case .survival: return "Survival"
+        }
+    }
+    init(wireName: String) {
+        self = DuelMode.allCases.first { $0.wireName == wireName } ?? .duel
     }
 }
 

@@ -17,7 +17,13 @@ struct DuelQuestionPanel: View {
     var body: some View {
         VStack(spacing: compact ? 10 : 16) {
             Group {
-                if question.kind == .hanziToMeaning {
+                if question.kind == .listenToHanzi {
+                    VStack(spacing: 6) {
+                        SpeakButton(text: question.word.hanzi, size: compact ? 64 : 84, tint: Theme.jade)
+                        Text("listen and tap it").font(.rounded(.caption, weight: .bold)).foregroundStyle(.secondary)
+                    }
+                    .onAppear { Speaker.shared.say(question.word.hanzi) }
+                } else if question.kind == .hanziToMeaning {
                     RubyText(hanzi: question.word.hanzi, pinyin: question.word.pinyin,
                              size: compact ? 42 : (question.word.hanzi.count > 3 ? 48 : 60),
                              weight: .semibold, alignment: .center)
@@ -44,7 +50,7 @@ struct DuelQuestionPanel: View {
     private func optionButton(_ option: Word) -> some View {
         let isAnswer = option.id == question.word.id
         let isPicked = picked?.id == option.id
-        let isHanzi = question.kind == .meaningToHanzi
+        let isHanzi = question.kind != .hanziToMeaning
         let bg: Color = reveal && isAnswer ? Theme.jade.opacity(0.22)
             : isPicked && !isAnswer ? Theme.red.opacity(0.2)
             : isPicked ? Theme.jade.opacity(0.22) : Theme.card
@@ -411,7 +417,7 @@ private struct MatchScreen: View {
                 case .lobby: lobby
             case .countdown(let n): countdown(n)
             case .playing, .roundResult:
-                if match.mode == .duel { duel } else { blitz }
+                if match.mode.isRounds { duel } else { blitz }
                 case .finished: finished
                 }
             }
@@ -465,24 +471,30 @@ private struct MatchScreen: View {
             Spacer(minLength: 0)
             if match.isHost {
                 Text("Pick a game").font(.rounded(.headline, weight: .bold))
-                ForEach(DuelMode.allCases) { mode in
-                    Button { match.hostStart(mode: mode) } label: {
-                        HStack(spacing: 14) {
-                            Text(mode.emoji).font(.system(size: 34))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(mode.title).font(.rounded(.headline, weight: .heavy))
-                                Text(mode.blurb).font(.rounded(.caption)).opacity(0.9).multilineTextAlignment(.leading)
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(DuelMode.allCases) { mode in
+                            Button { match.hostStart(mode: mode) } label: {
+                                HStack(spacing: 12) {
+                                    Text(mode.emoji).font(.system(size: 30))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mode.title).font(.rounded(.headline, weight: .heavy))
+                                        Text(mode.blurb).font(.rounded(.caption)).opacity(0.9)
+                                            .multilineTextAlignment(.leading).lineLimit(2)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "play.fill")
+                                }
+                                .foregroundStyle(.white)
+                                .padding(14)
+                                .background(mode.gradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                             }
-                            Spacer(minLength: 0)
-                            Image(systemName: "play.fill")
+                            .buttonStyle(PressableStyle())
                         }
-                        .foregroundStyle(.white)
-                        .padding(16)
-                        .background(mode == .duel ? Theme.warmGradient : Theme.skyGradient,
-                                    in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     }
-                    .buttonStyle(PressableStyle())
                 }
+                .scrollIndicators(.hidden)
+                .frame(maxHeight: 380)
             } else {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -561,13 +573,24 @@ private struct MatchScreen: View {
         let opp = match.opponent!
         return VStack(spacing: 14) {
             TimelineView(.periodic(from: .now, by: 0.2)) { tl in
-                let left = max(0, match.blitzEnds.map { $0.timeIntervalSince(tl.date) } ?? Double(DuelMatch.blitzSeconds))
+                let total = Double(match.mode.raceSeconds)
+                let left = max(0, match.blitzEnds.map { $0.timeIntervalSince(tl.date) } ?? total)
                 VStack(spacing: 6) {
                     Text(match.myDone ? "Time!" : String(format: "%.0f", left.rounded(.up)))
                         .font(.system(size: 44, weight: .black, design: .rounded))
                         .foregroundStyle(left < 10 ? Theme.red : .primary)
                         .contentTransition(.numericText(countsDown: true))
-                    ProgressView(value: left, total: Double(DuelMatch.blitzSeconds)).tint(left < 10 ? Theme.red : Theme.sky)
+                    ProgressView(value: left, total: total).tint(left < 10 ? Theme.red : Theme.sky)
+                    if match.mode == .survival {
+                        HStack(spacing: 4) {
+                            ForEach(0..<match.mode.lives, id: \.self) { i in
+                                Text(i < match.lives ? "❤️" : "🤍").font(.title3)
+                                    .scaleEffect(i < match.lives ? 1 : 0.8)
+                            }
+                        }
+                        .animation(Theme.bouncy, value: match.lives)
+                        .accessibilityLabel("\(match.lives) lives left")
+                    }
                 }
             }
             HStack(spacing: 12) {
@@ -583,7 +606,7 @@ private struct MatchScreen: View {
             } else if let q = match.currentQuestion {
                 DuelQuestionPanel(question: q, picked: match.myPick, locked: match.lockedOut,
                                   reveal: match.lockedOut) { match.pick($0) }
-                Text(match.lockedOut ? "Oops! 1 s penalty" : " ")
+                Text(match.lockedOut ? (match.mode == .survival ? "Ouch! -1 life" : "Oops! 1 s penalty") : " ")
                     .font(.rounded(.headline, weight: .bold)).foregroundStyle(Theme.red)
             }
             Spacer(minLength: 0)
@@ -622,7 +645,7 @@ private struct MatchScreen: View {
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .background(Theme.gold.opacity(0.18), in: Capsule())
             HStack(spacing: 12) {
-                if match.mode == .duel {
+                if match.mode.isRounds {
                     resultStat("\(match.damageDealt)", "damage")
                     resultStat(match.fastestMs.map { String(format: "%.1fs", Double($0) / 1000) } ?? "–", "fastest")
                 } else {

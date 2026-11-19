@@ -512,7 +512,13 @@ fun FastQuestion(q: Question, picked: CoreWord?, locked: Boolean, reveal: Boolea
     val app = LocalApp.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.fillMaxWidth().heightIn(min = if (compact) 70.dp else 110.dp).card().padding(10.dp), contentAlignment = Alignment.Center) {
-            if (q.kind == Kind.HanziToMeaning) RubyText(q.word.hanzi, q.word.pinyin, if (compact) 38.sp else 54.sp, FontWeight.SemiBold, center = true)
+            if (q.kind == Kind.Listen) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // listening duel: no characters, just the sound
+                LaunchedEffect(q.id) { Speaker.say(q.word.hanzi) }
+                SpeakButton(q.word.hanzi, if (compact) 64.dp else 84.dp, Street.c.jade)
+                Text("listen and tap it", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
+            }
+            else if (q.kind == Kind.HanziToMeaning) RubyText(q.word.hanzi, q.word.pinyin, if (compact) 38.sp else 54.sp, FontWeight.SemiBold, center = true)
             else Text("“${q.word.shortMeaning}”", style = street(if (compact) 24.sp else 30.sp), color = Street.c.text, textAlign = TextAlign.Center)
         }
         q.options.chunked(2).forEach { row ->
@@ -521,7 +527,7 @@ fun FastQuestion(q: Question, picked: CoreWord?, locked: Boolean, reveal: Boolea
                     val isAnswer = o.id == q.word.id
                     val isPicked = picked?.id == o.id
                     val bg = when { reveal && isAnswer -> Street.c.jade.copy(alpha = 0.25f); isPicked && !isAnswer -> Street.c.red.copy(alpha = 0.22f); isPicked -> Street.c.jade.copy(alpha = 0.25f); else -> Street.c.card }
-                    val isHanzi = q.kind == Kind.MeaningToHanzi
+                    val isHanzi = q.kind != Kind.HanziToMeaning
                     Column(
                         Modifier.weight(1f).heightIn(min = if (compact) 54.dp else 66.dp).streetCard(bg, Street.c.ink, shadow = 3.dp)
                             .graphicsLayer { alpha = if (locked && !isPicked && !(reveal && isAnswer)) 0.45f else 1f }

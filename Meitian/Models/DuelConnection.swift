@@ -12,7 +12,8 @@ struct WireQuestion: Codable, Hashable {
         guard let w = WordBank.word(wordId) else { return nil }
         let opts = options.compactMap(WordBank.word)
         guard opts.count == options.count else { return nil }
-        return QuizQuestion(word: w, kind: kind == 0 ? .hanziToMeaning : .meaningToHanzi, options: opts)
+        let k: QuizQuestion.Kind = kind == 0 ? .hanziToMeaning : kind == 2 ? .listenToHanzi : .meaningToHanzi
+        return QuizQuestion(word: w, kind: k, options: opts)
     }
 
     /// Built by the shared Rust core.
@@ -63,8 +64,8 @@ enum DuelQR {
 /// The battle protocol as plain JSON, identical to the Android app's messages. Used on the
 /// iPhone ↔ Android Wi‑Fi link (iPhone ↔ iPhone keeps Multipeer with Swift's own encoding).
 enum CanonicalWire {
-    private static func modeName(_ m: DuelMode) -> String { m == .duel ? "Duel" : "Blitz" }
-    private static func mode(_ s: Any?) -> DuelMode { (s as? String) == "Blitz" ? .blitz : .duel }
+    private static func modeName(_ m: DuelMode) -> String { m.wireName }
+    private static func mode(_ s: Any?) -> DuelMode { DuelMode(wireName: s as? String ?? "") }
 
     private static func questions(_ q: [WireQuestion]) -> [[String: Any]] {
         q.map { ["w": $0.wordId, "k": $0.kind, "o": $0.options] }
