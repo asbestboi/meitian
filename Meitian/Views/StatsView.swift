@@ -9,6 +9,7 @@ struct StatsView: View {
     @State private var retake = false
     @State private var levelTest = false
     @State private var confirmReset = false
+    @State private var showSettings = false
     @State private var reminderTime = Date.now
     @AppStorage(PinyinPrefs.show) private var showPinyin = true
     @AppStorage(PinyinPrefs.toneColors) private var toneColors = true
@@ -34,17 +35,20 @@ struct StatsView: View {
                     }
                     calendar
                     levels
-                    pinyinSettings
-                    exerciseSettings
-                    contentSettings
-                    settings
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 30)
+                .padding(.bottom, 32)
             }
             .background(Theme.background.ignoresSafeArea())
             .scrollIndicators(.hidden)
-            .navigationTitle("Progress")
+            .navigationTitle("Profile")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showSettings = true } label: { Image(systemName: "gearshape.fill") }
+                        .accessibilityLabel("Settings")
+                }
+            }
+            .navigationDestination(isPresented: $showSettings) { settingsPage }
         }
         .fullScreenCover(isPresented: $levelTest) {
             LevelTestView(level: store.currentLevel).environment(store)
@@ -57,6 +61,24 @@ struct StatsView: View {
             reminderTime = Calendar.current.date(from: DateComponents(hour: store.profile.reminderHour,
                                                                       minute: store.profile.reminderMinute)) ?? .now
         }
+    }
+
+    /// Everything adjustable, out of the way of the progress overview.
+    private var settingsPage: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                settings
+                pinyinSettings
+                exerciseSettings
+                contentSettings
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 32)
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .scrollIndicators(.hidden)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var levelCard: some View {

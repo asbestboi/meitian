@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -61,14 +62,88 @@ enum class WordStatus(val label: String) { All("all"), Learned("learned"), Weak(
 fun PracticeScreen() {
     val app = LocalApp.current
     val nav = LocalNav.current
+    val learned = app.learnedWords
+    val due = app.dueWords.size
+    val weak = app.weakWords(12)
+    val sentenceCount = ContentSync.stats.sentences.toInt()
+    val challengeDone = app.today.challenge != null
+
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item { ScreenTitle("Practice") }
+        item {
+            Column(Modifier.fillMaxWidth().block(Street.sky()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (due > 0) "$due DUE FOR REVIEW" else "ALL CAUGHT UP ✨", style = street(26.sp), color = Color.White)
+                Text(if (due > 0) "Spaced repetition: review right before you'd forget." else "Come back tomorrow, or pick a mode below. ${app.masteredCount} mastered.",
+                    color = Color.White.copy(alpha = 0.9f))
+                if (due > 0) BigButton("Start review") { nav.show { PracticeSession(PracticeMode.Review) { nav.close() } } }
+            }
+        }
+        item { Text("practice", style = street(22.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp)) }
+        item {
+            // every mode as the same kind of tile, two per row
+            val tiles = buildList {
+                add(ModeTile("⚡", "weak words", if (weak.size >= 4) "${weak.size} to fix" else "none yet", weak.size >= 4) {
+                    nav.show { PracticeSession(PracticeMode.Weak) { nav.close() } } })
+                add(ModeTile("💬", "sentences", if (sentenceCount > 0) "build & translate" else "downloading…", sentenceCount > 0) {
+                    nav.show { SentenceSession { nav.close() } } })
+                add(ModeTile("🎧", "listening", "10 questions", learned.isNotEmpty() && app.settings.listening) {
+                    nav.show { PracticeSession(PracticeMode.Listening) { nav.close() } } })
+                add(ModeTile("🎙️", "speaking", "10 questions", learned.isNotEmpty() && app.settings.speaking) {
+                    nav.show { PracticeSession(PracticeMode.Speaking) { nav.close() } } })
+                add(ModeTile("🔀", "speed mix", "everything, fast", learned.isNotEmpty()) {
+                    nav.show { PracticeSession(PracticeMode.Mixed) { nav.close() } } })
+                add(ModeTile(if (challengeDone) "🏆" else "🗣️", "friend challenge", if (challengeDone) "done today ✓" else "use a word for real", true) {
+                    nav.show { Column(Modifier.fillMaxSize()) { Row(Modifier.padding(16.dp)) { CloseButton { nav.close() } }; ChallengeScreen() } } })
+                if (app.settings.swears) add(ModeTile("🤬", "swear sprint", "60 s rapid fire · 18+", true) {
+                    nav.show { SwearSprint { nav.close() } } })
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                tiles.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        pair.forEach { t -> ModeTileView(t, learned.isEmpty(), Modifier.weight(1f)) }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        item { Text("read", style = street(22.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp)) }
+        item { StoryHub() }
+        item { StoryHub(chats = true) }
+        item {
+            Row(Modifier.fillMaxWidth().card().clickable { nav.show { WordLibrary { nav.close() } } }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("📚", fontSize = 32.sp); HSpacer(16.dp)
+                Column(Modifier.weight(1f)) {
+                    Text("my words", style = street(18.sp), color = Street.c.text)
+                    Text("${app.cards.size} learned · search the whole HSK list", fontSize = 13.sp, color = Street.c.secondary)
+                }
+                Text("›", style = street(28.sp), color = Street.c.secondary)
+            }
+        }
+        item { Gap(32.dp) }
+    }
+}
+
+private class ModeTile(val emoji: String, val title: String, val subtitle: String, val enabled: Boolean, val open: () -> Unit)
+
+@Composable
+private fun ModeTileView(t: ModeTile, noWords: Boolean, modifier: Modifier) {
+    Column(modifier.card().clickable(enabled = t.enabled, onClick = t.open).padding(16.dp)
+        .graphicsLayer { alpha = if (t.enabled) 1f else 0.45f }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(t.emoji, fontSize = 30.sp)
+        Text(t.title, style = street(16.sp), color = Street.c.text)
+        Text(if (!t.enabled && noWords) "learn words first" else t.subtitle, fontSize = 12.sp, color = Street.c.secondary, maxLines = 1)
+    }
+}
+
+/** Search and browse every word, with how the learner is doing on each. */
+@Composable
+fun WordLibrary(close: () -> Unit) {
+    val app = LocalApp.current
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf(WordStatus.All) }
     var detail by remember { mutableStateOf<CoreWord?>(null) }
-    val learned = app.learnedWords
-    val due = app.dueWords.size
-
-    val weak = app.weakWords(12)
     val shown = remember(search, filter, status, app.settings.swears, Words.all.size, app.cards.toMap()) {
         val q = search.trim().lowercase()
         val weakIds = if (status == WordStatus.Weak) app.weakWords(200).map { it.id }.toSet() else emptySet()
@@ -87,68 +162,14 @@ fun PracticeScreen() {
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { ScreenTitle("Practice") }
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().block(Street.sky()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (due > 0) "$due DUE FOR REVIEW" else "ALL CAUGHT UP ✨", style = street(26.sp), color = Color.White)
-                Text(if (due > 0) "Spaced repetition: review right before you'd forget." else "Come back tomorrow, or play a game below. ${app.masteredCount} mastered.",
-                    color = Color.White.copy(alpha = 0.9f))
-                if (due > 0) BigButton("Start review") { nav.show { PracticeSession(PracticeMode.Review) { nav.close() } } }
+            Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CloseButton(close); HSpacer(12.dp)
+                Text("my words", style = street(24.sp), color = Street.c.text)
             }
         }
         item {
-            val count = ContentSync.stats.sentences.toInt()
-            Row(Modifier.fillMaxWidth().card().clickable(enabled = count > 0) { nav.show { SentenceSession { nav.close() } } }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("💬", fontSize = 38.sp); HSpacer(12.dp)
-                Column(Modifier.weight(1f)) {
-                    Text("sentences", style = street(24.sp), color = Street.c.text)
-                    Text(if (count > 0) "Build, fill and translate real sentences at your level." else "Downloading sentence lessons… needs internet once.",
-                        fontSize = 13.sp, color = Street.c.secondary)
-                }
-                Text("›", style = street(28.sp), color = Street.c.secondary)
-            }
-        }
-        if (weak.size >= 4) item {
-            Row(Modifier.fillMaxWidth().card().clickable { nav.show { PracticeSession(PracticeMode.Weak) { nav.close() } } }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("⚡", fontSize = 36.sp); HSpacer(12.dp)
-                Column(Modifier.weight(1f)) {
-                    Text("weak words", style = street(24.sp), color = Street.c.text)
-                    Text(weak.take(5).joinToString(" · ") { it.hanzi } + " — the ones you miss most", fontSize = 13.sp, color = Street.c.secondary, maxLines = 1)
-                }
-                Text("›", style = street(28.sp), color = Street.c.secondary)
-            }
-        }
-        item { StoryHub() }
-        item { StoryHub(chats = true) }
-        if (app.settings.swears) item {
-            Row(Modifier.fillMaxWidth().block(Street.ink()).clickable { nav.show { SwearSprint { nav.close() } } }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("🤬", fontSize = 42.sp); HSpacer(12.dp)
-                Column(Modifier.weight(1f)) {
-                    Text("swear sprint", style = street(30.sp), color = Color.White)
-                    Text("Learn street Chinese fast: flip cards, then 60 s of rapid fire. Combos multiply.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
-                }
-                Pill("18+", Street.c.pink, 6f)
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf(Triple("👂", PracticeMode.Listening, app.settings.listening), Triple("🎙️", PracticeMode.Speaking, app.settings.speaking),
-                    Triple("⚡", PracticeMode.Mixed, true)).forEach { (icon, mode, on) ->
-                    val enabled = on && learned.isNotEmpty()
-                    Column(Modifier.weight(1f).card().clickable(enabled = enabled) { nav.show { PracticeSession(mode) { nav.close() } } }.padding(12.dp)) {
-                        GradientIcon(icon, when (mode) { PracticeMode.Listening -> Street.sky(); PracticeMode.Speaking -> Street.pink(); else -> Street.gold() })
-                        Gap(8.dp)
-                        Text(mode.title.lowercase(), style = street(16.sp), color = Street.c.text)
-                        Text(if (enabled) "10 questions" else "Learn words first", fontSize = 11.sp, color = Street.c.secondary)
-                    }
-                }
-            }
-        }
-        item {
-            Text("word library", style = street(24.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp))
             OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search hanzi, pinyin or English") }, singleLine = true)
             Gap(8.dp)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -192,7 +213,7 @@ fun PracticeScreen() {
                 Text(if (c == null) "·" else if (c.mastered) "👑" else "✅")
             }
         }
-        item { Gap(30.dp) }
+        item { Gap(32.dp) }
     }
     detail?.let { w -> WordDetail(w) { detail = null } }
 }

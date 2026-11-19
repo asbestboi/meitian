@@ -1,285 +1,375 @@
 import SwiftUI
 
+/// Learn tab: one winding path through the current HSK level (Duolingo-style map). Lessons, a story
+/// checkpoint after every unit, the level-up test at the end. One big button always says what's next.
 struct TodayView: View {
     @Environment(AppStore.self) private var store
-    var goToChallenge: () -> Void
+    @Environment(ArenaStore.self) private var arena
     var goToPractice: () -> Void
-    @AppStorage(PinyinPrefs.show) private var showPinyin = true
 
-    @State private var words: [Word] = []
-    /// After today's words: the next lesson, as many as the learner wants.
-    @State private var nextWords: [Word] = []
     @State private var lessonWords: [Word] = []
-    @State private var testLevel: LevelRef?
     @State private var learning = false
-    @State private var appeared = false
+    @State private var testLevel: LevelRef?
+    @State private var story: StoryRef?
+    @State private var storyUnit = 0
+    @State private var storyId = ""
+    @State private var goals = false
+    @State private var hint: String?
+    @State private var hintTick = 0
+
+    var body: some View {
+        let units = store.learnPath
+        let next = units.flatMap(\.nodes).first(where: \.next)
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if let saved = store.freezeNotice { freezeBanner(saved) }
+                        ForEach(units, id: \.number) { unit in
+                            unitHeader(unit)
+                            ForEach(Array(unit.nodes.enumerated()), id: \.offset) { i, node in
+                                PathNodeButton(node: node, level: store.currentLevel,
+                                               swing: pathSwing(index: UInt32(i))) { tap(node) }
+                                    .id(nodeId(node))
+                            }
+                        }
+                        Text("HSK \(store.currentLevel + 1) unlocks after the test ✦")
+                            .font(.rounded(.footnote, weight: .semibold)).foregroundStyle(.secondary)
+                            .padding(.vertical, 32)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .scrollIndicators(.hidden)
+                .onAppear {
+                    if let next { proxy.scrollTo(nodeId(next), anchor: .center) }
+                }
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .safeAreaInset(edge: .top, spacing: 0) { topBar }
+            .safeAreaInset(edge: .bottom, spacing: 0) { startBar(next) }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .fullScreenCover(isPresented: $learning) {
+            LearnSession(words: lessonWords).environment(store)
+        }
+        .fullScreenCover(item: $testLevel) { ref in
+            LevelTestView(level: ref.level, onPracticeWeak: goToPractice).environment(store)
+        }
+        .fullScreenCover(item: $story, onDismiss: storyClosed) { ref in
+            StoryPlayer(story: ref.story).environment(store)
+        }
+        .sheet(isPresented: $goals) {
+            GoalsSheet()
+                .environment(store).environment(arena)
+                .presentationDetents([.large])
+                .presentationCornerRadius(32)
+        }
+        .sensoryFeedback(.warning, trigger: hintTick)
+    }
+
+    private func nodeId(_ n: PathNode) -> String { "\(n.unit)-\(n.kind)-\(n.number)" }
+
+    // MARK: actions
+
+    private func tap(_ node: PathNode) {
+        switch (node.kind, node.state) {
+        case (_, .locked):
+            switch node.kind {
+            case .lesson: show("finish the lessons before this one first")
+            case .story: show("finish unit \(node.unit) to open its story")
+            case .test: show("learn every lesson to unlock the test")
+            }
+        case (.lesson, .done):
+            start(store.lessonWords(Int(node.number)))
+        case (.lesson, .open):
+            start(store.nextUpWords())
+        case (.story, _):
+            openStory(unit: Int(node.unit), done: node.state == .done)
+        case (.test, _):
+            if store.canLevelUp { testLevel = LevelRef(level: store.currentLevel) }
+            else { show("you've reached the highest level 🐉") }
+        }
+    }
+
+    private func start(_ words: [Word]) {
+        guard !words.isEmpty else { return }
+        lessonWords = words
+        learning = true
+    }
+
+    /// Odd units get a picture story, even units an SMS chat.
+    private func openStory(unit: Int, done: Bool) {
+        let chat = unit % 2 == 0
+        if let s = StoryProgress.next(chat: chat, dayKey: store.todayKey, level: store.currentLevel)
+            ?? StoryProgress.next(chat: !chat, dayKey: store.todayKey, level: store.currentLevel) {
+            ImagePrefetch.run(s)
+            storyUnit = done ? 0 : unit
+            storyId = s.id
+            story = StoryRef(story: s)
+        } else if !done {
+            // nothing new to read right now: the checkpoint becomes a treasure chest
+            store.finishPathStory(unit: unit)
+            show("🎁 chest opened · +20 XP")
+        } else {
+            show("you've read every story at this level")
+        }
+    }
+
+    private func storyClosed() {
+        guard storyUnit > 0 else { return }
+        // finishing the story (it lands in the reading history) completes the checkpoint
+        if StoryProgress.isRead(storyId) {
+            store.finishPathStory(unit: storyUnit)
+        }
+        storyUnit = 0
+    }
+
+    private func show(_ text: String) {
+        hintTick += 1
+        withAnimation(Theme.spring) { hint = text }
+        let tick = hintTick
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            if tick == hintTick { withAnimation(Theme.spring) { hint = nil } }
+        }
+    }
+
+    // MARK: pieces
+
+    private var topBar: some View {
+        let claimable = store.quests.filter { $0.done && !store.isClaimed($0.quest) }.count
+        let questsDone = store.quests.filter(\.done).count
+        return HStack(spacing: 8) {
+            Text("HSK \(store.currentLevel)")
+                .font(.rounded(.subheadline, weight: .heavy))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Theme.levelColor(store.currentLevel).opacity(0.16), in: Capsule())
+                .foregroundStyle(Theme.levelColor(store.currentLevel))
+            Spacer()
+            StreakBadge(streak: store.streak)
+            Button { goals = true } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "bolt.fill").foregroundStyle(Theme.gold)
+                    Text("\(max(store.today.xp, 0))").font(.rounded(.headline, weight: .heavy))
+                        .contentTransition(.numericText())
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Theme.card, in: Capsule())
+            }
+            .accessibilityLabel("XP today and daily goals")
+            Button { goals = true } label: {
+                HStack(spacing: 4) {
+                    Text("🎯")
+                    Text("\(questsDone)/\(store.quests.count)").font(.rounded(.headline, weight: .heavy))
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Theme.card, in: Capsule())
+                .overlay(alignment: .topTrailing) {
+                    if claimable > 0 {
+                        Circle().fill(Theme.red).frame(width: 10, height: 10).offset(x: 2, y: -2)
+                    }
+                }
+            }
+            .accessibilityLabel("Daily quests, \(questsDone) of \(store.quests.count) done")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Theme.background.opacity(0.94))
+    }
+
+    private func unitHeader(_ unit: PathUnit) -> some View {
+        let done = unit.nodes.allSatisfy { $0.state == .done || $0.kind == .test }
+        return HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("unit \(unit.number)").font(.rounded(.title3, weight: .heavy))
+                Text("HSK \(store.currentLevel) · lessons \(unit.firstLesson)–\(unit.lastLesson)")
+                    .font(.rounded(.subheadline, weight: .semibold)).opacity(0.85)
+            }
+            Spacer()
+            if done { Image(systemName: "checkmark.seal.fill").font(.title2) }
+        }
+        .foregroundStyle(.white)
+        .padding(16)
+        .background(Theme.levelGradient(store.currentLevel),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.top, unit.number == 1 ? 8 : 32)
+        .padding(.bottom, 16)
+    }
+
+    private func freezeBanner(_ saved: Int) -> some View {
+        HStack(spacing: 12) {
+            Text("🧊").font(.title2)
+            Text("A streak freeze saved your \(saved)-day streak!").font(.rounded(.subheadline, weight: .bold))
+            Spacer(minLength: 0)
+            Button { withAnimation(Theme.spring) { store.freezeNotice = nil } } label: {
+                Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 32, height: 32)
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(Theme.sky.opacity(0.15), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.top, 8)
+    }
+
+    /// The one primary action, in the thumb zone.
+    private func startBar(_ next: PathNode?) -> some View {
+        VStack(spacing: 8) {
+            if let hint {
+                Text(hint).font(.rounded(.subheadline, weight: .bold))
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Theme.ink, in: Capsule())
+                    .foregroundStyle(Theme.background)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let next {
+                Button { tap(next) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(startTitle(next)).font(.rounded(.headline, weight: .heavy))
+                            Text(startSubtitle(next)).font(.rounded(.caption, weight: .semibold)).opacity(0.7)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.right").font(.headline.weight(.heavy))
+                    }
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.limeGradient, in: Capsule())
+                    .shadow(color: Theme.lime.opacity(0.35), radius: 16, y: 6)
+                }
+                .buttonStyle(PressableStyle(scale: 0.97))
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+    }
+
+    private func startTitle(_ n: PathNode) -> String {
+        switch n.kind {
+        case .test: return "take the HSK \(store.currentLevel) test"
+        case .story: return "read the unit \(n.unit) story"
+        case .lesson: return store.today.learnedDone ? "start lesson \(n.number)" : "learn today's words"
+        }
+    }
+
+    private func startSubtitle(_ n: PathNode) -> String {
+        switch n.kind {
+        case .test: return "pass with 80% to unlock HSK \(store.currentLevel + 1)"
+        case .story: return "+20 XP"
+        case .lesson: return "unit \(n.unit) · lesson \(n.number) · \(store.profile.dailyGoal) new words"
+        }
+    }
+}
+
+/// One stop on the path: a chunky round button with a darker base (pressable depth).
+struct PathNodeButton: View {
+    let node: PathNode
+    let level: Int
+    /// -1…1 sideways position.
+    let swing: Double
+    let action: () -> Void
+    @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var size: CGFloat { node.kind == .lesson ? 72 : 84 }
+
+    private var color: Color {
+        switch node.state {
+        case .locked: return Color.secondary.opacity(0.22)
+        case .done, .open: return node.kind == .test ? Theme.gold : (node.kind == .story ? Theme.hot : Theme.levelColor(level))
+        }
+    }
+
+    private var icon: String {
+        switch (node.kind, node.state) {
+        case (.lesson, .done): return "checkmark"
+        case (.lesson, _): return node.state == .locked ? "lock.fill" : "star.fill"
+        case (.story, .done): return "book.closed.fill"
+        case (.story, _): return "book.fill"
+        case (.test, _): return "trophy.fill"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(color).brightness(-0.18).offset(y: 6)
+                Circle().fill(color)
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.38, weight: .heavy))
+                    .foregroundStyle(node.state == .locked ? Color.secondary : Color.white)
+            }
+            .frame(width: size, height: size)
+            .background {
+                if node.next {
+                    Circle().stroke(color.opacity(0.35), lineWidth: 6)
+                        .frame(width: size + 18, height: size + 18)
+                        .scaleEffect(pulse ? 1.08 : 0.96)
+                }
+            }
+        }
+        .buttonStyle(PressableStyle(scale: 0.92))
+        .overlay(alignment: .top) {
+            if node.next {
+                Text(node.kind == .test ? "TEST" : "START")
+                    .font(.rounded(.caption, weight: .heavy))
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Theme.card, in: Capsule())
+                    .shadow(color: .black.opacity(0.1), radius: 8, y: 3)
+                    .foregroundStyle(color)
+                    .offset(y: pulse ? -44 : -40)
+                    .fixedSize()
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if node.kind != .lesson {
+                Text(node.kind == .test ? "level-up test" : "story")
+                    .font(.rounded(.caption, weight: .bold)).foregroundStyle(.secondary)
+                    .offset(y: 28).fixedSize()
+            }
+        }
+        .offset(x: CGFloat(swing) * 72)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, node.kind == .lesson ? 10 : 22)
+        .onAppear {
+            guard node.next, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .accessibilityLabel(accessibility)
+    }
+
+    private var accessibility: String {
+        let what = switch node.kind {
+        case .lesson: "Lesson \(node.number)"
+        case .story: "Unit \(node.unit) story"
+        case .test: "HSK \(level) test"
+        }
+        let state = switch node.state {
+        case .done: "done"
+        case .open: "open"
+        case .locked: "locked"
+        }
+        return "\(what), \(state)"
+    }
+}
+
+/// Today's milestones and quests (from the top bar).
+struct GoalsSheet: View {
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header
+                VStack(spacing: 16) {
                     MilestoneCard()
-                    LevelTestCard(onStart: { testLevel = LevelRef(level: $0) })
-                    wordsCard
                     QuestCard()
-                    StoryOfTheDayCard()
-                    challengeCard
-                    reviewCard
-                    phraseOfTheDay
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 30)
+                .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
-            .scrollIndicators(.hidden)
-        }
-        .onAppear {
-            reloadWords()
-            withAnimation(reduceMotion ? nil : Theme.bouncy.delay(0.05)) { appeared = true }
-        }
-        .onChange(of: store.todayKey) { _, _ in reloadWords() }
-        .onChange(of: store.profile.dailyGoal) { _, _ in reloadWords() }
-        .fullScreenCover(isPresented: $learning, onDismiss: reloadWords) {
-            LearnSession(words: lessonWords).environment(store)
-        }
-        .fullScreenCover(item: $testLevel, onDismiss: reloadWords) { ref in
-            LevelTestView(level: ref.level, onPracticeWeak: goToPractice).environment(store)
-        }
-    }
-
-    private func reloadWords() {
-        words = store.todaysWords()
-        nextWords = store.nextLessonWords()
-    }
-
-    private func start(_ batch: [Word]) {
-        lessonWords = batch
-        learning = true
-    }
-
-    private var greeting: (hanzi: String, pinyin: String, english: String) {
-        let h = Calendar.current.component(.hour, from: .now)
-        if h < 11 { return ("早上好", "Zǎoshang hǎo", "Good morning") }
-        if h < 14 { return ("中午好", "Zhōngwǔ hǎo", "Good noon") }
-        if h < 18 { return ("下午好", "Xiàwǔ hǎo", "Good afternoon") }
-        return ("晚上好", "Wǎnshang hǎo", "Good evening")
-    }
-
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(Date.now.formatted(.dateTime.weekday(.wide).month().day()).lowercased())
-                        .font(.rounded(.subheadline, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Sparkle(size: 12)
-                }
-                Text("\(greeting.hanzi)，\(store.profile.name)")
-                    .font(.hanzi(32, weight: .heavy))
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                HStack(spacing: 6) {
-                    PinyinText(pinyin: greeting.pinyin, font: .rounded(.subheadline, weight: .bold))
-                    Text("· \(greeting.english.lowercased())").font(.rounded(.subheadline)).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            HStack(spacing: 6) {
-                StreakBadge(streak: store.streak)
-                XPBadge(xp: store.xp)
+            .navigationTitle("today's goals")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
-        .padding(.top, 12)
-    }
-
-    @ViewBuilder
-    private var wordsCard: some View {
-        if store.today.learnedDone && !nextWords.isEmpty {
-            nextLessonCard
-        } else {
-            todaysWordsCard
-        }
-    }
-
-    /// Duolingo-style: once the day's words are in, the next lesson on the path is right there.
-    private var nextLessonCard: some View {
-        let path = store.lessonPath
-        let extra = store.today.lessons ?? 0
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("keep going ✦").font(.rounded(.title2, weight: .heavy))
-                    Text("HSK \(store.currentLevel) · lesson \(path.lesson) of \(path.lessons)")
-                        .font(.rounded(.subheadline, weight: .semibold)).opacity(0.7)
-                }
-                Spacer()
-                if extra > 0 {
-                    Text("+\(extra) today").font(.rounded(.subheadline, weight: .heavy)).foregroundStyle(Theme.lime)
-                }
-            }
-            .foregroundStyle(.white)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.12))
-                    Capsule().fill(Theme.limeGradient).frame(width: max(8, geo.size.width * CGFloat(path.progress)))
-                }
-            }
-            .frame(height: 8)
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(nextWords) { w in
-                        Text(w.hanzi).font(.hanzi(24, weight: .semibold))
-                            .frame(minWidth: 48)
-                            .padding(.vertical, 10).padding(.horizontal, 6)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            Button { start(nextWords) } label: {
-                HStack {
-                    Text("start lesson \(path.lesson)")
-                    Spacer()
-                    Image(systemName: "arrow.right")
-                }
-                .font(.rounded(.headline, weight: .bold))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 22).padding(.vertical, 17)
-                .background(Color(red: 0.78, green: 1.0, blue: 0.24), in: Capsule())
-            }
-            .buttonStyle(PressableStyle())
-            Button { start(words) } label: {
-                Label("practice today's words again", systemImage: "arrow.clockwise")
-                    .font(.rounded(.subheadline, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .streetBlock(Theme.nightGradient)
-    }
-
-    private var todaysWordsCard: some View {
-        let done = store.today.learnedDone
-        return VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(done ? "today's words ✓" : "today's words")
-                    .font(.rounded(.title2, weight: .heavy))
-                Spacer()
-                Text("\(words.count)")
-                    .font(.rounded(.title2, weight: .heavy))
-                    .foregroundStyle(Theme.lime)
-                    .contentTransition(.numericText())
-            }
-            .foregroundStyle(.white)
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    ForEach(Array(words.enumerated()), id: \.element.id) { i, w in
-                        VStack(spacing: 4) {
-                            Text(w.hanzi).font(.hanzi(30, weight: .semibold))
-                            if done || showPinyin {
-                                PinyinText(pinyin: w.pinyin, font: .rounded(.caption, weight: .bold))
-                            } else {
-                                Text("?").font(.rounded(.caption, weight: .semibold)).opacity(0.5)
-                            }
-                        }
-                        .frame(minWidth: 66)
-                        .padding(.vertical, 14).padding(.horizontal, 10)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .foregroundStyle(.white)
-                        // cards drop in one after another
-                        .offset(y: appeared ? 0 : 24)
-                        .opacity(appeared ? 1 : 0)
-                        .animation(reduceMotion ? nil : Theme.bouncy.delay(0.05 * Double(i)), value: appeared)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            .environment(\.colorScheme, .dark)
-            Button { start(words) } label: {
-                HStack {
-                    Text(done ? "practice them again" : "learn today's words")
-                    Spacer()
-                    Image(systemName: done ? "arrow.clockwise" : "arrow.right")
-                }
-                .font(.rounded(.headline, weight: .bold))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 22).padding(.vertical, 17)
-                .background(done ? Theme.jade : Color(red: 0.78, green: 1.0, blue: 0.24), in: Capsule())
-            }
-            .buttonStyle(PressableStyle())
-        }
-        .streetBlock(Theme.nightGradient)
-    }
-
-    private var challengeCard: some View {
-        let done = store.today.challenge != nil
-        let challenge = Challenge.make(dayKey: store.todayKey, words: words, friend: store.profile.preferredFriend)
-        return Button(action: goToChallenge) {
-            HStack(spacing: 16) {
-                Text(done ? "🏆" : store.profile.preferredFriend.emoji)
-                    .font(.system(size: 38))
-                    .frame(width: 64, height: 64)
-                    .background(Theme.gold.opacity(0.18), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(done ? "Challenge complete!" : "Today's friend challenge")
-                        .font(.rounded(.headline, weight: .bold))
-                    Text(done ? "+50 XP earned. 你真棒！" : (challenge?.mission ?? "Learn today's words first."))
-                        .font(.rounded(.subheadline))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(.primary)
-            .cardSurface(padding: 16)
-        }
-        .buttonStyle(PressableStyle(scale: 0.98))
-    }
-
-    private var reviewCard: some View {
-        let due = store.dueWords.count
-        return Button(action: goToPractice) {
-            HStack(spacing: 16) {
-                Image(systemName: "rectangle.stack.fill")
-                    .font(.title)
-                    .foregroundStyle(Theme.sky)
-                    .frame(width: 64, height: 64)
-                    .background(Theme.sky.opacity(0.15), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(due > 0 ? "\(due) words to review" : "Reviews all caught up")
-                        .font(.rounded(.headline, weight: .bold))
-                    Text(due > 0 ? "Keep them fresh before they fade." : "\(store.learnedWords.count) words learned so far.")
-                        .font(.rounded(.subheadline)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(.primary)
-            .cardSurface(padding: 16)
-        }
-        .buttonStyle(PressableStyle(scale: 0.98))
-    }
-
-    private var phraseOfTheDay: some View {
-        let c = Meitian.phraseOfTheDay(dayKey: store.todayKey)
-        let p = (c.hanzi, c.pinyin, c.meaning)
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Phrase of the day").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    RubyText(hanzi: p.0, pinyin: p.1, size: 30, weight: .bold, alwaysShow: true)
-                    Text(p.2).font(.rounded(.subheadline))
-                }
-                Spacer()
-                SpeakButton(text: p.0)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
     }
 }
 
@@ -365,7 +455,7 @@ struct LearnSession: View {
                 stat("\(store.streak)", "day streak", Theme.red)
             }
             Spacer()
-            Text("Now try today's challenge: use one of these words with a friend!")
+            Text("Nice! The next lesson is waiting on your path.")
                 .font(.rounded(.subheadline))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

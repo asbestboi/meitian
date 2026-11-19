@@ -42,14 +42,13 @@ import kotlinx.coroutines.launch
 import com.asbestboi.meitian.data.Sfx
 import com.asbestboi.meitian.data.Speaker
 import com.asbestboi.meitian.ui.ArenaScreen
-import com.asbestboi.meitian.ui.ChallengeScreen
 import com.asbestboi.meitian.ui.Grain
 import com.asbestboi.meitian.ui.MeitianTheme
 import com.asbestboi.meitian.ui.OnboardingScreen
 import com.asbestboi.meitian.ui.PracticeScreen
 import com.asbestboi.meitian.ui.ProgressScreen
 import com.asbestboi.meitian.ui.Street
-import com.asbestboi.meitian.ui.TodayScreen
+import com.asbestboi.meitian.ui.LearnScreen
 
 val LocalApp = staticCompositionLocalOf<AppState> { error("no app state") }
 
@@ -122,14 +121,13 @@ fun Root() {
 @Composable
 fun Tabs() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val tabs = listOf("☀️" to "Today", "🗣️" to "Challenge", "🃏" to "Practice", "⚔️" to "Arena", "📊" to "Progress")
+    val tabs = listOf("🗺️" to "Learn", "🃏" to "Practice", "⚔️" to "Arena", "👤" to "Profile")
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> TodayScreen(goToChallenge = { tab = 1 }, goToPractice = { tab = 2 })
-                1 -> ChallengeScreen()
-                2 -> PracticeScreen()
-                3 -> ArenaScreen()
+                0 -> LearnScreen(goToPractice = { tab = 1 })
+                1 -> PracticeScreen()
+                2 -> ArenaScreen()
                 else -> ProgressScreen()
             }
         }

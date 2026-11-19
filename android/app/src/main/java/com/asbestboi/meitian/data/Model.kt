@@ -11,6 +11,7 @@ import org.json.JSONObject
 import uniffi.meitian_core.CoreWord
 import uniffi.meitian_core.Friend
 import uniffi.meitian_core.LessonPath
+import uniffi.meitian_core.PathUnit
 import uniffi.meitian_core.Milestone
 import uniffi.meitian_core.MilestoneProgress
 import uniffi.meitian_core.milestoneAt
@@ -159,6 +160,8 @@ data class Profile(
     val reminderOn: Boolean = false,
     val reminderHour: Int = 19,
     val reminderMinute: Int = 0,
+    /** Story checkpoints finished on the learning path, as "level-unit". */
+    val pathStories: List<String> = emptyList(),
 )
 
 data class Settings(
@@ -334,6 +337,43 @@ class AppState(private val context: Context) {
     val lessonPath: LessonPath
         get() = uniffi.meitian_core.lessonPath(learnedCount(currentLevel).toUInt(), Words.level(currentLevel).size.toUInt(), profile.dailyGoal.coerceAtLeast(1).toUInt())
 
+    // ---- learning path ----
+
+    /** The current level's map: units of lessons, a story checkpoint after each unit, the test at the end. */
+    val learnPath: List<PathUnit>
+        get() {
+            val level = currentLevel
+            val done = profile.pathStories.mapNotNull { key ->
+                val p = key.split("-")
+                if (p.size == 2 && p[0].toIntOrNull() == level) p[1].toUIntOrNull() else null
+            }
+            return uniffi.meitian_core.learnPath(learnedCount(level).toUInt(), Words.level(level).size.toUInt(),
+                profile.dailyGoal.coerceAtLeast(1).toUInt(), done)
+        }
+
+    /** A story checkpoint is finished: +20 XP once. */
+    fun finishPathStory(unit: Int) {
+        val key = "$currentLevel-$unit"
+        if (key in profile.pathStories) return
+        profile = profile.copy(pathStories = profile.pathStories + key)
+        addXP(20)
+    }
+
+    /** The words of one lesson on the current level's path (for replaying a finished lesson). */
+    fun lessonWords(lesson: Int): List<CoreWord> {
+        val size = profile.dailyGoal.coerceAtLeast(1)
+        val all = Words.level(currentLevel)
+        val start = (lesson - 1) * size
+        if (start < 0 || start >= all.size) return emptyList()
+        return all.subList(start, minOf(start + size, all.size))
+    }
+
+    /** What the next lesson teaches: today's words first, then more from the level. */
+    fun nextUpWords(): List<CoreWord> {
+        if (!today.learnedDone) return todaysWords()
+        return nextLessonWords().ifEmpty { todaysWords() }
+    }
+
     val milestoneProgress: MilestoneProgress get() = uniffi.meitian_core.milestoneProgress(today.xp.coerceAtLeast(0).toUInt())
 
     /** Hands out any milestones today's XP just reached (bonus XP goes to the total, not today's bar). */
@@ -504,6 +544,7 @@ class AppState(private val context: Context) {
             put("goal", profile.dailyGoal); put("onboarded", profile.onboarded); put("friend", profile.friend)
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
             put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
+            put("pathSt", JSONArray(profile.pathStories))
         })
         o.put("settings", JSONObject().apply {
             val s = settings
@@ -585,7 +626,8 @@ class AppState(private val context: Context) {
                 profile = Profile(p.optString("name"), p.optInt("claimed"), p.optInt("confirmed"), p.optInt("goal", 5),
                     p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"),
                     p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList(),
-                    p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0))
+                    p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0),
+                    p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
             }
             o.optJSONObject("settings")?.let { s ->
                 settings = Settings(s.optBoolean("pinyin", true), s.optBoolean("tones", true), s.optBoolean("swears"),

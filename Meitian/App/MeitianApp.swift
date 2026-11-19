@@ -60,21 +60,18 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            TodayView(goToChallenge: { tab = 1 }, goToPractice: { tab = 2 })
-                .tabItem { Label("Today", systemImage: "sun.max.fill") }
+            TodayView(goToPractice: { tab = 1 })
+                .tabItem { Label("Learn", systemImage: "map.fill") }
                 .tag(0)
-            ChallengeView()
-                .tabItem { Label("Challenge", systemImage: "person.2.wave.2.fill") }
-                .tag(1)
             PracticeView()
                 .tabItem { Label("Practice", systemImage: "rectangle.stack.fill") }
-                .tag(2)
+                .tag(1)
             ArenaView()
                 .tabItem { Label("Arena", systemImage: "flag.2.crossed.fill") }
-                .tag(3)
+                .tag(2)
             StatsView()
-                .tabItem { Label("Progress", systemImage: "chart.bar.fill") }
-                .tag(4)
+                .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
+                .tag(3)
         }
         .sensoryFeedback(.selection, trigger: tab)
         .overlay { MilestoneCelebration() }

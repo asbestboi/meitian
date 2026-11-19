@@ -10,6 +10,8 @@ struct PracticeView: View {
     @State private var selected: Word?
     @State private var sprint = false
     @State private var sentences = false
+    @State private var challenge = false
+    @State private var showLibrary = false
     @AppStorage(Prefs.swears) private var swears = false
     @AppStorage(Prefs.listening) private var listeningOn = true
     @AppStorage(Prefs.speaking) private var speakingOn = true
@@ -17,35 +19,24 @@ struct PracticeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 24) {
                     reviewHero
-                    weakTile
-                    sentenceTile
-                    StoryHub()
-                    StoryHub(chats: true)
-                    if swears { sprintTile }
-                    HStack(spacing: 12) {
-                        gameTile("Listening", "ear.fill", Theme.skyGradient,
-                                 enabled: store.learnedWords.count >= 1 && listeningOn) {
-                            session = .listening
-                        }
-                        gameTile("Speaking", "mic.fill", Theme.pinkGradient,
-                                 enabled: store.learnedWords.count >= 1 && speakingOn) {
-                            session = .speaking
-                        }
-                        gameTile("Speed mix", "bolt.fill", Theme.goldGradient, enabled: store.learnedWords.count >= 1) {
-                            session = .mixed
+                    section("practice") { modes }
+                    section("read") {
+                        VStack(spacing: 24) {
+                            StoryHub()
+                            StoryHub(chats: true)
                         }
                     }
-                    library
+                    libraryRow
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 30)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 32)
             }
             .background(Theme.background.ignoresSafeArea())
             .scrollIndicators(.hidden)
             .navigationTitle("Practice")
-            .searchable(text: $search, prompt: "Search hanzi, pinyin or English")
+            .navigationDestination(isPresented: $showLibrary) { libraryPage }
         }
         .fullScreenCover(item: $session) { mode in
             PracticeSession(mode: mode).environment(store)
@@ -56,6 +47,10 @@ struct PracticeView: View {
         .fullScreenCover(isPresented: $sprint) {
             SwearSprintView().environment(store)
         }
+        .sheet(isPresented: $challenge) {
+            ChallengeView().environment(store)
+                .presentationCornerRadius(32)
+        }
         .onChange(of: swears) { _, on in if !on && levelFilter == WordBank.streetLevel { levelFilter = 0 } }
         .sheet(item: $selected) { w in
             WordDetail(word: w)
@@ -63,6 +58,85 @@ struct PracticeView: View {
                 .presentationDetents([.medium, .large])
                 .presentationCornerRadius(32)
         }
+    }
+
+    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.rounded(.title3, weight: .heavy))
+            content()
+        }
+    }
+
+    /// Every practice mode as the same kind of tile, two per row.
+    private var modes: some View {
+        let hasWords = !store.learnedWords.isEmpty
+        let weak = store.weakWords(limit: 12)
+        let sentenceCount = Int(content.stats.sentences)
+        let challengeDone = store.today.challenge != nil
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            modeTile("⚡", "weak words", weak.count >= 4 ? "\(weak.count) to fix" : "none yet", enabled: weak.count >= 4) {
+                session = .weak
+            }
+            modeTile("💬", "sentences", sentenceCount > 0 ? "build & translate" : "downloading…", enabled: sentenceCount > 0) {
+                sentences = true
+            }
+            modeTile("🎧", "listening", "10 questions", enabled: hasWords && listeningOn) { session = .listening }
+            modeTile("🎙️", "speaking", "10 questions", enabled: hasWords && speakingOn) { session = .speaking }
+            modeTile("🔀", "speed mix", "everything, fast", enabled: hasWords) { session = .mixed }
+            modeTile(challengeDone ? "🏆" : store.profile.preferredFriend.emoji, "friend challenge",
+                     challengeDone ? "done today ✓" : "use a word for real", enabled: true) { challenge = true }
+            if swears {
+                modeTile("🤬", "swear sprint", "60 s rapid fire · 18+", enabled: true) { sprint = true }
+            }
+        }
+    }
+
+    private func modeTile(_ emoji: String, _ title: String, _ subtitle: String, enabled: Bool,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(emoji).font(.system(size: 32))
+                Text(title).font(.rounded(.headline, weight: .bold))
+                Text(enabled ? subtitle : (store.learnedWords.isEmpty ? "learn words first" : subtitle))
+                    .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(.primary)
+            .cardSurface(padding: 16)
+            .opacity(enabled ? 1 : 0.45)
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(!enabled)
+    }
+
+    private var libraryRow: some View {
+        Button { showLibrary = true } label: {
+            HStack(spacing: 16) {
+                Text("📚").font(.system(size: 32))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("my words").font(.rounded(.headline, weight: .bold))
+                    Text("\(store.cards.count) learned · search the whole HSK list")
+                        .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.headline.weight(.bold)).foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.primary)
+            .cardSurface(padding: 16)
+        }
+        .buttonStyle(PressableStyle(scale: 0.98))
+    }
+
+    private var libraryPage: some View {
+        ScrollView {
+            library.padding(.horizontal, 16).padding(.bottom, 32)
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .scrollIndicators(.hidden)
+        .navigationTitle("My words")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, prompt: "Search hanzi, pinyin or English")
     }
 
     private var reviewHero: some View {
@@ -73,7 +147,7 @@ struct PracticeView: View {
                     Text(due > 0 ? "\(due) due for review" : "All caught up ✨")
                         .font(.rounded(.title2, weight: .bold))
                     Text(due > 0 ? "Spaced repetition: review right before you'd forget."
-                         : "Come back tomorrow, or play a game below.")
+                         : "Come back tomorrow, or pick a mode below.")
                         .font(.rounded(.subheadline)).opacity(0.85)
                 }
                 Spacer()
@@ -103,93 +177,6 @@ struct PracticeView: View {
         .streetBlock(Theme.skyGradient)
     }
 
-    /// Practice the words you get wrong most (hidden until there are a few).
-    @ViewBuilder
-    private var weakTile: some View {
-        let weak = store.weakWords(limit: 12)
-        if weak.count >= 4 {
-            Button { session = .weak } label: {
-                HStack(spacing: 14) {
-                    Text("⚡").font(.system(size: 38))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Weak words").font(.rounded(.title3, weight: .bold))
-                        Text(weak.prefix(5).map(\.hanzi).joined(separator: " · ") + " — the ones you miss most")
-                            .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right").font(.headline.weight(.bold)).foregroundStyle(.secondary)
-                }
-                .foregroundStyle(.primary)
-                .cardSurface(padding: 16)
-            }
-            .buttonStyle(PressableStyle(scale: 0.98))
-        }
-    }
-
-    private var sentenceTile: some View {
-        let count = Int(content.stats.sentences)
-        return Button { sentences = true } label: {
-            HStack(spacing: 14) {
-                Text("💬").font(.system(size: 40))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Sentences").font(.rounded(.title3, weight: .bold))
-                    Text(count > 0 ? "Build, fill and translate real sentences at your level."
-                                   : "Downloading sentence lessons… needs internet once.")
-                        .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.headline.weight(.bold)).foregroundStyle(.secondary)
-            }
-            .foregroundStyle(.primary)
-            .cardSurface(padding: 16)
-            .opacity(count > 0 ? 1 : 0.6)
-        }
-        .buttonStyle(PressableStyle())
-        .disabled(count == 0)
-    }
-
-    private var sprintTile: some View {
-        Button { sprint = true } label: {
-            HStack(spacing: 14) {
-                Text("🤬").font(.system(size: 44))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("swear sprint").font(.street(28))
-                    Text("Learn street Chinese fast: flip cards, then 60 s of rapid fire. Combos multiply.")
-                        .font(.rounded(.caption, weight: .semibold)).opacity(0.9)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.headline.weight(.black))
-            }
-            .foregroundStyle(.white)
-            .streetBlock(Theme.inkGradient, padding: 18)
-            .overlay(alignment: .topTrailing) { Pill(text: "18+", color: Theme.pink, tilt: 6).offset(x: -14, y: -8) }
-        }
-        .buttonStyle(PressableStyle())
-    }
-
-    private func gameTile(_ title: String, _ icon: String, _ g: LinearGradient, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: icon).font(.title2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 46, height: 46)
-                    .background(g, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                Text(title).font(.rounded(.headline, weight: .bold))
-                Text(enabled ? "10 questions" : "Learn words first")
-                    .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(.primary)
-            .cardSurface(padding: 16)
-            .opacity(enabled ? 1 : 0.5)
-        }
-        .buttonStyle(PressableStyle())
-        .disabled(!enabled)
-    }
-
     private var filtered: [Word] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         let weak = status == .weak ? Set(store.weakWords(limit: 200).map(\.id)) : []
@@ -213,7 +200,6 @@ struct PracticeView: View {
 
     private var library: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Word library").font(.rounded(.title3, weight: .bold)).padding(.top, 6)
             Picker("Level", selection: $levelFilter) {
                 Text("All").tag(0)
                 ForEach(WordBank.levels, id: \.self) { Text(WordBank.levels.count > 4 ? "\($0)" : "HSK \($0)").tag($0) }

@@ -82,6 +82,8 @@ struct Profile: Codable, Hashable {
     /// Streak freezes held, and the days they covered (day numbers).
     var freezes: Int?
     var frozenDays: [Int64]?
+    /// Story checkpoints finished on the learning path, as "level-unit".
+    var pathStories: [String]?
 }
 
 private struct SaveFile: Codable {
@@ -303,6 +305,51 @@ final class AppStore {
         return Meitian.lessonPath(learned: UInt32(learnedCount(level: level)),
                                   total: UInt32(WordBank.words(level: level).count),
                                   lessonSize: UInt32(max(profile.dailyGoal, 1)))
+    }
+
+    // MARK: learning path
+
+    /// The current level's map: units of lessons, a story checkpoint after each unit, the test at the end.
+    var learnPath: [PathUnit] {
+        let level = currentLevel
+        let done = (profile.pathStories ?? []).compactMap { key -> UInt32? in
+            let p = key.split(separator: "-")
+            guard p.count == 2, Int(p[0]) == level else { return nil }
+            return UInt32(p[1])
+        }
+        return Meitian.learnPath(learned: UInt32(learnedCount(level: level)),
+                                 total: UInt32(WordBank.words(level: level).count),
+                                 lessonSize: UInt32(max(profile.dailyGoal, 1)),
+                                 storiesDone: done)
+    }
+
+    /// The node the big start button points at.
+    var nextPathNode: PathNode? { learnPath.flatMap(\.nodes).first(where: \.next) }
+
+    /// A story checkpoint is finished: +20 XP once.
+    func finishPathStory(unit: Int) {
+        let key = "\(currentLevel)-\(unit)"
+        var done = profile.pathStories ?? []
+        guard !done.contains(key) else { return }
+        done.append(key)
+        profile.pathStories = done
+        addXP(20)
+    }
+
+    /// The words of one lesson on the current level's path (for replaying a finished lesson).
+    func lessonWords(_ lesson: Int) -> [Word] {
+        let size = max(profile.dailyGoal, 1)
+        let all = WordBank.words(level: currentLevel)
+        let start = (lesson - 1) * size
+        guard start >= 0, start < all.count else { return [] }
+        return Array(all[start..<min(start + size, all.count)])
+    }
+
+    /// What the next lesson teaches: today's words first, then more from the level.
+    func nextUpWords() -> [Word] {
+        if !today.learnedDone { return todaysWords() }
+        let more = nextLessonWords()
+        return more.isEmpty ? todaysWords() : more
     }
 
     var milestoneProgress: MilestoneProgress { Meitian.milestoneProgress(xpToday: UInt32(clamping: max(today.xp, 0))) }
