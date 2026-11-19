@@ -8,10 +8,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export IPHONEOS_DEPLOYMENT_TARGET=17.0
-rustup target add aarch64-apple-ios >/dev/null
+# aarch64-apple-ios for devices, aarch64-apple-ios-sim for the simulator smoke test
+TARGET=${CORE_TARGET:-aarch64-apple-ios}
+rustup target add "$TARGET" >/dev/null
 
 ( cd core
-  cargo build --release --lib --target aarch64-apple-ios
+  cargo build --release --lib --target "$TARGET"
   # bindings are generated from a host build of the same library
   cargo build --release --lib
   cargo build --release --bin uniffi-bindgen
@@ -29,4 +31,4 @@ mv build/core-gen/meitian_core.swift build/core-swift/
 mv build/core-gen/meitian_coreFFI.h build/core-include/
 mv build/core-gen/meitian_coreFFI.modulemap build/core-include/module.modulemap
 rm -rf build/core-gen
-echo "core ready: $(du -h core/target/aarch64-apple-ios/release/libmeitian_core.a | cut -f1) static lib"
+echo "core ready: $(du -h core/target/$TARGET/release/libmeitian_core.a | cut -f1) static lib ($TARGET)"

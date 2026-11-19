@@ -1,0 +1,33 @@
+# Launches the app in the iOS Simulator (fresh install and an onboarded user) and reports crashes.
+name: iOS smoke test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build for simulator
+        run: |
+          mkdir -p build
+          CORE_TARGET=aarch64-apple-ios-sim scripts/build-core-ios.sh
+          xcodegen generate
+          xcodebuild -project Meitian.xcodeproj -scheme Meitian -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+            LIBRARY_SEARCH_PATHS="$PWD/core/target/aarch64-apple-ios-sim/release" build \
+            | tee build/sim.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build/sim.log
+      - name: Launch and look for crashes
+        run: scripts/smoke-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-results
+          path: build/smoke
