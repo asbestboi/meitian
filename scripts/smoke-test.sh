@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 OUT=build/smoke; mkdir -p "$OUT"
-APP=build/sim/Build/Products/Debug-iphonesimulator/Meitian.app
+APP=build/sim/Build/Products/Release-iphonesimulator/Meitian.app
 BUNDLE=com.asbestboi.meitian
 
 DEVICE=$(xcrun simctl list devices available -j | python3 -c '
@@ -23,12 +23,14 @@ run() {
     local name=$1
     rm -rf ~/Library/Logs/DiagnosticReports/Meitian* 2>/dev/null
     xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null
-    xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE" > "$OUT/$name-console.txt" 2>&1 &
-    local pid=$!
+    local launched pid
+    launched=$(xcrun simctl launch "$DEVICE" "$BUNDLE" 2>&1)
+    echo "$launched" > "$OUT/$name-console.txt"
+    pid=${launched##*: }
     sleep 15
-    kill "$pid" 2>/dev/null
     xcrun simctl io "$DEVICE" screenshot "$OUT/$name.png" >/dev/null 2>&1
-    if xcrun simctl spawn "$DEVICE" launchctl list | grep -q "$BUNDLE"; then
+    # simulator apps are host processes, so ps sees them
+    if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
         echo "✅ $name: app is running"
     else
         echo "❌ $name: app is NOT running (crashed)"; failed=1
