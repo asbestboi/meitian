@@ -41,8 +41,11 @@ object Speaker {
     fun say(text: String, slow: Boolean = false) {
         val t = tts ?: return
         if (!ready) return
+        // WeChat emoji and other emoji aren't read out
+        val spoken = uniffi.meitian_core.speakable(text)
+        if (spoken.isEmpty()) return
         t.setSpeechRate(if (slow) 0.6f else 0.9f)
-        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "say")
+        t.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "say")
     }
 }
 

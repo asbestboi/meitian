@@ -15,6 +15,7 @@ pub mod pinyin;
 pub mod progress;
 pub mod quests;
 pub mod stories;
+pub mod wechat;
 pub mod words;
 
 pub use challenge::*;
@@ -29,4 +30,5 @@ pub use pinyin::*;
 pub use progress::*;
 pub use quests::*;
 pub use stories::*;
+pub use wechat::*;
 pub use words::*;

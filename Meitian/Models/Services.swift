@@ -19,7 +19,10 @@ final class Speaker {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
-        let u = AVSpeechUtterance(string: text)
+        // WeChat emoji and other emoji aren't read out
+        let spoken = speakable(text: text)
+        guard !spoken.isEmpty else { return }
+        let u = AVSpeechUtterance(string: spoken)
         u.voice = voice
         u.rate = slow ? 0.32 : 0.45
         u.pitchMultiplier = 1.05

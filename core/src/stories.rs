@@ -1,5 +1,6 @@
 //! Graded illustrated stories (Duolingo-style), downloaded as the "stories" content pack.
 
+use crate::wechat::render_wechat;
 use std::sync::{OnceLock, RwLock};
 
 use serde::Deserialize;
@@ -182,7 +183,8 @@ fn tokens(t: Vec<(String, String)>, zh: &str, py: &str) -> Vec<Token> {
     } else {
         t.into_iter()
             .map(|(text, pinyin)| Token {
-                text,
+                // WeChat emoji codes ("[捂脸]") become the emoji itself
+                text: render_wechat(&text),
                 pinyin,
                 word_id: None,
             })
@@ -194,10 +196,10 @@ fn line(l: RawLine) -> StoryLine {
     StoryLine {
         speaker: l.who,
         image: l.image.map(image),
-        tokens: tokens(l.t, &l.zh, &l.py),
-        zh: l.zh,
-        pinyin: l.py,
-        en: l.en,
+        tokens: tokens(l.t, &render_wechat(&l.zh), &render_wechat(&l.py)),
+        zh: render_wechat(&l.zh),
+        pinyin: render_wechat(&l.py),
+        en: render_wechat(&l.en),
     }
 }
 
@@ -262,10 +264,10 @@ pub(crate) fn load_stories(json: &str) -> Result<u32, ContentError> {
                                 .unwrap_or_default()
                                 .into_iter()
                                 .map(|o| ReplyOption {
-                                    tokens: tokens(o.t, &o.zh, &o.py),
-                                    zh: o.zh,
-                                    pinyin: o.py,
-                                    en: o.en,
+                                    tokens: tokens(o.t, &render_wechat(&o.zh), &render_wechat(&o.py)),
+                                    zh: render_wechat(&o.zh),
+                                    pinyin: render_wechat(&o.py),
+                                    en: render_wechat(&o.en),
                                     correct: o.ok,
                                     reaction: o.then.map(line),
                                 })
