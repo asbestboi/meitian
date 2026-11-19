@@ -8,6 +8,8 @@ struct TodayView: View {
 
     @State private var words: [Word] = []
     @State private var learning = false
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationStack {
@@ -25,7 +27,10 @@ struct TodayView: View {
             .background(Theme.background.ignoresSafeArea())
             .scrollIndicators(.hidden)
         }
-        .onAppear { words = store.todaysWords() }
+        .onAppear {
+            words = store.todaysWords()
+            withAnimation(reduceMotion ? nil : Theme.bouncy.delay(0.05)) { appeared = true }
+        }
         .onChange(of: store.todayKey) { _, _ in words = store.todaysWords() }
         .onChange(of: store.profile.dailyGoal) { _, _ in words = store.todaysWords() }
         .fullScreenCover(isPresented: $learning) {
@@ -42,72 +47,82 @@ struct TodayView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(Date.now.formatted(.dateTime.weekday(.wide).month().day()).lowercased())
+                        .font(.rounded(.subheadline, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Sparkle(size: 12)
+                }
                 Text("\(greeting.hanzi)，\(store.profile.name)")
-                    .font(.hanzi(28, weight: .bold))
-                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .font(.hanzi(32, weight: .heavy))
+                    .lineLimit(1).minimumScaleFactor(0.6)
                 HStack(spacing: 6) {
                     PinyinText(pinyin: greeting.pinyin, font: .rounded(.subheadline, weight: .bold))
-                    Text("· \(greeting.english)").font(.rounded(.subheadline)).foregroundStyle(.secondary)
+                    Text("· \(greeting.english.lowercased())").font(.rounded(.subheadline)).foregroundStyle(.secondary)
                 }
-                Text(Date.now.formatted(.dateTime.weekday(.wide).month().day()))
-                    .font(.rounded(.subheadline, weight: .medium))
-                    .foregroundStyle(.secondary)
             }
             Spacer()
-            StreakBadge(streak: store.streak)
-            XPBadge(xp: store.xp)
+            HStack(spacing: 6) {
+                StreakBadge(streak: store.streak)
+                XPBadge(xp: store.xp)
+            }
         }
-        .padding(.top, 8)
+        .padding(.top, 12)
     }
 
     private var wordsCard: some View {
         let done = store.today.learnedDone
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Label(done ? "Today's words · done" : "Today's words", systemImage: done ? "checkmark.seal.fill" : "sparkles")
-                    .font(.rounded(.headline, weight: .bold))
-                    .foregroundStyle(.white)
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(done ? "today's words ✓" : "today's words")
+                    .font(.rounded(.title2, weight: .heavy))
                 Spacer()
-                Text("\(words.count) words")
-                    .font(.rounded(.subheadline, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                Text("\(words.count)")
+                    .font(.rounded(.title2, weight: .heavy))
+                    .foregroundStyle(Theme.lime)
+                    .contentTransition(.numericText())
             }
+            .foregroundStyle(.white)
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
-                    ForEach(words) { w in
+                    ForEach(Array(words.enumerated()), id: \.element.id) { i, w in
                         VStack(spacing: 4) {
-                            Text(w.hanzi).font(.hanzi(28, weight: .semibold))
+                            Text(w.hanzi).font(.hanzi(30, weight: .semibold))
                             if done || showPinyin {
                                 PinyinText(pinyin: w.pinyin, font: .rounded(.caption, weight: .bold))
                             } else {
-                                Text("?").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
+                                Text("?").font(.rounded(.caption, weight: .semibold)).opacity(0.5)
                             }
                         }
-                        .frame(minWidth: 64)
-                        .padding(.vertical, 12).padding(.horizontal, 10)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .foregroundStyle(.primary)
+                        .frame(minWidth: 66)
+                        .padding(.vertical, 14).padding(.horizontal, 10)
+                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .foregroundStyle(.white)
+                        // cards drop in one after another
+                        .offset(y: appeared ? 0 : 24)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(reduceMotion ? nil : Theme.bouncy.delay(0.05 * Double(i)), value: appeared)
                     }
                 }
             }
             .scrollIndicators(.hidden)
+            .environment(\.colorScheme, .dark)
             Button { learning = true } label: {
                 HStack {
-                    Text(done ? "Practice them again" : "Learn today's words")
+                    Text(done ? "practice them again" : "learn today's words")
                     Spacer()
-                    Image(systemName: done ? "arrow.clockwise" : "play.fill")
+                    Image(systemName: done ? "arrow.clockwise" : "arrow.right")
                 }
                 .font(.rounded(.headline, weight: .bold))
-                .foregroundStyle(Theme.red)
-                .padding(.horizontal, 20).padding(.vertical, 16)
-                .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 22).padding(.vertical, 17)
+                .background(done ? Theme.jade : Color(red: 0.78, green: 1.0, blue: 0.24), in: Capsule())
             }
             .buttonStyle(PressableStyle())
         }
-        .streetBlock(done ? Theme.jadeGradient : Theme.warmGradient)
-        .overlay(alignment: .topTrailing) { TapeStrip(angle: 8).offset(x: -10, y: -10) }
+        .streetBlock(Theme.nightGradient)
     }
 
     private var challengeCard: some View {

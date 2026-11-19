@@ -45,7 +45,7 @@ struct SwearSprintView: View {
                     .foregroundStyle(.primary)
                     .accessibilityLabel("Close")
                     Spacer()
-                    Text("🤬 SWEAR SPRINT").font(.street(26))
+                    Text("🤬 swear sprint").font(.street(26))
                     Spacer()
                     Color.clear.frame(width: 40, height: 40)
                 }
@@ -98,7 +98,7 @@ struct SwearSprintView: View {
         return VStack(spacing: 18) {
             Spacer()
             Text("🤬").font(.system(size: 90))
-            Text("LEARN TO SWEAR FAST").font(.street(46)).multilineTextAlignment(.center)
+            Text("learn to swear fast").font(.street(46)).multilineTextAlignment(.center)
             Text("\(fresh.isEmpty ? "You've unlocked every street word." : "\(min(5, fresh.count)) new words first, then") 60 seconds of rapid fire. Three right in a row = ×2, six = ×3… up to ×5.")
                 .font(.rounded(.body)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             HStack(spacing: 10) {
@@ -190,7 +190,7 @@ struct SwearSprintView: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 0) {
                             Text("\(score)").font(.street(44)).contentTransition(.numericText())
-                            Text("POINTS").font(.rounded(.caption, weight: .black)).foregroundStyle(.secondary)
+                            Text("points").font(.rounded(.caption, weight: .black)).foregroundStyle(.secondary)
                         }
                     }
                     ProgressView(value: left, total: Self.seconds).tint(left < 10 ? Theme.red : Theme.pink)
@@ -228,7 +228,7 @@ struct SwearSprintView: View {
     private var results: some View {
         VStack(spacing: 18) {
             Spacer()
-            Text(newBest ? "NEW BEST!" : "TIME!").font(.street(64)).foregroundStyle(newBest ? Theme.gold : Theme.pink)
+            Text(newBest ? "new best ✦" : "time!").font(.street(64)).foregroundStyle(newBest ? Theme.gold : Theme.pink)
             Text("\(score)").font(.street(110)).contentTransition(.numericText())
             Text("points").font(.rounded(.headline, weight: .bold)).foregroundStyle(.secondary)
             HStack(spacing: 12) {

@@ -78,7 +78,7 @@ fun PracticeScreen() {
                 Text(if (due > 0) "$due DUE FOR REVIEW" else "ALL CAUGHT UP ✨", style = street(26.sp), color = Color.White)
                 Text(if (due > 0) "Spaced repetition: review right before you'd forget." else "Come back tomorrow, or play a game below. ${app.masteredCount} mastered.",
                     color = Color.White.copy(alpha = 0.9f))
-                if (due > 0) BigButton("Start review", brush = Street.ink()) { nav.show { PracticeSession(PracticeMode.Review) { nav.close() } } }
+                if (due > 0) BigButton("Start review") { nav.show { PracticeSession(PracticeMode.Review) { nav.close() } } }
             }
         }
         item {
@@ -87,7 +87,7 @@ fun PracticeScreen() {
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("💬", fontSize = 38.sp); HSpacer(12.dp)
                 Column(Modifier.weight(1f)) {
-                    Text("SENTENCES", style = street(24.sp), color = Street.c.text)
+                    Text("sentences", style = street(24.sp), color = Street.c.text)
                     Text(if (count > 0) "Build, fill and translate real sentences at your level." else "Downloading sentence lessons… needs internet once.",
                         fontSize = 13.sp, color = Street.c.secondary)
                 }
@@ -98,7 +98,7 @@ fun PracticeScreen() {
             Row(Modifier.fillMaxWidth().block(Street.ink()).clickable { nav.show { SwearSprint { nav.close() } } }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("🤬", fontSize = 42.sp); HSpacer(12.dp)
                 Column(Modifier.weight(1f)) {
-                    Text("SWEAR SPRINT", style = street(30.sp), color = Color.White)
+                    Text("swear sprint", style = street(30.sp), color = Color.White)
                     Text("Learn street Chinese fast: flip cards, then 60 s of rapid fire. Combos multiply.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                 }
                 Pill("18+", Street.c.pink, 6f)
@@ -112,21 +112,21 @@ fun PracticeScreen() {
                     Column(Modifier.weight(1f).card().clickable(enabled = enabled) { nav.show { PracticeSession(mode) { nav.close() } } }.padding(12.dp)) {
                         GradientIcon(icon, when (mode) { PracticeMode.Listening -> Street.sky(); PracticeMode.Speaking -> Street.pink(); else -> Street.gold() })
                         Gap(8.dp)
-                        Text(mode.title.uppercase(), style = street(16.sp), color = Street.c.text)
+                        Text(mode.title.lowercase(), style = street(16.sp), color = Street.c.text)
                         Text(if (enabled) "10 questions" else "Learn words first", fontSize = 11.sp, color = Street.c.secondary)
                     }
                 }
             }
         }
         item {
-            Text("WORD LIBRARY", style = street(24.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp))
+            Text("word library", style = street(24.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp))
             OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search hanzi, pinyin or English") }, singleLine = true)
             Gap(8.dp)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 (listOf(0 to "All") + Words.levels.map { it to "HSK $it" } + if (app.settings.swears) listOf(STREET_LEVEL to "🤬") else emptyList()).forEach { (l, label) ->
                     Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (filter == l) Street.c.red else Street.c.card).clickable { filter = l }
                         .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                        Text(label, fontWeight = FontWeight.Black, fontSize = 12.sp, color = if (filter == l) Color.White else Street.c.text)
+                        Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (filter == l) Color.White else Street.c.text)
                     }
                 }
             }
@@ -168,7 +168,7 @@ fun WordDetail(w: CoreWord, close: () -> Unit) {
             }
             ExampleSentences(w)
             app.cards[w.id]?.let { Text("Box ${it.box} of 6 · ✓ ${it.correct} ✗ ${it.wrong}", color = Street.c.secondary, fontWeight = FontWeight.Bold) }
-            BigButton("Close", brush = Street.ink(), onClick = close)
+            BigButton("Close", onClick = close)
         }
     }
 }
@@ -191,7 +191,7 @@ fun PracticeSession(mode: PracticeMode, close: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CloseButton(close); Spacer(Modifier.weight(1f)); Text(mode.title.uppercase(), style = street(20.sp), color = Street.c.text); Spacer(Modifier.weight(1f))
+                CloseButton(close); Spacer(Modifier.weight(1f)); Text(mode.title.lowercase(), style = street(20.sp), color = Street.c.text); Spacer(Modifier.weight(1f))
             }
             val s = score
             if (questions.isEmpty()) Text("Nothing to practice yet. Learn some words first!", color = Street.c.secondary)
@@ -266,14 +266,14 @@ fun SwearSprint(close: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CloseButton { phase = 99; close() }; Spacer(Modifier.weight(1f)); Text("🤬 SWEAR SPRINT", style = street(24.sp), color = Street.c.text); Spacer(Modifier.weight(1f))
+                CloseButton { phase = 99; close() }; Spacer(Modifier.weight(1f)); Text("🤬 swear sprint", style = street(24.sp), color = Street.c.text); Spacer(Modifier.weight(1f))
             }
             when (phase) {
                 0 -> {
                     val fresh = Words.swears.filter { app.cards[it.id] == null }
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Text("🤬", fontSize = 90.sp)
-                        Text("LEARN TO SWEAR FAST", style = street(44.sp), color = Street.c.text, textAlign = TextAlign.Center)
+                        Text("learn to swear fast", style = street(44.sp), color = Street.c.text, textAlign = TextAlign.Center)
                         Text("${if (fresh.isEmpty()) "You've unlocked every street word." else "${minOf(5, fresh.size)} new words first, then"} 60 seconds of rapid fire. 3 right in a row = ×2, 6 = ×3… up to ×5.",
                             color = Street.c.secondary, textAlign = TextAlign.Center)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -291,7 +291,7 @@ fun SwearSprint(close: () -> Unit) {
                     val left = ((endsAt - now) / 1000.0).coerceAtLeast(0.0)
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text("${kotlin.math.ceil(left).toInt()}", style = street(56.sp), color = if (left < 10) Street.c.red else Street.c.text, modifier = Modifier.weight(1f))
-                        Column(horizontalAlignment = Alignment.End) { Text("$score", style = street(46.sp), color = Street.c.text); Text("POINTS", fontWeight = FontWeight.Black, fontSize = 12.sp, color = Street.c.secondary) }
+                        Column(horizontalAlignment = Alignment.End) { Text("$score", style = street(46.sp), color = Street.c.text); Text("points", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Street.c.secondary) }
                     }
                     LinearProgressIndicator(progress = { (left / 60).toFloat() }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), color = Street.c.pink)
                     val mult = sprintMultiplier(combo.toUInt()).toInt()
@@ -314,7 +314,7 @@ fun SwearSprint(close: () -> Unit) {
                 }
                 4 -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Spacer(Modifier.weight(1f))
-                    Text(if (newBest) "NEW BEST!" else "TIME!", style = street(60.sp), color = if (newBest) Street.c.gold else Street.c.pink)
+                    Text(if (newBest) "new best!" else "time!", style = street(60.sp), color = if (newBest) Street.c.gold else Street.c.pink)
                     Text("$score", style = street(110.sp), color = Street.c.text)
                     Text("points", fontWeight = FontWeight.Bold, color = Street.c.secondary)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -324,7 +324,7 @@ fun SwearSprint(close: () -> Unit) {
                     }
                     Spacer(Modifier.weight(1f))
                     BigButton("Again", brush = Street.pink()) { newWords = emptyList(); phase = 2 }
-                    Text("Done", fontWeight = FontWeight.Black, color = Street.c.text, modifier = Modifier.clickable(onClick = close).padding(8.dp))
+                    Text("Done", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.clickable(onClick = close).padding(8.dp))
                 }
             }
         }

@@ -138,12 +138,13 @@ data class Rival(val id: String, val name: String, val avatar: String, val wins:
 data class Arena(
     val playerId: String = UUID.randomUUID().toString(),
     val coins: Int = 0,
-    val owned: Set<String> = setOf("av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none"),
+    val owned: Set<String> = setOf("av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"),
     val avatar: String = "av.chick",
     val frame: String = "fr.lantern",
     val title: String = "ti.newbie",
     val effect: String = "fx.boom",
     val sticker: String = "st.none",
+    val aura: String = "au.none",
     val wins: Int = 0,
     val losses: Int = 0,
     val draws: Int = 0,
@@ -293,6 +294,7 @@ class AppState(private val context: Context) {
             CosmeticKind.Frame -> arena.copy(frame = item.id)
             CosmeticKind.Title -> arena.copy(title = item.id)
             CosmeticKind.Effect -> arena.copy(effect = item.id)
+            CosmeticKind.Aura -> arena.copy(aura = item.id)
             CosmeticKind.Sticker -> arena.copy(sticker = item.id)
         }
         save()
@@ -300,7 +302,7 @@ class AppState(private val context: Context) {
 
     fun equipped(kind: CosmeticKind) = when (kind) {
         CosmeticKind.Avatar -> arena.avatar; CosmeticKind.Frame -> arena.frame; CosmeticKind.Title -> arena.title
-        CosmeticKind.Effect -> arena.effect; CosmeticKind.Sticker -> arena.sticker
+        CosmeticKind.Effect -> arena.effect; CosmeticKind.Aura -> arena.aura; CosmeticKind.Sticker -> arena.sticker
     }
 
     fun myCard(): PlayerCard {
@@ -311,7 +313,7 @@ class AppState(private val context: Context) {
             id = a.playerId, name = profile.name.ifBlank { "Player" }, level = currentLevel, wordsLearned = cards.size,
             wins = a.wins, losses = a.losses, avatar = clean(a.avatar, "av.chick"), frame = a.frame,
             title = clean(a.title, "ti.newbie"), effect = clean(a.effect, "fx.boom"),
-            sticker = clean(a.sticker, "st.none"), swears = sw,
+            sticker = clean(a.sticker, "st.none"), swears = sw, aura = a.aura,
         )
     }
 
@@ -353,7 +355,7 @@ class AppState(private val context: Context) {
         o.put("arena", JSONObject().apply {
             val a = arena
             put("id", a.playerId); put("coins", a.coins); put("owned", JSONArray(a.owned.toList()))
-            put("avatar", a.avatar); put("frame", a.frame); put("title", a.title); put("effect", a.effect); put("sticker", a.sticker)
+            put("avatar", a.avatar); put("frame", a.frame); put("title", a.title); put("effect", a.effect); put("sticker", a.sticker); put("aura", a.aura)
             put("wins", a.wins); put("losses", a.losses); put("draws", a.draws); put("streak", a.streak); put("best", a.bestStreak)
             put("fastest", a.fastestMs ?: -1)
             put("rivals", JSONArray(a.rivals.values.map { r ->
@@ -405,10 +407,10 @@ class AppState(private val context: Context) {
                 } ?: emptyMap()
                 arena = Arena(
                     playerId = a.optString("id", UUID.randomUUID().toString()), coins = a.optInt("coins"),
-                    owned = owned + setOf("av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none"),
+                    owned = owned + setOf("av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"),
                     avatar = a.optString("avatar", "av.chick"), frame = a.optString("frame", "fr.lantern"),
                     title = a.optString("title", "ti.newbie"), effect = a.optString("effect", "fx.boom"),
-                    sticker = a.optString("sticker", "st.none"), wins = a.optInt("wins"), losses = a.optInt("losses"),
+                    sticker = a.optString("sticker", "st.none"), aura = a.optString("aura", "au.none"), wins = a.optInt("wins"), losses = a.optInt("losses"),
                     draws = a.optInt("draws"), streak = a.optInt("streak"), bestStreak = a.optInt("best"),
                     fastestMs = a.optInt("fastest", -1).takeIf { it >= 0 }, rivals = rivals,
                 )

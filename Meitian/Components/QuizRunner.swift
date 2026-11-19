@@ -40,7 +40,7 @@ struct QuizRunner: View {
                 VStack(spacing: 18) {
                     Text(q.prompt)
                         .font(.rounded(.headline, weight: .bold))
-                        .textCase(.uppercase)
+                        .textCase(.lowercase)
                         .foregroundStyle(.secondary)
                     promptView(q)
                         .frame(maxWidth: .infinity, minHeight: 170)

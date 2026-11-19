@@ -79,12 +79,15 @@ struct HealthBar: View {
     let hp: Int
     var tint: Color = Theme.jade
     var hitTick: Int = 0
+    var aura: String? = nil
 
     @State private var shake: CGFloat = 0
+    @State private var flashRed = false
 
     var body: some View {
         HStack(spacing: 10) {
             Text(avatar).font(.system(size: 30))
+                .background { AuraView(auraId: aura ?? "au.none", radius: 20).frame(width: 90, height: 90) }
                 .modifier(ShakeEffect(amount: shake))
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -105,9 +108,18 @@ struct HealthBar: View {
             }
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.red.opacity(flashRed ? 0.25 : 0)).allowsHitTesting(false))
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 5)
         .animation(Theme.bouncy, value: hp)
-        .onChange(of: hitTick) { _, _ in withAnimation(.linear(duration: 0.45)) { shake += 1 } }
+        .onChange(of: hitTick) { _, _ in
+            // land the shake when the projectile arrives
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
+                withAnimation(.linear(duration: 0.45)) { shake += 1 }
+                flashRed = true
+                withAnimation(.easeOut(duration: 0.5)) { flashRed = false }
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(name), \(hp) health")
     }
@@ -368,6 +380,8 @@ private struct MatchScreen: View {
     let match: DuelMatch
     @Binding var confetti: Int
     let close: () -> Void
+    @State private var shakeT: CGFloat = 1
+    @State private var shakeStrength: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 14) {
@@ -405,7 +419,7 @@ private struct MatchScreen: View {
         return VStack(spacing: 18) {
             Spacer()
             Text("🚫").font(.system(size: 80))
-            Text("CAN'T BATTLE").font(.street(48))
+            Text("can't battle").font(.street(48))
             Text(mine
                  ? "You have swear words ON, \(opp?.name ?? "your friend") has them OFF."
                  : "You have swear words OFF, \(opp?.name ?? "your friend") has them ON.")
@@ -492,7 +506,7 @@ private struct MatchScreen: View {
         return ZStack {
             VStack(spacing: 14) {
                 HealthBar(name: opp.name, avatar: opp.avatarSymbol, hp: match.hp(of: opp.id), tint: Theme.sky,
-                          hitTick: iWon ? match.hitTick : 0)
+                          hitTick: iWon ? match.hitTick : 0, aura: opp.aura)
                 Spacer(minLength: 0)
                 if let q = match.currentQuestion {
                     DuelQuestionPanel(question: q, picked: match.myPick, locked: match.lockedOut || match.phase == .roundResult,
@@ -501,11 +515,17 @@ private struct MatchScreen: View {
                 roundBanner.frame(height: 44)
                 Spacer(minLength: 0)
                 HealthBar(name: match.me.name, avatar: match.me.avatarSymbol, hp: match.hp(of: match.me.id),
-                          hitTick: !iWon && match.roundWinner != nil ? match.hitTick : 0)
+                          hitTick: !iWon && match.roundWinner != nil ? match.hitTick : 0, aura: match.me.aura)
             }
-            HitBurst(symbol: iWon ? match.me.effectSymbol : opp.effectSymbol, damage: match.lastDamage,
-                     trigger: match.hitTick, towardTop: iWon)
+            HitEffectView(effectId: iWon ? match.me.effect : opp.effect, trigger: match.hitTick,
+                          from: UnitPoint(x: 0.5, y: iWon ? 0.9 : 0.1), to: UnitPoint(x: 0.5, y: iWon ? 0.1 : 0.9),
+                          damage: match.lastDamage) { strength in
+                shakeStrength = strength
+                shakeT = 0
+                withAnimation(.linear(duration: 0.45)) { shakeT = 1 }
+            }
         }
+        .modifier(ImpactShake(amount: shakeT, strength: shakeStrength))
     }
 
     @ViewBuilder

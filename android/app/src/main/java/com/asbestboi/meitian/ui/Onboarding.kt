@@ -78,7 +78,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                 0 -> {
                     Spacer(Modifier.weight(1f))
                     Text("每天", style = street(110.sp), color = Street.c.red, modifier = Modifier.align(Alignment.CenterHorizontally))
-                    Text("MĚITIĀN", style = street(44.sp), color = Street.c.text, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Text("měitiān", style = street(44.sp), color = Street.c.text, modifier = Modifier.align(Alignment.CenterHorizontally))
                     Gap(8.dp)
                     Text("A little Chinese every day.\nNew words, real friends, real sentences.", color = Street.c.secondary,
                         fontSize = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
@@ -107,7 +107,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                 2 -> {
                     CloseButton { if (retakeOnly) onDone() else step = 1 }
                     Gap(14.dp)
-                    Text("HOW'S YOUR CHINESE?", style = street(34.sp), color = Street.c.text)
+                    Text("how's your chinese?", style = street(34.sp), color = Street.c.text)
                     Text("Pick what feels right. Then a quick quiz confirms it.", color = Street.c.secondary)
                     Gap(12.dp)
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -119,7 +119,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                             ) {
                                 Text(emoji, fontSize = 32.sp); HSpacer(12.dp)
                                 Column(Modifier.weight(1f)) {
-                                    Text(title, fontWeight = FontWeight.Black, color = Street.c.text)
+                                    Text(title, fontWeight = FontWeight.Bold, color = Street.c.text)
                                     Text(sub, color = Street.c.secondary, fontSize = 14.sp)
                                 }
                                 Text(if (claimed == i) "✅" else "⚪", fontSize = 22.sp)
@@ -163,7 +163,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                             confirmed == claimed -> if (confirmed == 0) "Let's begin together" else "Confirmed! 太棒了 (tài bàng le)"
                             else -> "Let's build a solid base"
                         },
-                        fontSize = 22.sp, fontWeight = FontWeight.Black, color = Street.c.text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                        fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Street.c.text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                     )
                     val top = Words.maxLevel
                     val start = minOf(confirmed + 1, top)
@@ -182,7 +182,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                 else -> {
                     CloseButton { step = 4 }
                     Gap(14.dp)
-                    Text("YOUR DAILY GOAL", style = street(34.sp), color = Street.c.text)
+                    Text("your daily goal", style = street(34.sp), color = Street.c.text)
                     Text("How many new words a day?", color = Street.c.secondary)
                     Gap(14.dp)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

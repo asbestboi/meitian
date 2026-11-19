@@ -5,6 +5,7 @@ uniffi::setup_scaffolding!();
 
 pub mod challenge;
 pub mod content;
+pub mod effects;
 pub mod exercises;
 pub mod game;
 pub mod pinyin;
@@ -14,6 +15,7 @@ pub mod words;
 
 pub use challenge::*;
 pub use content::*;
+pub use effects::*;
 pub use exercises::*;
 pub use game::*;
 pub use pinyin::*;

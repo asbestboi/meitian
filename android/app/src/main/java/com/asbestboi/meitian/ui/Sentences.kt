@@ -132,10 +132,10 @@ fun WordPeek(w: CoreWord, close: () -> Unit) {
                 SpeakButton(w.hanzi, 48.dp)
                 Spacer(Modifier.weight(1f))
                 if (app.cards[w.id] == null) {
-                    Text("＋ Add to review", fontWeight = FontWeight.Black, color = Street.c.jade,
+                    Text("＋ Add to review", fontWeight = FontWeight.Bold, color = Street.c.jade,
                         modifier = Modifier.clickable { app.addToReview(listOf(w)) }.padding(8.dp))
                 } else {
-                    Text("✓ In your reviews", fontWeight = FontWeight.Black, color = Street.c.jade)
+                    Text("✓ In your reviews", fontWeight = FontWeight.Bold, color = Street.c.jade)
                 }
             }
             Text(w.levelLabel, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
@@ -151,7 +151,7 @@ fun ExampleSentences(word: CoreWord) {
     }
     if (sentences.isEmpty()) return
     Column(Modifier.fillMaxWidth().card().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("MORE EXAMPLES", style = street(16.sp), color = Street.c.text)
+        Text("more examples", style = street(16.sp), color = Street.c.text)
         sentences.forEach { s ->
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
@@ -197,9 +197,9 @@ fun SentenceSession(close: () -> Unit) {
                 finished -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Spacer(Modifier.weight(1f))
                     Text("$correct/${exercises.size}", style = street(90.sp), color = Street.c.text)
-                    Text(if (correct * 2 >= exercises.size) "YOU'RE READING REAL CHINESE! 厉害!" else "SENTENCES ARE HARD. 加油!",
+                    Text(if (correct * 2 >= exercises.size) "you're reading real chinese! 厉害!" else "sentences are hard. 加油!",
                         style = street(24.sp), color = Street.c.red, textAlign = TextAlign.Center)
-                    Text("+${correct * 4} XP", fontWeight = FontWeight.Black, color = Street.c.gold)
+                    Text("+${correct * 4} XP", fontWeight = FontWeight.Bold, color = Street.c.gold)
                     Spacer(Modifier.weight(1f))
                     BigButton("Done", onClick = close)
                 }
@@ -254,7 +254,7 @@ private fun ExerciseView(ex: Exercise, onNext: (Boolean) -> Unit) {
     val shakeX = (sin(shake.value * Math.PI * 4) * 10 * (1 - shake.value)).roundToInt()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(ex.kind.title().uppercase(), style = street(26.sp), color = Street.c.text)
+        Text(ex.kind.title().lowercase(), style = street(26.sp), color = Street.c.text)
         Column(Modifier.fillMaxWidth().heightIn(min = 110.dp).card().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (ex.kind) {
                 ExerciseKind.WORD_ORDER -> {
@@ -267,7 +267,7 @@ private fun ExerciseView(ex: Exercise, onNext: (Boolean) -> Unit) {
                 }
                 ExerciseKind.LISTEN_PICK -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpeakButton(s.zh, 84.dp, Street.c.sky)
-                    Text("🐢 Slower", fontWeight = FontWeight.Black, color = Street.c.sky, modifier = Modifier.clickable { Speaker.say(s.zh, true) })
+                    Text("🐢 Slower", fontWeight = FontWeight.Bold, color = Street.c.sky, modifier = Modifier.clickable { Speaker.say(s.zh, true) })
                     if (result != null) TokenSentence(s.tokens, 20.sp, center = true)
                 }
                 ExerciseKind.TRANSLATE_PICK -> Row(verticalAlignment = Alignment.Top) {
@@ -319,7 +319,7 @@ private fun ExerciseView(ex: Exercise, onNext: (Boolean) -> Unit) {
         val r = result
         if (r != null) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (r) "✅ NICE! 对了" else "❌ NOT QUITE", style = street(22.sp), color = if (r) Street.c.jade else Street.c.red)
+                Text(if (r) "✅ nice! 对了" else "❌ not quite", style = street(22.sp), color = if (r) Street.c.jade else Street.c.red)
                 if (!r || ex.kind == ExerciseKind.WORD_ORDER) {
                     TokenSentence(s.tokens, 20.sp, forcePinyin = true)
                     Text(s.en, color = Street.c.secondary)

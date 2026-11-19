@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.Color
 import org.json.JSONObject
 
 enum class CosmeticKind(val label: String) {
-    Avatar("Avatars"), Frame("Frames"), Title("Titles"), Effect("Hits"), Sticker("Stickers")
+    Avatar("Avatars"), Frame("Frames"), Title("Titles"), Effect("Hits"), Aura("Auras"), Sticker("Stickers")
 }
 
 data class Cosmetic(val id: String, val kind: CosmeticKind, val name: String, val symbol: String, val price: Int, val swear: Boolean = false)
@@ -16,6 +16,7 @@ object Catalog {
     private fun f(id: String, name: String, p: Int) = Cosmetic(id, CosmeticKind.Frame, name, "", p)
     private fun t(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Title, name, s, p, sw)
     private fun e(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Effect, name, s, p, sw)
+    private fun au(id: String, name: String, s: String, p: Int) = Cosmetic(id, CosmeticKind.Aura, name, s, p)
     private fun st(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Sticker, name, s, p, sw)
 
     val all = listOf(
@@ -40,6 +41,11 @@ object Catalog {
         e("fx.envelope", "Red Envelope", "🧧", 150), e("fx.blossom", "Blossom", "🌸", 150), e("fx.dragon", "Dragon Strike", "🐉", 400),
         e("fx.bomb", "Bomb", "💣", 120), e("fx.glove", "Knockout", "🥊", 140), e("fx.firecracker", "Firecracker", "🧨", 160),
         e("fx.tomato", "Tomato", "🍅", 90), e("fx.mic", "Mic Drop", "🎤", 200), e("fx.poop", "Poop", "💩", 130, true),
+        e("fx.glitch", "Glitch", "👾", 220), e("fx.chrome", "Chrome Ripple", "💿", 280), e("fx.money", "Money Rain", "💸", 320),
+        e("fx.snow", "Blizzard", "❄️", 180), e("fx.hearts", "Heartbreaker", "💘", 160),
+        au("au.none", "No aura", "", 0), au("au.sparkle", "Sparkle", "✦", 120), au("au.flame", "On Fire", "🔥", 260),
+        au("au.hearts", "Lovestruck", "💗", 150), au("au.snow", "Frosty", "❄️", 150), au("au.notes", "Vibing", "🎶", 180),
+        au("au.glitch", "Corrupted", "▓", 240), au("au.money", "Rich", "💸", 400), au("au.chrome", "Chrome", "💿", 500),
         st("st.none", "No sticker", "", 0), st("st.fire", "On Fire", "🔥", 60), st("st.crown", "Crown", "👑", 200),
         st("st.lantern", "Lantern", "🏮", 80), st("st.skate", "Skate", "🛹", 100), st("st.cap", "Snapback", "🧢", 100),
         st("st.tape", "Mixtape", "📼", 120), st("st.spray", "Spray Can", "🎨", 120), st("st.devil", "Devil", "😈", 150),
@@ -85,6 +91,7 @@ data class PlayerCard(
     val effect: String,
     val sticker: String? = null,
     val swears: Boolean? = null,
+    val aura: String? = null,
 ) {
     val swearsOn get() = swears ?: false
     val avatarSymbol get() = Catalog[avatar]?.symbol ?: "🐣"
@@ -95,7 +102,7 @@ data class PlayerCard(
     fun json() = JSONObject().apply {
         put("id", id); put("name", name); put("level", level); put("wordsLearned", wordsLearned); put("wins", wins)
         put("losses", losses); put("avatar", avatar); put("frame", frame); put("title", title); put("effect", effect)
-        put("sticker", sticker ?: "st.none"); put("swears", swearsOn)
+        put("sticker", sticker ?: "st.none"); put("swears", swearsOn); put("aura", aura ?: "au.none")
     }
 
     companion object {
@@ -103,7 +110,7 @@ data class PlayerCard(
             o.getString("id"), o.optString("name", "Player"), o.optInt("level", 1), o.optInt("wordsLearned"),
             o.optInt("wins"), o.optInt("losses"), o.optString("avatar", "av.chick"), o.optString("frame", "fr.lantern"),
             o.optString("title", "ti.newbie"), o.optString("effect", "fx.boom"), o.optString("sticker", "st.none"),
-            o.optBoolean("swears", false),
+            o.optBoolean("swears", false), o.optString("aura", "au.none"),
         )
     }
 }

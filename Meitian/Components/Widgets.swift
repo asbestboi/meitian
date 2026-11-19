@@ -96,7 +96,8 @@ struct StreakBadge: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(Theme.card, in: Capsule())
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         .accessibilityLabel("\(streak) day streak")
     }
 }
@@ -110,7 +111,8 @@ struct XPBadge: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(Theme.card, in: Capsule())
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         .accessibilityLabel("\(xp) XP")
     }
 }

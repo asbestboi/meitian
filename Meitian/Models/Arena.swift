@@ -4,7 +4,7 @@ import Observation
 // MARK: - Cosmetics
 
 enum CosmeticKind: String, Codable, CaseIterable, Identifiable {
-    case avatar, frame, title, effect, sticker
+    case avatar, frame, title, effect, aura, sticker
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -12,6 +12,7 @@ enum CosmeticKind: String, Codable, CaseIterable, Identifiable {
         case .frame: return "Frames"
         case .title: return "Titles"
         case .effect: return "Hits"
+        case .aura: return "Auras"
         case .sticker: return "Stickers"
         }
     }
@@ -97,6 +98,22 @@ enum Catalog {
         Cosmetic(id: "fx.tomato", kind: .effect, name: "Tomato", symbol: "🍅", price: 90),
         Cosmetic(id: "fx.mic", kind: .effect, name: "Mic Drop", symbol: "🎤", price: 200),
         Cosmetic(id: "fx.poop", kind: .effect, name: "Poop", symbol: "💩", price: 130, swear: true),
+        // new hits (real particle effects)
+        Cosmetic(id: "fx.glitch", kind: .effect, name: "Glitch", symbol: "👾", price: 220),
+        Cosmetic(id: "fx.chrome", kind: .effect, name: "Chrome Ripple", symbol: "💿", price: 280),
+        Cosmetic(id: "fx.money", kind: .effect, name: "Money Rain", symbol: "💸", price: 320),
+        Cosmetic(id: "fx.snow", kind: .effect, name: "Blizzard", symbol: "❄️", price: 180),
+        Cosmetic(id: "fx.hearts", kind: .effect, name: "Heartbreaker", symbol: "💘", price: 160),
+        // auras (particles around your avatar)
+        Cosmetic(id: "au.none", kind: .aura, name: "No aura", symbol: "", price: 0),
+        Cosmetic(id: "au.sparkle", kind: .aura, name: "Sparkle", symbol: "✦", price: 120),
+        Cosmetic(id: "au.flame", kind: .aura, name: "On Fire", symbol: "🔥", price: 260),
+        Cosmetic(id: "au.hearts", kind: .aura, name: "Lovestruck", symbol: "💗", price: 150),
+        Cosmetic(id: "au.snow", kind: .aura, name: "Frosty", symbol: "❄️", price: 150),
+        Cosmetic(id: "au.notes", kind: .aura, name: "Vibing", symbol: "🎶", price: 180),
+        Cosmetic(id: "au.glitch", kind: .aura, name: "Corrupted", symbol: "▓", price: 240),
+        Cosmetic(id: "au.money", kind: .aura, name: "Rich", symbol: "💸", price: 400),
+        Cosmetic(id: "au.chrome", kind: .aura, name: "Chrome", symbol: "💿", price: 500),
         // stickers (slapped on your card)
         Cosmetic(id: "st.none", kind: .sticker, name: "No sticker", symbol: "", price: 0),
         Cosmetic(id: "st.fire", kind: .sticker, name: "On Fire", symbol: "🔥", price: 60),
@@ -162,6 +179,8 @@ struct PlayerCard: Codable, Hashable {
     /// Added in 1.3 (optional so older phones' cards still decode).
     var sticker: String? = nil
     var swears: Bool? = nil
+    /// Added in 1.6.
+    var aura: String? = nil
 
     var swearsOn: Bool { swears ?? false }
     var stickerSymbol: String? {
@@ -215,18 +234,20 @@ private struct ArenaSave: Codable {
     var totalDamage: Int
     var rivals: [String: Rival]
     var sticker: String?
+    var aura: String?
 }
 
 @Observable
 final class ArenaStore {
     var playerId = UUID().uuidString
     var coins = 0
-    var owned: Set<String> = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none"]
+    var owned: Set<String> = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"]
     var avatar = "av.chick"
     var frame = "fr.lantern"
     var title = "ti.newbie"
     var effect = "fx.boom"
     var sticker = "st.none"
+    var aura = "au.none"
     var wins = 0
     var losses = 0
     var draws = 0
@@ -247,7 +268,9 @@ final class ArenaStore {
             wins = s.wins; losses = s.losses; draws = s.draws; streak = s.streak; bestStreak = s.bestStreak
             fastestMs = s.fastestMs; totalDamage = s.totalDamage; rivals = s.rivals
             sticker = s.sticker ?? "st.none"
+            aura = s.aura ?? "au.none"
             owned.insert("st.none")
+            owned.insert("au.none")
         } else {
             save()
         }
@@ -256,14 +279,14 @@ final class ArenaStore {
     func save() {
         let s = ArenaSave(playerId: playerId, coins: coins, owned: owned, avatar: avatar, frame: frame, title: title,
                           effect: effect, wins: wins, losses: losses, draws: draws, streak: streak, bestStreak: bestStreak,
-                          fastestMs: fastestMs, totalDamage: totalDamage, rivals: rivals, sticker: sticker)
+                          fastestMs: fastestMs, totalDamage: totalDamage, rivals: rivals, sticker: sticker, aura: aura)
         if let data = try? JSONEncoder().encode(s) { try? data.write(to: url, options: .atomic) }
     }
 
     func reset() {
         let id = playerId
-        coins = 0; owned = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none"]
-        avatar = "av.chick"; frame = "fr.lantern"; title = "ti.newbie"; effect = "fx.boom"; sticker = "st.none"
+        coins = 0; owned = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"]
+        avatar = "av.chick"; frame = "fr.lantern"; title = "ti.newbie"; effect = "fx.boom"; sticker = "st.none"; aura = "au.none"
         wins = 0; losses = 0; draws = 0; streak = 0; bestStreak = 0; fastestMs = nil; totalDamage = 0; rivals = [:]
         playerId = id
         save()
@@ -278,7 +301,7 @@ final class ArenaStore {
         return PlayerCard(id: playerId, name: name.isEmpty ? "Player" : name, level: level, wordsLearned: wordsLearned,
                           wins: wins, losses: losses, avatar: clean(avatar, "av.chick"), frame: frame,
                           title: clean(title, "ti.newbie"), effect: clean(effect, "fx.boom"),
-                          sticker: clean(sticker, "st.none"), swears: swears)
+                          sticker: clean(sticker, "st.none"), swears: swears, aura: aura)
     }
 
     // MARK: shop
@@ -289,6 +312,7 @@ final class ArenaStore {
         case .frame: return frame
         case .title: return title
         case .effect: return effect
+        case .aura: return aura
         case .sticker: return sticker
         }
     }
@@ -300,6 +324,7 @@ final class ArenaStore {
         case .frame: frame = item.id
         case .title: title = item.id
         case .effect: effect = item.id
+        case .aura: aura = item.id
         case .sticker: sticker = item.id
         }
         save()

@@ -195,7 +195,7 @@ struct StatsView: View {
 
     private func settingsBlock<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased()).font(.rounded(.caption, weight: .black)).foregroundStyle(.secondary)
+            Text(title.lowercased()).font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
                 .padding(.leading, 4)
             VStack(alignment: .leading, spacing: 0) { content() }
                 .font(.rounded(.body))

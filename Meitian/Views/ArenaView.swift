@@ -13,6 +13,10 @@ struct PlayerCardView: View {
                 .frame(width: compact ? 54 : 78, height: compact ? 54 : 78)
                 .background(.white.opacity(0.22), in: Circle())
                 .overlay(Circle().stroke(.white.opacity(0.6), lineWidth: 2))
+                .background {
+                    AuraView(auraId: card.aura ?? "au.none", radius: compact ? 28 : 40)
+                        .frame(width: compact ? 120 : 170, height: compact ? 120 : 170)
+                }
             VStack(alignment: .leading, spacing: 3) {
                 Text(card.name)
                     .font(.rounded(compact ? .headline : .title2, weight: .bold))
@@ -215,13 +219,45 @@ struct ShopView: View {
     @State private var boughtTick = 0
     @State private var deniedTick = 0
     @State private var confetti = 0
+    @State private var demoEffect = "fx.boom"
+    @State private var demoTick = 0
+    @State private var shakeT: CGFloat = 1
+    @State private var shakeStrength: CGFloat = 0
     @AppStorage(Prefs.swears) private var swears = false
 
     private var preview: PlayerCard {
         var c = card
         c.avatar = arena.avatar; c.frame = arena.frame; c.title = arena.title; c.effect = arena.effect
-        c.sticker = arena.sticker
+        c.sticker = arena.sticker; c.aura = arena.aura
         return c
+    }
+
+    /// Hit preview stage: tap any hit to see it fly.
+    private var demoStage: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).fill(Theme.nightGradient)
+            HStack {
+                Text(preview.avatarSymbol).font(.system(size: 40))
+                Spacer()
+                Text("🎯").font(.system(size: 40))
+            }
+            .padding(.horizontal, 24)
+            HitEffectView(effectId: demoEffect, trigger: demoTick, from: UnitPoint(x: 0.14, y: 0.55),
+                          to: UnitPoint(x: 0.86, y: 0.5), damage: 22) { strength in
+                shakeStrength = strength
+                shakeT = 0
+                withAnimation(.linear(duration: 0.45)) { shakeT = 1 }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            VStack {
+                Spacer()
+                Text("tap a hit to try it").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                    .padding(.bottom, 8)
+            }
+        }
+        .frame(height: 150)
+        .modifier(ImpactShake(amount: shakeT, strength: shakeStrength))
+        .onTapGesture { demoTick += 1 }
     }
 
     var body: some View {
@@ -245,15 +281,17 @@ struct ShopView: View {
                     .foregroundStyle(.primary)
                     .accessibilityLabel("Close")
                 }
-                PlayerCardView(card: preview, compact: true)
-                    .overlay(alignment: .topTrailing) {
-                        Text(preview.effectSymbol).font(.title).padding(10)
-                    }
-                    .animation(Theme.bouncy, value: preview)
+                if kind == .effect {
+                    demoStage.transition(.opacity.combined(with: .scale(scale: 0.96)))
+                } else {
+                    PlayerCardView(card: preview, compact: true)
+                        .animation(Theme.bouncy, value: preview)
+                }
                 Picker("Kind", selection: $kind) {
                     ForEach(CosmeticKind.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .animation(Theme.spring, value: kind)
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         ForEach(Catalog.items(kind, swears: swears)) { item in itemTile(item) }
@@ -274,6 +312,10 @@ struct ShopView: View {
         let equipped = arena.equipped(item.kind) == item.id
         let affordable = arena.coins >= item.price
         return Button {
+            if item.kind == .effect {
+                demoEffect = item.id
+                demoTick += 1
+            }
             if owned {
                 withAnimation(Theme.bouncy) { arena.equip(item) }
             } else if arena.buy(item) {
@@ -317,6 +359,11 @@ struct ShopView: View {
         switch item.kind {
         case .avatar, .effect:
             Text(item.symbol).font(.system(size: 48))
+        case .aura:
+            ZStack {
+                AuraView(auraId: item.id, radius: 22).frame(width: 110, height: 90)
+                Text(item.symbol.isEmpty ? "🚫" : "🐣").font(.system(size: 36))
+            }
         case .sticker:
             if item.symbol.isEmpty {
                 Image(systemName: "nosign").font(.system(size: 36, weight: .bold)).foregroundStyle(.secondary)

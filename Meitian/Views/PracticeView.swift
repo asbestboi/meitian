@@ -127,7 +127,7 @@ struct PracticeView: View {
             HStack(spacing: 14) {
                 Text("🤬").font(.system(size: 44))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("SWEAR SPRINT").font(.street(30))
+                    Text("swear sprint").font(.street(28))
                     Text("Learn street Chinese fast: flip cards, then 60 s of rapid fire. Combos multiply.")
                         .font(.rounded(.caption, weight: .semibold)).opacity(0.9)
                         .multilineTextAlignment(.leading)

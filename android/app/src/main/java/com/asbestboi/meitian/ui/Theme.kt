@@ -29,6 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
@@ -46,7 +50,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The "street" look shared with iOS: concrete paper, ink outlines, hard offset shadows, loud colors. */
+/** "Quiet base, loud accents" (shared with iOS): off-white / near-black surfaces, soft cards without
+ *  outlines, big hanzi, bold type, one hypercolor accent (acid lime, hot pink) per surface. */
 data class StreetColors(
     val paper: Color,
     val card: Color,
@@ -56,18 +61,20 @@ data class StreetColors(
     val red: Color,
     val gold: Color,
     val jade: Color,
-    val sky: Color = Color(0xFF3370FF),
-    val plum: Color = Color(0xFF9E54FF),
-    val pink: Color = Color(0xFFFF338C),
+    val sky: Color = Color(0xFF3D7AFF),
+    val plum: Color = Color(0xFF945CFF),
+    val pink: Color = Color(0xFFFF3DA8),
+    val lime: Color = Color(0xFFC6FF3D),
 )
 
 private val Light = StreetColors(
-    paper = Color(0xFFE8E4DB), card = Color(0xFFF9F6F0), ink = Color(0xFF151515), text = Color(0xFF151515),
-    secondary = Color(0xFF6B6760), red = Color(0xFFF53326), gold = Color(0xFFED8F00), jade = Color(0xFF178F4A),
+    paper = Color(0xFFF6F5F2), card = Color(0xFFFFFFFF), ink = Color(0xFF0B0B0C), text = Color(0xFF0B0B0C),
+    secondary = Color(0xFF7A7873), red = Color(0xFFF2382B), gold = Color(0xFFED8F00), jade = Color(0xFF17914A),
+    lime = Color(0xFF8CC414),
 )
 private val Dark = StreetColors(
-    paper = Color(0xFF111111), card = Color(0xFF1F1F1F), ink = Color(0xFFEDE9E0), text = Color(0xFFF2EFE6),
-    secondary = Color(0xFFA29E96), red = Color(0xFFFF5C4A), gold = Color(0xFFFFC726), jade = Color(0xFF42DE85),
+    paper = Color(0xFF0B0B0C), card = Color(0xFF18181B), ink = Color(0xFFF2F2F0), text = Color(0xFFF2F2F0),
+    secondary = Color(0xFF9A9893), red = Color(0xFFFF5C4A), gold = Color(0xFFFFC726), jade = Color(0xFF42DE85),
 )
 
 val LocalStreet = staticCompositionLocalOf { Light }
@@ -75,152 +82,122 @@ val LocalStreet = staticCompositionLocalOf { Light }
 object Street {
     val c: StreetColors @Composable get() = LocalStreet.current
 
-    fun warm() = Brush.linearGradient(listOf(Color(0xFFFF5C33), Color(0xFFE01C29)))
-    fun gold() = Brush.linearGradient(listOf(Color(0xFFFFA81A), Color(0xFFEB6B00)))
-    fun jade() = Brush.linearGradient(listOf(Color(0xFF29C266), Color(0xFF0D8545)))
-    fun sky() = Brush.linearGradient(listOf(Color(0xFF4285FF), Color(0xFF2B3BDB)))
-    fun pink() = Brush.linearGradient(listOf(Color(0xFFFF5C9E), Color(0xFFDB126E)))
-    fun ink() = Brush.linearGradient(listOf(Color(0xFF383838), Color(0xFF0D0D0D)))
-    fun purple() = Brush.linearGradient(listOf(Color(0xFFB873FF), Color(0xFF7A38EB)))
+    fun warm() = Brush.linearGradient(listOf(Color(0xFFFF6B4D), Color(0xFFFF2E78)))
+    fun gold() = Brush.linearGradient(listOf(Color(0xFFFFCC33), Color(0xFFFF851A)))
+    fun jade() = Brush.linearGradient(listOf(Color(0xFF4DE08C), Color(0xFF0DA87A)))
+    fun sky() = Brush.linearGradient(listOf(Color(0xFF5499FF), Color(0xFF6B52FF)))
+    fun pink() = Brush.linearGradient(listOf(Color(0xFFFF6BBF), Color(0xFFB34DFF)))
+    fun ink() = Brush.linearGradient(listOf(Color(0xFF1A1A1F), Color(0xFF08080A)))
+    fun night() = ink()
+    fun lime() = Brush.linearGradient(listOf(Color(0xFFDBFF5C), Color(0xFF8CF273)))
+    fun purple() = Brush.linearGradient(listOf(Color(0xFFB87AFF), Color(0xFF7347F2)))
+    fun chrome() = Brush.linearGradient(listOf(Color(0xFFCCF2FF), Color(0xFFF9CCFF), Color(0xFFD9FFCC), Color(0xFFCCDBFF)))
 
     fun level(level: Int): Brush = when (level) {
-        1 -> jade(); 2 -> sky(); 3 -> purple(); 5 -> pink(); else -> warm()
+        1 -> jade(); 2 -> sky(); 3 -> purple(); 4 -> warm(); 5 -> gold(); else -> pink()
     }
 
     @Composable
     fun levelColor(level: Int): Color = when (level) {
-        1 -> c.jade; 2 -> c.sky; 3 -> c.plum; 5 -> c.pink; else -> c.red
+        1 -> c.jade; 2 -> c.sky; 3 -> c.plum; 4 -> c.red; 5 -> c.gold; else -> c.pink
     }
 
-    val radius = 14.dp
+    val radius = 24.dp
 }
 
-/** Condensed-feel headline: black weight, tight tracking. */
-fun street(size: TextUnit) = TextStyle(fontWeight = FontWeight.Black, fontSize = size, letterSpacing = (-0.02).sp * size.value)
+/** Display headline: heavy weight, slightly tight tracking. */
+fun street(size: TextUnit) = TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = size, letterSpacing = (-0.015).sp * size.value)
 
 @Composable
 fun MeitianTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val colors = if (dark) Dark else Light
-    val scheme = if (dark) darkColorScheme(primary = colors.red, background = colors.paper, surface = colors.card)
-    else lightColorScheme(primary = colors.red, background = colors.paper, surface = colors.card)
+    val scheme = if (dark) darkColorScheme(primary = colors.ink, background = colors.paper, surface = colors.card)
+    else lightColorScheme(primary = colors.ink, background = colors.paper, surface = colors.card)
     CompositionLocalProvider(LocalStreet provides colors) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
 
-/** Card with ink outline and hard offset shadow. */
+/** Soft card: big radius, one gentle shadow, no outline. (`ink` / `shadow` kept for call sites;
+ *  a non-default ink color marks a selected card with a thin ring.) */
 fun Modifier.streetCard(card: Color, ink: Color, radius: Dp = Street.radius, shadow: Dp = 5.dp): Modifier =
     this
-        .padding(end = shadow, bottom = shadow)
-        .drawBehind {
-            val r = radius.toPx()
-            val s = shadow.toPx()
-            drawRoundRect(ink, topLeft = Offset(s * 0.8f, s), size = size, cornerRadius = CornerRadius(r))
-        }
+        .shadow(if (shadow > 0.dp) 6.dp else 0.dp, RoundedCornerShape(radius), ambientColor = Color.Black.copy(alpha = 0.08f), spotColor = Color.Black.copy(alpha = 0.10f))
         .clip(RoundedCornerShape(radius))
         .background(card)
-        .border(2.5.dp, ink, RoundedCornerShape(radius))
 
 @Composable
 fun Modifier.card(): Modifier = streetCard(Street.c.card, Street.c.ink)
 
-@Composable
-fun Modifier.block(brush: Brush): Modifier {
-    val ink = Street.c.ink
-    return this
-        .padding(end = 6.dp, bottom = 6.dp)
-        .drawBehind {
-            drawRoundRect(ink, topLeft = Offset(5.dp.toPx(), 6.dp.toPx()), size = size, cornerRadius = CornerRadius(18.dp.toPx()))
-        }
-        .clip(RoundedCornerShape(18.dp))
-        .background(brush)
-        .border(3.dp, ink, RoundedCornerShape(18.dp))
-}
+/** Selected-state ring for cards (equipped item, chosen option). */
+fun Modifier.ring(on: Boolean, color: Color, radius: Dp = Street.radius): Modifier =
+    if (on) this.border(2.dp, color, RoundedCornerShape(radius)) else this
 
-/** Big chunky button that gets pushed down into its ink shadow. */
+/** Hero block: big colored surface with soft depth. */
+@Composable
+fun Modifier.block(brush: Brush): Modifier =
+    this
+        .shadow(10.dp, RoundedCornerShape(28.dp), ambientColor = Color.Black.copy(alpha = 0.12f), spotColor = Color.Black.copy(alpha = 0.16f))
+        .clip(RoundedCornerShape(28.dp))
+        .background(brush)
+
+/** Big call-to-action: full-width capsule. Default is ink (black / off-white); pass a brush for color. */
 @Composable
 fun BigButton(
     title: String,
     modifier: Modifier = Modifier,
-    brush: Brush = Street.warm(),
+    brush: Brush? = null,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val ink = Street.c.ink
     val haptic = LocalHapticFeedback.current
-    val dy by animateDpAsState(if (pressed) 4.dp else 0.dp, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "press")
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "press")
+    val fill = brush ?: SolidColor(Street.c.ink)
     Box(
         modifier
             .fillMaxWidth()
-            .padding(bottom = 5.dp)
-            .drawBehind {
-                drawRoundRect(ink, topLeft = Offset(0f, 5.dp.toPx()), size = size, cornerRadius = CornerRadius(Street.radius.toPx()))
-            }
-            .offset(y = dy)
-            .clip(RoundedCornerShape(Street.radius))
-            .background(brush, alpha = if (enabled) 1f else 0.4f)
-            .border(3.dp, ink, RoundedCornerShape(Street.radius))
+            .scale(scale)
+            .shadow(if (enabled) 8.dp else 0.dp, RoundedCornerShape(50), ambientColor = Color.Black.copy(alpha = 0.12f), spotColor = Color.Black.copy(alpha = 0.14f))
+            .clip(RoundedCornerShape(50))
+            .background(fill, alpha = if (enabled) 1f else 0.35f)
             .clickable(source, null, enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onClick()
             }
-            .padding(vertical = 16.dp),
+            .padding(vertical = 18.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(title.uppercase(), color = Color.White, style = street(20.sp), letterSpacing = 1.sp)
+        Text(title.lowercase(), color = if (brush == null) Street.c.paper else Color.White, fontWeight = FontWeight.Bold, fontSize = 19.sp)
     }
 }
 
-/** Sticker tag: solid color, ink outline, slightly crooked. */
+/** Small tag: tinted capsule, no outline. */
 @Composable
-fun Pill(text: String, color: Color, tilt: Float = -2f, modifier: Modifier = Modifier) {
+fun Pill(text: String, color: Color, tilt: Float = 0f, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .rotate(tilt)
-            .clip(RoundedCornerShape(6.dp))
-            .background(color)
-            .border(1.5.dp, Street.c.ink, RoundedCornerShape(6.dp))
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
-        Text(text.uppercase(), color = Color.White, fontWeight = FontWeight.Black, fontSize = 12.sp)
+        Text(text.lowercase(), color = color, fontWeight = FontWeight.Bold, fontSize = 12.sp)
     }
 }
 
-/** Masking tape strip. */
+/** Removed from the look; kept so old call sites compile. */
 @Composable
-fun Tape(modifier: Modifier = Modifier, angle: Float = -6f) {
-    Box(modifier.rotate(angle).width(70.dp).padding(0.dp)) {
-        Canvas(Modifier.width(70.dp).padding(0.dp).then(Modifier)) {
-            drawRect(Color(0xD9F5EBB3), size = Size(size.width, 22.dp.toPx()))
-        }
-    }
-}
+fun Tape(modifier: Modifier = Modifier, angle: Float = -6f) {}
 
-/** Printed-paper grain, drawn from a fixed seed. */
+/** Removed from the look; kept so old call sites compile. */
 @Composable
-fun Grain(modifier: Modifier = Modifier, alpha: Float = 0.06f) {
-    Canvas(modifier) {
-        var seed = 0x9E3779B97F4A7C15uL
-        fun rnd(): Float {
-            seed = seed * 6364136223846793005uL + 1442695040888963407uL
-            return ((seed shr 40).toLong() and 0xFFFFFF).toFloat() / 0xFFFFFF.toFloat()
-        }
-        val count = (size.width * size.height / 250f).toInt().coerceAtMost(40_000)
-        repeat(count) {
-            val x = rnd() * size.width
-            val y = rnd() * size.height
-            val s = 1f + rnd() * 2.5f
-            drawRect(if (rnd() > 0.45f) Color.Black else Color.White, Offset(x, y), Size(s, s), alpha = alpha)
-        }
-    }
-}
+fun Grain(modifier: Modifier = Modifier, alpha: Float = 0.06f) {}
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(text.uppercase(), color = Street.c.secondary, fontWeight = FontWeight.Black, fontSize = 13.sp,
+    Text(text.lowercase(), color = Street.c.secondary, fontWeight = FontWeight.Bold, fontSize = 15.sp,
         modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp))
 }
 

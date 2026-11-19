@@ -159,7 +159,7 @@ fun CloseButton(onClick: () -> Unit) {
     Box(
         Modifier.size(40.dp).clip(CircleShape).background(Street.c.card).border(2.dp, Street.c.ink, CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text("✕", fontWeight = FontWeight.Black, color = Street.c.text) }
+    ) { Text("✕", fontWeight = FontWeight.Bold, color = Street.c.text) }
 }
 
 /** Physics confetti. Changing [trigger] fires a burst. */
@@ -216,7 +216,7 @@ fun PlayerCardView(card: PlayerCard, compact: Boolean = false, coins: Int? = nul
             }
             coins?.let {
                 Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.22f)).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                    Text("🪙 $it", color = Color.White, fontWeight = FontWeight.Black)
+                    Text("🪙 $it", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -403,11 +403,11 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                     app.save()
                     for (i in index until items.size) items[i] = items[i].adjusted(app.settings)
                 }.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                    Text(if (listen) "🔇 Can't listen now" else "🎙️✕ Can't speak now", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Street.c.text)
+                    Text(if (listen) "🔇 Can't listen now" else "🎙️✕ Can't speak now", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.text)
                 }
             }
         }
-        Text(q.prompt.uppercase(), color = Street.c.secondary, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Text(q.prompt.lowercase(), color = Street.c.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
         Box(Modifier.fillMaxWidth().heightIn(min = 160.dp).card().padding(18.dp), contentAlignment = Alignment.Center) {
             when (q.kind) {
                 Kind.HanziToMeaning, Kind.Speak -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -441,7 +441,7 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                     color = if (listener.state == SpeechListener.State.Missed) Street.c.red else Street.c.secondary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 )
                 if (answered == null && (tries >= 2 || listener.state == SpeechListener.State.Unavailable)) {
-                    Text("Skip this one", color = Street.c.red, fontWeight = FontWeight.Black, modifier = Modifier.clickable { answer(false) })
+                    Text("Skip this one", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { answer(false) })
                 }
             }
         } else {
@@ -474,7 +474,7 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                         if (right && index % 4 < 3) Text(listOf("tài hǎo le · great", "duì le · correct", "lìhai · awesome")[index % 4], fontSize = 12.sp, color = Street.c.secondary)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("${q.word.hanzi} · ${q.word.pinyin}", fontWeight = FontWeight.Black, color = Street.c.text)
+                        Text("${q.word.hanzi} · ${q.word.pinyin}", fontWeight = FontWeight.Bold, color = Street.c.text)
                         Text(q.word.meaning, fontSize = 13.sp, color = Street.c.secondary)
                     }
                 }

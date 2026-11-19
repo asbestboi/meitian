@@ -1,40 +1,54 @@
 import SwiftUI
 
-/// The "street" look: concrete paper, ink outlines, hard offset shadows, condensed heavy type,
-/// sticker tags and loud flat colors. Colors live in the asset catalog so they adapt to dark mode.
+/// "Quiet base, loud accents": off-white / near-black surfaces, soft cards without outlines,
+/// big hanzi, bold lowercase-friendly type, and one hypercolor accent (acid lime, hot pink) per surface.
+/// Colors live in the asset catalog so they adapt to dark mode.
 enum Theme {
     static let red = Color("Vermilion")
     static let gold = Color("Gold")
     static let jade = Color("Jade")
     static let ink = Color("Ink")
-    static let sky = Color(red: 0.20, green: 0.44, blue: 1.0)
-    static let plum = Color(red: 0.62, green: 0.33, blue: 1.0)
-    static let pink = Color(red: 1.0, green: 0.20, blue: 0.55)
+    static let lime = Color("Lime")
+    static let hot = Color("Hot")
+    static let sky = Color(red: 0.24, green: 0.48, blue: 1.0)
+    static let plum = Color(red: 0.58, green: 0.36, blue: 1.0)
+    static let pink = hot
 
     static let background = Color("Paper")
     static let card = Color("Card")
 
-    /// Corner radius: tighter than iOS defaults, it reads rougher.
-    static let radius: CGFloat = 14
+    static let radius: CGFloat = 24
 
     private static func g(_ a: Color, _ b: Color) -> LinearGradient {
         LinearGradient(colors: [a, b], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
-    static let warmGradient = g(Color(red: 1.0, green: 0.36, blue: 0.20), Color(red: 0.88, green: 0.11, blue: 0.16))
-    static let goldGradient = g(Color(red: 1.0, green: 0.66, blue: 0.10), Color(red: 0.92, green: 0.42, blue: 0.0))
-    static let jadeGradient = g(Color(red: 0.16, green: 0.76, blue: 0.40), Color(red: 0.05, green: 0.52, blue: 0.27))
-    static let skyGradient = g(Color(red: 0.26, green: 0.52, blue: 1.0), Color(red: 0.17, green: 0.23, blue: 0.86))
-    static let pinkGradient = g(Color(red: 1.0, green: 0.36, blue: 0.62), Color(red: 0.86, green: 0.07, blue: 0.43))
-    static let inkGradient = g(Color(red: 0.22, green: 0.22, blue: 0.22), Color(red: 0.05, green: 0.05, blue: 0.05))
+    // Hypercolor gradients for hero surfaces and rewards.
+    static let warmGradient = g(Color(red: 1.0, green: 0.42, blue: 0.30), Color(red: 1.0, green: 0.18, blue: 0.47))
+    static let goldGradient = g(Color(red: 1.0, green: 0.80, blue: 0.20), Color(red: 1.0, green: 0.52, blue: 0.10))
+    static let jadeGradient = g(Color(red: 0.30, green: 0.88, blue: 0.55), Color(red: 0.05, green: 0.66, blue: 0.48))
+    static let skyGradient = g(Color(red: 0.33, green: 0.60, blue: 1.0), Color(red: 0.42, green: 0.32, blue: 1.0))
+    static let pinkGradient = g(Color(red: 1.0, green: 0.42, blue: 0.75), Color(red: 0.70, green: 0.30, blue: 1.0))
+    static let limeGradient = g(Color(red: 0.86, green: 1.0, blue: 0.36), Color(red: 0.55, green: 0.95, blue: 0.45))
+    /// Adapts to dark mode: black in light, off-white in dark.
+    static let inkGradient = LinearGradient(colors: [Color("Ink"), Color("Ink")], startPoint: .top, endPoint: .bottom)
+    /// Fixed dark hero surface (stays dark in both modes) for the loud-accent cards.
+    static let nightGradient = g(Color(red: 0.10, green: 0.10, blue: 0.12), Color(red: 0.03, green: 0.03, blue: 0.04))
+    /// Iridescent "chrome" for rewards (coins, level-ups, victory).
+    static let chrome = LinearGradient(
+        colors: [Color(red: 0.80, green: 0.95, blue: 1.0), Color(red: 0.98, green: 0.80, blue: 1.0),
+                 Color(red: 0.85, green: 1.0, blue: 0.80), Color(red: 0.80, green: 0.86, blue: 1.0)],
+        startPoint: .topLeading, endPoint: .bottomTrailing)
 
     static func levelColor(_ level: Int) -> Color {
         switch level {
         case 1: return jade
         case 2: return sky
         case 3: return plum
-        case 5: return pink
-        default: return red
+        case 4: return red
+        case 5: return gold
+        case 6: return hot
+        default: return hot
         }
     }
 
@@ -42,16 +56,17 @@ enum Theme {
         switch level {
         case 1: return jadeGradient
         case 2: return skyGradient
-        case 3: return g(Color(red: 0.72, green: 0.45, blue: 1.0), Color(red: 0.48, green: 0.22, blue: 0.92))
-        case 5: return pinkGradient
-        default: return warmGradient
+        case 3: return g(Color(red: 0.72, green: 0.48, blue: 1.0), Color(red: 0.45, green: 0.28, blue: 0.95))
+        case 4: return warmGradient
+        case 5: return goldGradient
+        default: return pinkGradient
         }
     }
 
     /// Default UI spring: critically damped, no overshoot.
     static let spring = Animation.spring(response: 0.38, dampingFraction: 1.0)
-    /// Momentum spring: a little bounce, only after a gesture carried energy.
-    static let bouncy = Animation.spring(response: 0.36, dampingFraction: 0.78)
+    /// Momentum spring: a little bounce, after a gesture carried energy or for playful reveals.
+    static let bouncy = Animation.spring(response: 0.36, dampingFraction: 0.72)
 }
 
 extension Font {
@@ -59,16 +74,15 @@ extension Font {
         .system(size: size, weight: weight)
     }
 
-    /// App text style. Bold and heavier weights go condensed: the streetwear poster look.
+    /// App text style: SF Pro, bold weights go heavy for strong but clean headings.
     static func rounded(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
-        let heavy = weight == .bold || weight == .heavy || weight == .black
-        return heavy ? .system(style, design: .default, weight: weight == .bold ? .heavy : .black).width(.condensed)
-                     : .system(style, design: .default, weight: weight)
+        let w: Font.Weight = weight == .bold ? .bold : weight == .heavy || weight == .black ? .heavy : weight
+        return .system(style, design: .default, weight: w)
     }
 
-    /// Big poster headline.
+    /// Big display headline.
     static func street(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .black).width(.compressed)
+        .system(size: size, weight: .heavy)
     }
 }
 
@@ -78,156 +92,123 @@ struct PressableStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? scale : 1)
-            .brightness(configuration.isPressed ? -0.03 : 0)
+            .opacity(configuration.isPressed ? 0.88 : 1)
             .animation(configuration.isPressed ? .easeOut(duration: 0.1) : Theme.bouncy, value: configuration.isPressed)
     }
 }
 
-/// Button that sits on a hard ink shadow and gets pushed down into it when pressed.
+/// Kept for call sites: now the same soft press as everything else.
 struct HardPressStyle: ButtonStyle {
     var radius: CGFloat = Theme.radius
     var depth: CGFloat = 5
     func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        configuration.label
-            .offset(y: configuration.isPressed ? depth - 1 : 0)
-            .background(shape.fill(Theme.ink).offset(y: depth))
-            .animation(configuration.isPressed ? .easeOut(duration: 0.06) : Theme.bouncy, value: configuration.isPressed)
+        PressableStyle(scale: 0.96).makeBody(configuration: configuration)
     }
 }
 
-/// Big, chunky call-to-action button.
+/// Big call-to-action: a full-width capsule. Default is ink (black / off-white); pass a gradient for
+/// a colorful one.
 struct BigButton: View {
     let title: String
     var systemImage: String? = nil
-    var gradient: LinearGradient = Theme.warmGradient
+    var gradient: LinearGradient? = nil
     var enabled: Bool = true
     let action: () -> Void
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
         Button(action: action) {
             HStack(spacing: 10) {
-                if let systemImage { Image(systemName: systemImage).font(.headline.weight(.black)) }
-                Text(title.uppercased())
-                    .font(.system(.title3, weight: .black).width(.condensed))
-                    .tracking(0.6)
+                Text(title.lowercased())
+                    .font(.system(.title3, weight: .bold))
+                if let systemImage { Image(systemName: systemImage).font(.headline.weight(.bold)) }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(gradient == nil ? Theme.background : .white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(gradient, in: shape)
-            .overlay(shape.stroke(Theme.ink, lineWidth: 3))
-            .overlay(GrainOverlay(opacity: 0.12).clipShape(shape))
-            .opacity(enabled ? 1 : 0.4)
+            .padding(.vertical, 18)
+            .background(gradient ?? Theme.inkGradient, in: Capsule())
+            .shadow(color: .black.opacity(enabled ? 0.12 : 0), radius: 12, y: 6)
+            .opacity(enabled ? 1 : 0.35)
         }
-        .buttonStyle(HardPressStyle())
-        .padding(.bottom, 5)
+        .buttonStyle(PressableStyle(scale: 0.97))
         .disabled(!enabled)
     }
 }
 
-/// Card surface used everywhere: ink outline + hard offset shadow.
+/// Card surface used everywhere: white / graphite, big corner radius, one soft shadow, no outline.
 struct CardSurface: ViewModifier {
     var padding: CGFloat = 20
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
         content
             .padding(padding)
-            .background(Theme.card, in: shape)
-            .overlay(shape.stroke(Theme.ink, lineWidth: 2.5))
-            .background(shape.fill(Theme.ink).offset(x: 4, y: 5))
-            .padding(.trailing, 4)
-            .padding(.bottom, 5)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .shadow(color: .black.opacity(0.06), radius: 18, y: 8)
     }
 }
 
 extension View {
     func cardSurface(padding: CGFloat = 20) -> some View { modifier(CardSurface(padding: padding)) }
 
-    /// Loud colored block with ink outline and hard shadow (hero cards).
-    func streetBlock<S: ShapeStyle>(_ fill: S, padding: CGFloat = 20) -> some View {
+    /// Hero block: a big colored surface (gradient or ink) with soft depth.
+    func streetBlock<S: ShapeStyle>(_ fill: S, padding: CGFloat = 22) -> some View {
         let shape = RoundedRectangle(cornerRadius: Theme.radius + 4, style: .continuous)
         return self
             .padding(padding)
             .background(fill, in: shape)
-            .overlay(GrainOverlay(opacity: 0.14).clipShape(shape).allowsHitTesting(false))
-            .overlay(shape.stroke(Theme.ink, lineWidth: 3))
-            .background(shape.fill(Theme.ink).offset(x: 5, y: 6))
-            .padding(.trailing, 5)
-            .padding(.bottom, 6)
+            .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 1).allowsHitTesting(false))
+            .shadow(color: .black.opacity(0.12), radius: 20, y: 10)
     }
 }
 
-/// Sticker tag ("HSK 2", "+10 XP"): solid color, ink outline, slightly crooked.
+/// Small tag ("HSK 2", "+10 XP"): tinted capsule, no outline.
 struct Pill: View {
     let text: String
-    var color: Color = Theme.red
+    var color: Color = Theme.ink
     var systemImage: String? = nil
-    var tilt: Double = -2
+    var tilt: Double = 0
     var body: some View {
         HStack(spacing: 4) {
             if let systemImage { Image(systemName: systemImage) }
-            Text(text.uppercased())
+            Text(text.lowercased())
         }
-        .font(.system(.caption, weight: .black).width(.condensed))
-        .foregroundStyle(.white)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(color, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Theme.ink, lineWidth: 1.5))
-        .rotationEffect(.degrees(tilt))
+        .font(.system(.caption, weight: .bold))
+        .foregroundStyle(color)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(color.opacity(0.14), in: Capsule())
     }
 }
 
-/// Strip of masking tape, for slapping onto cards.
-struct TapeStrip: View {
-    var width: CGFloat = 70
-    var angle: Double = -6
+/// ✦ sparkle accent, gently twinkling. A nod to the internet-pop vibe; used sparingly.
+struct Sparkle: View {
+    var size: CGFloat = 14
+    var color: Color = Theme.lime
+    @State private var on = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        Rectangle()
-            .fill(Color(red: 0.96, green: 0.92, blue: 0.70).opacity(0.85))
-            .overlay(GrainOverlay(opacity: 0.25))
-            .frame(width: width, height: 22)
-            .rotationEffect(.degrees(angle))
-            .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
-            .allowsHitTesting(false)
+        Text("✦")
+            .font(.system(size: size, weight: .black))
+            .foregroundStyle(color)
+            .scaleEffect(on ? 1 : 0.6)
+            .opacity(on ? 1 : 0.5)
+            .rotationEffect(.degrees(on ? 20 : 0))
+            .onAppear {
+                guard !reduceMotion else { on = true; return }
+                withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { on = true }
+            }
             .accessibilityHidden(true)
     }
 }
 
-/// Printed-paper grain. Drawn once from a fixed seed and rasterized, so it's cheap.
+/// Removed from the look; kept so old call sites compile.
+struct TapeStrip: View {
+    var width: CGFloat = 70
+    var angle: Double = -6
+    var body: some View { EmptyView() }
+}
+
+/// Removed from the look; kept so old call sites compile.
 struct GrainOverlay: View {
     var opacity: Double = 0.06
-    var body: some View {
-        Canvas { ctx, size in
-            var seed: UInt64 = 0x9E3779B97F4A7C15
-            func rnd() -> Double {
-                seed = seed &* 6364136223846793005 &+ 1442695040888963407
-                return Double(seed >> 11) / Double(1 << 53)
-            }
-            let count = Int(size.width * size.height / 90)
-            for _ in 0..<count {
-                let x = rnd() * size.width
-                let y = rnd() * size.height
-                let s = 0.6 + rnd() * 1.4
-                let dark = rnd() > 0.45
-                ctx.fill(Path(CGRect(x: x, y: y, width: s, height: s)),
-                         with: .color(dark ? .black : .white))
-            }
-            // a few scuffs
-            for _ in 0..<Int(size.width / 40) {
-                let x = rnd() * size.width
-                let y = rnd() * size.height
-                var p = Path()
-                p.move(to: CGPoint(x: x, y: y))
-                p.addLine(to: CGPoint(x: x + rnd() * 30 - 15, y: y + rnd() * 6 - 3))
-                ctx.stroke(p, with: .color(.black), lineWidth: 0.6)
-            }
-        }
-        .opacity(opacity)
-        .drawingGroup()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
+    var body: some View { Color.clear.allowsHitTesting(false).accessibilityHidden(true) }
 }

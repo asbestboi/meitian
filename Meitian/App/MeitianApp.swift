@@ -8,9 +8,9 @@ struct MeitianApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
-        // street headlines: condensed black titles in navigation bars
-        let large = UIFont.systemFont(ofSize: 38, weight: .black, width: .compressed)
-        let inline = UIFont.systemFont(ofSize: 19, weight: .black, width: .condensed)
+        // clean, heavy titles in navigation bars
+        let large = UIFont.systemFont(ofSize: 36, weight: .heavy)
+        let inline = UIFont.systemFont(ofSize: 17, weight: .bold)
         UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
         UINavigationBar.appearance().titleTextAttributes = [.font: inline]
     }
@@ -46,9 +46,7 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: store.profile.onboarded)
-        .tint(Theme.red)
-        // printed-paper grain over everything
-        .overlay(GrainOverlay(opacity: 0.05).ignoresSafeArea())
+        .tint(Theme.ink)
     }
 }
 

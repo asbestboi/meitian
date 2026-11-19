@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,7 +108,6 @@ fun Root() {
                 Box(Modifier.fillMaxSize().background(Street.c.paper).windowInsetsPadding(WindowInsets.safeDrawing)) { c() }
             }
         }
-        Grain(Modifier.fillMaxSize(), 0.05f)
     }
 }
 
@@ -126,7 +126,7 @@ fun Tabs() {
             }
         }
         Row(
-            Modifier.fillMaxWidth().background(Street.c.card).border(2.dp, Street.c.ink).navigationBarsPadding().padding(vertical = 6.dp),
+            Modifier.fillMaxWidth().background(Street.c.card).navigationBarsPadding().padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             tabs.forEachIndexed { i, (icon, label) ->
@@ -134,9 +134,11 @@ fun Tabs() {
                     Modifier.weight(1f).clickable { tab = i }.padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(icon, fontSize = if (tab == i) 24.sp else 20.sp)
-                    Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Black,
-                        color = if (tab == i) Street.c.red else Street.c.secondary)
+                    val scale by androidx.compose.animation.core.animateFloatAsState(if (tab == i) 1.18f else 1f,
+                        androidx.compose.animation.core.spring(dampingRatio = 0.5f), label = "tab")
+                    Text(icon, fontSize = 21.sp, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
+                    Text(label.lowercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = if (tab == i) Street.c.text else Street.c.secondary)
                 }
             }
         }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -55,7 +56,7 @@ import java.time.format.DateTimeFormatter
 
 @Composable
 fun ScreenTitle(text: String) {
-    Text(text.uppercase(), style = street(40.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+    Text(text.lowercase(), style = street(40.sp), color = Street.c.text, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
 }
 
 // ---------- Today ----------
@@ -74,30 +75,34 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("${greet.first}，${app.profile.name}", fontSize = 26.sp, fontWeight = FontWeight.Black, color = Street.c.text, maxLines = 1)
-                Row { PinyinText(greet.second, 14.sp); Text(" · ${greet.third}", fontSize = 14.sp, color = Street.c.secondary) }
-                Text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMM d")), fontSize = 13.sp, color = Street.c.secondary)
+                Text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMM d")).lowercase() + "  ✦", fontSize = 14.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
+                Text("${greet.first}，${app.profile.name}", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.text, maxLines = 1)
+                Row { PinyinText(greet.second, 14.sp); Text(" · ${greet.third.lowercase()}", fontSize = 14.sp, color = Street.c.secondary) }
             }
             Badge("🔥 ${app.streak}"); HSpacer(6.dp); Badge("⭐ ${app.xp}")
         }
-        // today's words
-        Column(Modifier.fillMaxWidth().block(if (done) Street.jade() else Street.warm()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row {
-                Text(if (done) "TODAY'S WORDS · DONE" else "TODAY'S WORDS", style = street(22.sp), color = Color.White, modifier = Modifier.weight(1f))
-                Text("${words.size} words", color = Color.White.copy(alpha = 0.85f), fontWeight = FontWeight.Bold)
+        // today's words: dark hero card with a lime accent (same on iOS)
+        var appeared by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { appeared = true }
+        Column(Modifier.fillMaxWidth().block(Street.night()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (done) "today's words ✓" else "today's words", style = street(24.sp), color = Color.White, modifier = Modifier.weight(1f))
+                Text("${words.size}", style = street(24.sp), color = Color(0xFFC6FF3D))
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                words.forEach { w ->
-                    Column(Modifier.clip(RoundedCornerShape(12.dp)).background(Street.c.card).border(2.dp, Street.c.ink, RoundedCornerShape(12.dp)).padding(12.dp),
+                words.forEachIndexed { i, w ->
+                    val y by androidx.compose.animation.core.animateDpAsState(if (appeared) 0.dp else 24.dp,
+                        androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 300f - i * 20f), label = "drop")
+                    Column(Modifier.offset(y = y).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.08f)).padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(w.hanzi, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = Street.c.text)
-                        if (done || app.settings.showPinyin) PinyinText(w.pinyin, 12.sp) else Text("?", color = Street.c.secondary)
+                        Text(w.hanzi, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        if (done || app.settings.showPinyin) PinyinText(w.pinyin, 12.sp) else Text("?", color = Color.White.copy(alpha = 0.5f))
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).border(2.dp, Street.c.ink, RoundedCornerShape(12.dp))
-                .clickable { nav.show { LearnSession(words) { nav.close() } } }.padding(16.dp)) {
-                Text(if (done) "PRACTICE THEM AGAIN ↻" else "LEARN TODAY'S WORDS ▶", style = street(18.sp), color = Street.c.red)
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(if (done) Street.c.jade else Color(0xFFC6FF3D))
+                .clickable { nav.show { LearnSession(words) { nav.close() } } }.padding(horizontal = 22.dp, vertical = 16.dp)) {
+                Text(if (done) "practice them again ↻" else "learn today's words →", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.Black)
             }
         }
         // challenge
@@ -105,7 +110,7 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
         Row(Modifier.fillMaxWidth().card().clickable(onClick = goToChallenge).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (app.today.challenge != null) "🏆" else "🗣️", fontSize = 36.sp); HSpacer(14.dp)
             Column(Modifier.weight(1f)) {
-                Text(if (app.today.challenge != null) "CHALLENGE COMPLETE!" else "TODAY'S FRIEND CHALLENGE", style = street(18.sp), color = Street.c.text)
+                Text(if (app.today.challenge != null) "challenge complete!" else "today's friend challenge", style = street(18.sp), color = Street.c.text)
                 Text(if (app.today.challenge != null) "+50 XP earned. 你真棒！" else challenge?.mission ?: "Learn today's words first.",
                     fontSize = 14.sp, color = Street.c.secondary, maxLines = 2)
             }
@@ -115,14 +120,14 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
         Row(Modifier.fillMaxWidth().card().clickable(onClick = goToPractice).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🃏", fontSize = 36.sp); HSpacer(14.dp)
             Column {
-                Text(if (due > 0) "$due WORDS TO REVIEW" else "REVIEWS ALL CAUGHT UP", style = street(18.sp), color = Street.c.text)
+                Text(if (due > 0) "$due words to review" else "reviews all caught up", style = street(18.sp), color = Street.c.text)
                 Text(if (due > 0) "Keep them fresh before they fade." else "${app.learnedWords.size} words learned so far.", fontSize = 14.sp, color = Street.c.secondary)
             }
         }
         // phrase of the day
         val p = phraseOfTheDay(app.todayKey)
         Column(Modifier.fillMaxWidth().card().padding(16.dp)) {
-            Text("PHRASE OF THE DAY", fontWeight = FontWeight.Black, fontSize = 13.sp, color = Street.c.secondary)
+            Text("phrase of the day", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Street.c.secondary)
             Gap(6.dp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -139,7 +144,7 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
 @Composable
 fun Badge(text: String) {
     Box(Modifier.clip(RoundedCornerShape(50)).background(Street.c.card).border(2.dp, Street.c.ink, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 5.dp)) {
-        Text(text, fontWeight = FontWeight.Black, color = Street.c.text)
+        Text(text, fontWeight = FontWeight.Bold, color = Street.c.text)
     }
 }
 
@@ -154,7 +159,7 @@ fun LearnSession(words: List<CoreWord>, close: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CloseButton(close); Spacer(Modifier.weight(1f))
-                Text(when (phase) { 0 -> "SWIPE RIGHT IF YOU'VE GOT IT"; 1 -> "QUICK CHECK"; else -> "" }, fontWeight = FontWeight.Black, color = Street.c.secondary)
+                Text(when (phase) { 0 -> "SWIPE RIGHT IF YOU'VE GOT IT"; 1 -> "QUICK CHECK"; else -> "" }, fontWeight = FontWeight.Bold, color = Street.c.secondary)
                 Spacer(Modifier.weight(1f))
             }
             when (phase) {
@@ -209,7 +214,7 @@ fun ChallengeScreen() {
                     Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) Street.c.red else Color.Transparent)
                         .clickable(enabled = log == null) { app.profile = app.profile.copy(friend = if (chinese) "chinese" else "nonChinese"); app.save() }
                         .padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                        Text(label, fontWeight = FontWeight.Black, fontSize = 14.sp, color = if (on) Color.White else Street.c.text)
+                        Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (on) Color.White else Street.c.text)
                     }
                 }
             }
@@ -218,7 +223,7 @@ fun ChallengeScreen() {
             } else if (log != null) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("🏆", fontSize = 80.sp)
-                    Text("CHALLENGE COMPLETE!", style = street(30.sp), color = Street.c.text)
+                    Text("challenge complete!", style = street(30.sp), color = Street.c.text)
                     Text("You used ${Words[log.wordId]?.hanzi ?: c.word.hanzi} with a friend today. 你真棒！(nǐ zhēn bàng)", color = Street.c.secondary, textAlign = TextAlign.Center)
                     if (log.note.isNotBlank()) Text("“${log.note}”", modifier = Modifier.fillMaxWidth().card().padding(14.dp), color = Street.c.text)
                     Text("New challenge tomorrow. 明天见！(míngtiān jiàn)", fontWeight = FontWeight.Bold, color = Street.c.text)
@@ -226,17 +231,17 @@ fun ChallengeScreen() {
             } else {
                 Row(Modifier.fillMaxWidth().block(Street.level(c.word.lvl)).padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("TODAY'S WORD", fontWeight = FontWeight.Black, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
+                        Text("today's word", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
                         Text(c.word.hanzi, fontSize = 50.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text("${c.word.pinyin} · ${c.word.meaning}", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                     SpeakButton(c.word.hanzi, 54.dp, Color.White)
                 }
                 Pill(c.title, Street.c.red)
-                Text(c.mission, fontSize = 20.sp, fontWeight = FontWeight.Black, color = Street.c.text)
+                Text(c.mission, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Street.c.text)
                 Column(Modifier.fillMaxWidth().card().padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("YOUR SENTENCE", fontWeight = FontWeight.Black, fontSize = 12.sp, color = Street.c.secondary, modifier = Modifier.weight(1f))
+                        Text("your sentence", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Street.c.secondary, modifier = Modifier.weight(1f))
                         Text("🐢 Slow", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.clickable { com.asbestboi.meitian.data.Speaker.say(c.word.example, true) }.padding(6.dp))
                         SpeakButton(c.word.example, 36.dp, Street.c.jade)
                     }
@@ -253,7 +258,7 @@ fun ChallengeScreen() {
                 }
                 Text("⭐ ${c.bonus}", color = Street.c.gold, fontWeight = FontWeight.Bold)
                 if (checked.size == c.steps.size) {
-                    Text("HOW DID IT GO?", style = street(20.sp), color = Street.c.text)
+                    Text("how did it go?", style = street(20.sp), color = Street.c.text)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         listOf("😅" to "Tough", "🙂" to "Good", "🤩" to "Amazing").forEachIndexed { i, (e, l) ->
                             Column(Modifier.weight(1f).streetCard(if (mood == i) Street.c.gold.copy(alpha = 0.3f) else Street.c.card, Street.c.ink, shadow = 3.dp)
@@ -307,7 +312,7 @@ fun ProgressScreen() {
         }
         // activity calendar (15 weeks)
         Column(Modifier.fillMaxWidth().card().padding(14.dp)) {
-            Text("ACTIVITY", fontWeight = FontWeight.Black, color = Street.c.text)
+            Text("activity", fontWeight = FontWeight.Bold, color = Street.c.text)
             Gap(8.dp)
             val today = LocalDate.now()
             val start = today.minusDays((14 * 7 + today.dayOfWeek.value - 1).toLong())
@@ -328,7 +333,7 @@ fun ProgressScreen() {
         }
         // levels
         Column(Modifier.fillMaxWidth().card().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("LEVELS", fontWeight = FontWeight.Black, color = Street.c.text)
+            Text("levels", fontWeight = FontWeight.Bold, color = Street.c.text)
             Words.levels.forEach { l ->
                 val total = Words.level(l).size; val done = app.learnedCount(l)
                 Row { Text("HSK $l", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.weight(1f)); Text("$done/$total", color = Street.c.secondary) }
@@ -353,12 +358,12 @@ fun ProgressScreen() {
             HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
             Row(Modifier.fillMaxWidth().padding(16.dp)) {
                 if (!s.canListen || !s.canSpeak) {
-                    Text("▶ I can listen & speak again", color = Street.c.red, fontWeight = FontWeight.Black,
+                    Text("▶ I can listen & speak again", color = Street.c.red, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable { set(s.copy(noListenUntil = 0, noSpeakUntil = 0)) })
                 } else {
                     val hour = System.currentTimeMillis() + 3_600_000
-                    Text("🔇 Can't listen 1h", color = Street.c.red, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f).clickable { set(s.copy(noListenUntil = hour)) })
-                    Text("🎙️ Can't speak 1h", color = Street.c.red, fontWeight = FontWeight.Black, modifier = Modifier.clickable { set(s.copy(noSpeakUntil = hour)) })
+                    Text("🔇 Can't listen 1h", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).clickable { set(s.copy(noListenUntil = hour)) })
+                    Text("🎙️ Can't speak 1h", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { set(s.copy(noSpeakUntil = hour)) })
                 }
             }
         }
@@ -377,9 +382,9 @@ fun ProgressScreen() {
                 Text("−", style = street(28.sp), color = Street.c.red, modifier = Modifier.clickable { app.profile = app.profile.copy(dailyGoal = (app.profile.dailyGoal - 1).coerceAtLeast(1)); app.save() }.padding(horizontal = 12.dp))
                 Text("+", style = street(28.sp), color = Street.c.red, modifier = Modifier.clickable { app.profile = app.profile.copy(dailyGoal = (app.profile.dailyGoal + 1).coerceAtMost(15)); app.save() }.padding(horizontal = 12.dp))
             }
-            Text("✅ Retake placement quiz", fontWeight = FontWeight.Black, color = Street.c.text,
+            Text("✅ Retake placement quiz", fontWeight = FontWeight.Bold, color = Street.c.text,
                 modifier = Modifier.clickable { nav.show { OnboardingScreen(retakeOnly = true) { nav.close() } } })
-            Text(if (confirmReset) "⚠️ Tap again to delete everything (can't be undone)" else "🗑️ Reset all progress", fontWeight = FontWeight.Black, color = Street.c.red,
+            Text(if (confirmReset) "⚠️ Tap again to delete everything (can't be undone)" else "🗑️ Reset all progress", fontWeight = FontWeight.Bold, color = Street.c.red,
                 modifier = Modifier.clickable { if (confirmReset) { app.resetAll(); confirmReset = false } else confirmReset = true })
         }
         Gap(30.dp)
@@ -429,10 +434,10 @@ private fun LessonDownloads() {
     }
     HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
     Row(Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("↻ Update now", fontWeight = FontWeight.Black, color = Street.c.red,
+        Text("↻ Update now", fontWeight = FontWeight.Bold, color = Street.c.red,
             modifier = Modifier.weight(1f).clickable { scope.launch { ContentSync.refresh(context, level) } })
         val mb = "%.1f MB".format(ContentSync.cacheBytes(context) / 1_048_576.0)
-        Text(if (confirmClear) "Tap again to delete" else "🗑️ Delete ($mb)", fontWeight = FontWeight.Black, color = Street.c.red,
+        Text(if (confirmClear) "Tap again to delete" else "🗑️ Delete ($mb)", fontWeight = FontWeight.Bold, color = Street.c.red,
             modifier = Modifier.clickable { if (confirmClear) { ContentSync.clear(context); confirmClear = false } else confirmClear = true })
     }
     if (ContentSync.credits.isNotEmpty()) {

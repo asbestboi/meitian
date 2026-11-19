@@ -92,7 +92,6 @@ struct ChallengeView: View {
         }
         .foregroundStyle(.white)
         .streetBlock(Theme.levelGradient(c.word.level), padding: 22)
-        .overlay(alignment: .topLeading) { TapeStrip(angle: -7).offset(x: 14, y: -10) }
     }
 
     private func mission(_ c: Challenge) -> some View {
