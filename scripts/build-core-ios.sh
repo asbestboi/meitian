@@ -17,10 +17,14 @@ rustup target add aarch64-apple-ios >/dev/null
   cargo build --release --bin uniffi-bindgen
 )
 
-HOSTLIB=$(ls core/target/release/libmeitian_core.dylib core/target/release/libmeitian_core.so 2>/dev/null | head -1)
+HOSTLIB=""
+for f in core/target/release/libmeitian_core.dylib core/target/release/libmeitian_core.so; do
+    [ -f "$f" ] && HOSTLIB=$f && break
+done
 rm -rf build/core-swift build/core-include
 mkdir -p build/core-swift build/core-include
-core/target/release/uniffi-bindgen generate --library "$HOSTLIB" --language swift --no-format --out-dir build/core-gen
+# library mode reads cargo metadata, so run it from the crate
+( cd core && target/release/uniffi-bindgen generate --library "../$HOSTLIB" --language swift --no-format --out-dir "../build/core-gen" )
 mv build/core-gen/meitian_core.swift build/core-swift/
 mv build/core-gen/meitian_coreFFI.h build/core-include/
 mv build/core-gen/meitian_coreFFI.modulemap build/core-include/module.modulemap
