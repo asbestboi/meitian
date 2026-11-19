@@ -1,0 +1,192 @@
+# level	hanzi	pinyin	meaning	example	example pinyin	example meaning
+1	你好	nǐ hǎo	hello	你好，我叫小明。	Nǐ hǎo, wǒ jiào Xiǎomíng.	Hello, my name is Xiaoming.
+1	谢谢	xièxie	thank you	谢谢你的帮助！	Xièxie nǐ de bāngzhù!	Thanks for your help!
+1	不客气	bú kèqi	you're welcome	不客气，这是小事。	Bú kèqi, zhè shì xiǎoshì.	You're welcome, it's nothing.
+1	再见	zàijiàn	goodbye	明天见，再见！	Míngtiān jiàn, zàijiàn!	See you tomorrow, bye!
+1	我	wǒ	I, me	我是学生。	Wǒ shì xuésheng.	I am a student.
+1	你	nǐ	you	你是哪国人？	Nǐ shì nǎ guó rén?	Which country are you from?
+1	他	tā	he, him	他是我的朋友。	Tā shì wǒ de péngyou.	He is my friend.
+1	她	tā	she, her	她很漂亮。	Tā hěn piàoliang.	She is very pretty.
+1	朋友	péngyou	friend	我有很多朋友。	Wǒ yǒu hěn duō péngyou.	I have many friends.
+1	喜欢	xǐhuan	to like	我喜欢喝茶。	Wǒ xǐhuan hē chá.	I like drinking tea.
+1	吃	chī	to eat	你想吃什么？	Nǐ xiǎng chī shénme?	What do you want to eat?
+1	喝	hē	to drink	我们去喝咖啡吧。	Wǒmen qù hē kāfēi ba.	Let's go drink coffee.
+1	水	shuǐ	water	请给我一杯水。	Qǐng gěi wǒ yì bēi shuǐ.	Please give me a glass of water.
+1	茶	chá	tea	中国茶很好喝。	Zhōngguó chá hěn hǎohē.	Chinese tea tastes great.
+1	米饭	mǐfàn	cooked rice	我每天吃米饭。	Wǒ měitiān chī mǐfàn.	I eat rice every day.
+1	家	jiā	home, family	我家有四口人。	Wǒ jiā yǒu sì kǒu rén.	There are four people in my family.
+1	学校	xuéxiào	school	学校很大。	Xuéxiào hěn dà.	The school is very big.
+1	老师	lǎoshī	teacher	我们的老师很好。	Wǒmen de lǎoshī hěn hǎo.	Our teacher is very nice.
+1	学生	xuésheng	student	他是大学生。	Tā shì dàxuéshēng.	He is a university student.
+1	学习	xuéxí	to study	我在学习中文。	Wǒ zài xuéxí Zhōngwén.	I am studying Chinese.
+1	中文	Zhōngwén	Chinese language	你的中文很好！	Nǐ de Zhōngwén hěn hǎo!	Your Chinese is very good!
+1	是	shì	to be	这是我的书。	Zhè shì wǒ de shū.	This is my book.
+1	不	bù	not, no	我不忙。	Wǒ bù máng.	I'm not busy.
+1	很	hěn	very	今天很热。	Jīntiān hěn rè.	It's very hot today.
+1	好	hǎo	good	这个主意很好。	Zhège zhǔyi hěn hǎo.	This idea is good.
+1	大	dà	big	这个苹果很大。	Zhège píngguǒ hěn dà.	This apple is big.
+1	小	xiǎo	small	我的猫很小。	Wǒ de māo hěn xiǎo.	My cat is small.
+1	多	duō	many, much	人很多。	Rén hěn duō.	There are a lot of people.
+1	少	shǎo	few, little	今天人很少。	Jīntiān rén hěn shǎo.	There are few people today.
+1	今天	jīntiān	today	今天星期几？	Jīntiān xīngqī jǐ?	What day is it today?
+1	明天	míngtiān	tomorrow	明天我们去公园。	Míngtiān wǒmen qù gōngyuán.	Tomorrow we're going to the park.
+1	昨天	zuótiān	yesterday	昨天下雨了。	Zuótiān xià yǔ le.	It rained yesterday.
+1	现在	xiànzài	now	现在几点？	Xiànzài jǐ diǎn?	What time is it now?
+1	什么	shénme	what	你叫什么名字？	Nǐ jiào shénme míngzi?	What's your name?
+1	谁	shéi	who	他是谁？	Tā shì shéi?	Who is he?
+1	哪儿	nǎr	where	厕所在哪儿？	Cèsuǒ zài nǎr?	Where is the toilet?
+1	多少	duōshao	how many, how much	这个多少钱？	Zhège duōshao qián?	How much is this?
+1	钱	qián	money	我没有钱了。	Wǒ méiyǒu qián le.	I'm out of money.
+1	买	mǎi	to buy	我想买一件衣服。	Wǒ xiǎng mǎi yí jiàn yīfu.	I want to buy a piece of clothing.
+1	想	xiǎng	to want, to think	我想去中国。	Wǒ xiǎng qù Zhōngguó.	I want to go to China.
+1	去	qù	to go	你去哪儿？	Nǐ qù nǎr?	Where are you going?
+1	来	lái	to come	快来看！	Kuài lái kàn!	Come and look, quick!
+1	看	kàn	to look, to watch	我们看电影吧。	Wǒmen kàn diànyǐng ba.	Let's watch a movie.
+1	说	shuō	to speak, to say	你会说中文吗？	Nǐ huì shuō Zhōngwén ma?	Can you speak Chinese?
+1	听	tīng	to listen	我喜欢听音乐。	Wǒ xǐhuan tīng yīnyuè.	I like listening to music.
+1	爱	ài	to love	我爱我的家。	Wǒ ài wǒ de jiā.	I love my family.
+1	猫	māo	cat	这只猫很可爱。	Zhè zhī māo hěn kě'ài.	This cat is very cute.
+1	狗	gǒu	dog	我的狗叫小白。	Wǒ de gǒu jiào Xiǎobái.	My dog is called Xiaobai.
+1	天气	tiānqì	weather	今天天气很好。	Jīntiān tiānqì hěn hǎo.	The weather is nice today.
+1	高兴	gāoxìng	happy, glad	认识你很高兴！	Rènshi nǐ hěn gāoxìng!	Nice to meet you!
+2	咖啡	kāfēi	coffee	早上我要喝咖啡。	Zǎoshang wǒ yào hē kāfēi.	In the morning I need coffee.
+2	早上	zǎoshang	morning	早上好！	Zǎoshang hǎo!	Good morning!
+2	晚上	wǎnshang	evening	晚上我们一起吃饭吧。	Wǎnshang wǒmen yìqǐ chī fàn ba.	Let's have dinner together tonight.
+2	一起	yìqǐ	together	我们一起去吧！	Wǒmen yìqǐ qù ba!	Let's go together!
+2	已经	yǐjīng	already	我已经吃饭了。	Wǒ yǐjīng chī fàn le.	I've already eaten.
+2	可以	kěyǐ	can, may	我可以坐这儿吗？	Wǒ kěyǐ zuò zhèr ma?	May I sit here?
+2	知道	zhīdào	to know	我不知道。	Wǒ bù zhīdào.	I don't know.
+2	觉得	juéde	to feel, to think	我觉得这个很好吃。	Wǒ juéde zhège hěn hǎochī.	I think this is delicious.
+2	因为	yīnwèi	because	因为下雨，我没去。	Yīnwèi xià yǔ, wǒ méi qù.	Because it rained, I didn't go.
+2	所以	suǒyǐ	so, therefore	我很累，所以想睡觉。	Wǒ hěn lèi, suǒyǐ xiǎng shuìjiào.	I'm tired, so I want to sleep.
+2	但是	dànshì	but	我想去，但是没时间。	Wǒ xiǎng qù, dànshì méi shíjiān.	I want to go, but I have no time.
+2	时间	shíjiān	time	你有时间吗？	Nǐ yǒu shíjiān ma?	Do you have time?
+2	问题	wèntí	question, problem	没问题！	Méi wèntí!	No problem!
+2	准备	zhǔnbèi	to prepare	你准备好了吗？	Nǐ zhǔnbèi hǎo le ma?	Are you ready?
+2	开始	kāishǐ	to begin	电影开始了。	Diànyǐng kāishǐ le.	The movie has started.
+2	帮助	bāngzhù	to help	谢谢你帮助我。	Xièxie nǐ bāngzhù wǒ.	Thank you for helping me.
+2	介绍	jièshào	to introduce	我来介绍一下。	Wǒ lái jièshào yíxià.	Let me introduce (someone).
+2	旅游	lǚyóu	to travel	我喜欢去旅游。	Wǒ xǐhuan qù lǚyóu.	I love to travel.
+2	运动	yùndòng	sport, exercise	你喜欢什么运动？	Nǐ xǐhuan shénme yùndòng?	What sports do you like?
+2	跑步	pǎobù	to run, jog	我每天早上跑步。	Wǒ měitiān zǎoshang pǎobù.	I go running every morning.
+2	唱歌	chànggē	to sing	我们去唱歌吧！	Wǒmen qù chànggē ba!	Let's go sing (karaoke)!
+2	跳舞	tiàowǔ	to dance	她跳舞跳得很好。	Tā tiàowǔ tiào de hěn hǎo.	She dances very well.
+2	好吃	hǎochī	delicious	这个菜真好吃！	Zhège cài zhēn hǎochī!	This dish is really delicious!
+2	便宜	piányi	cheap	这儿的东西很便宜。	Zhèr de dōngxi hěn piányi.	Things here are cheap.
+2	贵	guì	expensive	太贵了！	Tài guì le!	Too expensive!
+2	快乐	kuàilè	happy, joyful	生日快乐！	Shēngrì kuàilè!	Happy birthday!
+2	生日	shēngrì	birthday	你的生日是几月几号？	Nǐ de shēngrì shì jǐ yuè jǐ hào?	When is your birthday?
+2	工作	gōngzuò	work, job	你做什么工作？	Nǐ zuò shénme gōngzuò?	What do you do for work?
+2	休息	xiūxi	to rest	你累了，休息一下吧。	Nǐ lèi le, xiūxi yíxià ba.	You're tired, take a rest.
+2	累	lèi	tired	今天我很累。	Jīntiān wǒ hěn lèi.	I'm very tired today.
+2	忙	máng	busy	你最近忙吗？	Nǐ zuìjìn máng ma?	Have you been busy lately?
+2	最近	zuìjìn	recently	最近怎么样？	Zuìjìn zěnmeyàng?	How have you been lately?
+2	怎么样	zěnmeyàng	how about, how is it	这个主意怎么样？	Zhège zhǔyi zěnmeyàng?	How about this idea?
+2	为什么	wèishénme	why	你为什么学中文？	Nǐ wèishénme xué Zhōngwén?	Why do you study Chinese?
+2	希望	xīwàng	to hope	希望你喜欢！	Xīwàng nǐ xǐhuan!	I hope you like it!
+2	意思	yìsi	meaning	这个字是什么意思？	Zhège zì shì shénme yìsi?	What does this character mean?
+2	懂	dǒng	to understand	你懂我的意思吗？	Nǐ dǒng wǒ de yìsi ma?	Do you understand what I mean?
+2	手机	shǒujī	mobile phone	我的手机没电了。	Wǒ de shǒujī méi diàn le.	My phone is out of battery.
+2	颜色	yánsè	color	你喜欢什么颜色？	Nǐ xǐhuan shénme yánsè?	What color do you like?
+2	红色	hóngsè	red	红色在中国代表好运。	Hóngsè zài Zhōngguó dàibiǎo hǎoyùn.	Red represents good luck in China.
+2	雪	xuě	snow	外面下雪了！	Wàimiàn xià xuě le!	It's snowing outside!
+2	离	lí	away from	我家离公司很近。	Wǒ jiā lí gōngsī hěn jìn.	My home is close to the office.
+2	远	yuǎn	far	学校离这儿远吗？	Xuéxiào lí zhèr yuǎn ma?	Is the school far from here?
+2	近	jìn	near	超市很近。	Chāoshì hěn jìn.	The supermarket is close.
+2	笑	xiào	to laugh, smile	他笑得很开心。	Tā xiào de hěn kāixīn.	He laughed happily.
+2	玩	wán	to play, have fun	周末我们去玩吧！	Zhōumò wǒmen qù wán ba!	Let's go have fun this weekend!
+3	周末	zhōumò	weekend	周末你有什么打算？	Zhōumò nǐ yǒu shénme dǎsuàn?	What are your plans for the weekend?
+3	打算	dǎsuàn	to plan	我打算明年去北京。	Wǒ dǎsuàn míngnián qù Běijīng.	I plan to go to Beijing next year.
+3	决定	juédìng	to decide	我决定学做饭。	Wǒ juédìng xué zuò fàn.	I've decided to learn to cook.
+3	需要	xūyào	to need	你需要帮忙吗？	Nǐ xūyào bāngmáng ma?	Do you need help?
+3	当然	dāngrán	of course	当然可以！	Dāngrán kěyǐ!	Of course you can!
+3	其实	qíshí	actually	其实我不太饿。	Qíshí wǒ bú tài è.	Actually, I'm not very hungry.
+3	一般	yìbān	usually, ordinary	我一般十一点睡觉。	Wǒ yìbān shíyī diǎn shuìjiào.	I usually go to bed at eleven.
+3	习惯	xíguàn	habit, used to	我习惯了这里的生活。	Wǒ xíguàn le zhèlǐ de shēnghuó.	I'm used to life here.
+3	简单	jiǎndān	simple	这个问题很简单。	Zhège wèntí hěn jiǎndān.	This question is simple.
+3	容易	róngyì	easy	中文不太容易。	Zhōngwén bú tài róngyì.	Chinese isn't very easy.
+3	难	nán	difficult	汉字很难写。	Hànzì hěn nán xiě.	Chinese characters are hard to write.
+3	认真	rènzhēn	serious, conscientious	她学习很认真。	Tā xuéxí hěn rènzhēn.	She studies very diligently.
+3	努力	nǔlì	to work hard	我会努力的！	Wǒ huì nǔlì de!	I'll work hard!
+3	担心	dānxīn	to worry	别担心，没事的。	Bié dānxīn, méi shì de.	Don't worry, it's fine.
+3	关心	guānxīn	to care about	谢谢你关心我。	Xièxie nǐ guānxīn wǒ.	Thanks for caring about me.
+3	满意	mǎnyì	satisfied	你对结果满意吗？	Nǐ duì jiéguǒ mǎnyì ma?	Are you satisfied with the result?
+3	奇怪	qíguài	strange	这个味道很奇怪。	Zhège wèidào hěn qíguài.	This taste is strange.
+3	有名	yǒumíng	famous	这家饭馆很有名。	Zhè jiā fànguǎn hěn yǒumíng.	This restaurant is famous.
+3	环境	huánjìng	environment	这里的环境很好。	Zhèlǐ de huánjìng hěn hǎo.	The surroundings here are nice.
+3	文化	wénhuà	culture	我对中国文化很感兴趣。	Wǒ duì Zhōngguó wénhuà hěn gǎn xìngqù.	I'm very interested in Chinese culture.
+3	兴趣	xìngqù	interest	你的兴趣是什么？	Nǐ de xìngqù shì shénme?	What are your interests?
+3	健康	jiànkāng	healthy, health	多运动对健康好。	Duō yùndòng duì jiànkāng hǎo.	Exercising more is good for your health.
+3	锻炼	duànliàn	to work out	我每周锻炼三次。	Wǒ měi zhōu duànliàn sān cì.	I work out three times a week.
+3	城市	chéngshì	city	上海是一个大城市。	Shànghǎi shì yí ge dà chéngshì.	Shanghai is a big city.
+3	地铁	dìtiě	subway	我们坐地铁去吧。	Wǒmen zuò dìtiě qù ba.	Let's take the subway.
+3	节日	jiérì	holiday, festival	春节是最重要的节日。	Chūnjié shì zuì zhòngyào de jiérì.	Spring Festival is the most important holiday.
+3	礼物	lǐwù	gift	这是给你的礼物。	Zhè shì gěi nǐ de lǐwù.	This is a gift for you.
+3	照片	zhàopiàn	photo	我们拍张照片吧！	Wǒmen pāi zhāng zhàopiàn ba!	Let's take a photo!
+3	邻居	línjū	neighbor	我的邻居很友好。	Wǒ de línjū hěn yǒuhǎo.	My neighbor is very friendly.
+3	聪明	cōngming	clever	你真聪明！	Nǐ zhēn cōngming!	You're so clever!
+3	饿	è	hungry	我饿死了！	Wǒ è sǐ le!	I'm starving!
+3	渴	kě	thirsty	你渴不渴？	Nǐ kě bu kě?	Are you thirsty?
+3	着急	zháojí	anxious, in a hurry	别着急，慢慢来。	Bié zháojí, mànmàn lái.	Don't rush, take your time.
+3	方便	fāngbiàn	convenient	你什么时候方便？	Nǐ shénme shíhou fāngbiàn?	When is convenient for you?
+3	突然	tūrán	suddenly	天突然黑了。	Tiān tūrán hēi le.	The sky suddenly went dark.
+3	终于	zhōngyú	finally	我终于明白了！	Wǒ zhōngyú míngbai le!	I finally get it!
+3	明白	míngbai	to understand, clear	你明白了吗？	Nǐ míngbai le ma?	Do you get it?
+3	记得	jìde	to remember	你还记得我吗？	Nǐ hái jìde wǒ ma?	Do you still remember me?
+3	忘记	wàngjì	to forget	我忘记带钥匙了。	Wǒ wàngjì dài yàoshi le.	I forgot to bring my keys.
+3	相信	xiāngxìn	to believe	我相信你！	Wǒ xiāngxìn nǐ!	I believe in you!
+3	同意	tóngyì	to agree	我同意你的看法。	Wǒ tóngyì nǐ de kànfǎ.	I agree with your view.
+3	比赛	bǐsài	match, competition	昨天的比赛很精彩。	Zuótiān de bǐsài hěn jīngcǎi.	Yesterday's match was exciting.
+3	上网	shàngwǎng	to go online	我每天上网两个小时。	Wǒ měitiān shàngwǎng liǎng ge xiǎoshí.	I'm online two hours a day.
+3	菜单	càidān	menu	服务员，请给我菜单。	Fúwùyuán, qǐng gěi wǒ càidān.	Waiter, the menu please.
+3	辣	là	spicy	我不怕辣！	Wǒ bú pà là!	I'm not afraid of spicy food!
+3	甜	tián	sweet	这个蛋糕太甜了。	Zhège dàngāo tài tián le.	This cake is too sweet.
+3	熊猫	xióngmāo	panda	熊猫太可爱了！	Xióngmāo tài kě'ài le!	Pandas are so cute!
+3	加油	jiāyóu	go for it!, keep it up	加油！你可以的！	Jiāyóu! Nǐ kěyǐ de!	Go for it! You can do it!
+3	差不多	chàbuduō	about the same, almost	我们差不多大。	Wǒmen chàbuduō dà.	We're about the same age.
+4	经验	jīngyàn	experience	你有工作经验吗？	Nǐ yǒu gōngzuò jīngyàn ma?	Do you have work experience?
+4	机会	jīhuì	opportunity	这是一个好机会。	Zhè shì yí ge hǎo jīhuì.	This is a good opportunity.
+4	成功	chénggōng	success, to succeed	祝你成功！	Zhù nǐ chénggōng!	Wishing you success!
+4	失败	shībài	failure, to fail	失败是成功之母。	Shībài shì chénggōng zhī mǔ.	Failure is the mother of success.
+4	鼓励	gǔlì	to encourage	谢谢你的鼓励。	Xièxie nǐ de gǔlì.	Thanks for the encouragement.
+4	感动	gǎndòng	to be moved	这个故事让我很感动。	Zhège gùshi ràng wǒ hěn gǎndòng.	This story really moved me.
+4	讨论	tǎolùn	to discuss	我们讨论一下这个问题。	Wǒmen tǎolùn yíxià zhège wèntí.	Let's discuss this problem.
+4	建议	jiànyì	suggestion, to suggest	你有什么建议？	Nǐ yǒu shénme jiànyì?	Do you have any suggestions?
+4	考虑	kǎolǜ	to consider	让我考虑一下。	Ràng wǒ kǎolǜ yíxià.	Let me think it over.
+4	适合	shìhé	to suit, fit	这件衣服很适合你。	Zhè jiàn yīfu hěn shìhé nǐ.	This outfit really suits you.
+4	轻松	qīngsōng	relaxed, easy	周末过得很轻松。	Zhōumò guò de hěn qīngsōng.	The weekend was very relaxing.
+4	压力	yālì	pressure, stress	最近工作压力很大。	Zuìjìn gōngzuò yālì hěn dà.	Work has been really stressful lately.
+4	幽默	yōumò	humorous	他是一个很幽默的人。	Tā shì yí ge hěn yōumò de rén.	He's a very funny person.
+4	浪漫	làngmàn	romantic	这个地方真浪漫。	Zhège dìfang zhēn làngmàn.	This place is so romantic.
+4	友谊	yǒuyì	friendship	我们的友谊很长久。	Wǒmen de yǒuyì hěn chángjiǔ.	Our friendship is long-lasting.
+4	交流	jiāoliú	to communicate, exchange	我们多交流吧。	Wǒmen duō jiāoliú ba.	Let's keep in touch more.
+4	理解	lǐjiě	to understand, comprehend	我理解你的感受。	Wǒ lǐjiě nǐ de gǎnshòu.	I understand how you feel.
+4	原谅	yuánliàng	to forgive	请原谅我。	Qǐng yuánliàng wǒ.	Please forgive me.
+4	表扬	biǎoyáng	to praise	老师表扬了我。	Lǎoshī biǎoyáng le wǒ.	The teacher praised me.
+4	耐心	nàixīn	patient, patience	谢谢你这么有耐心。	Xièxie nǐ zhème yǒu nàixīn.	Thanks for being so patient.
+4	勇敢	yǒnggǎn	brave	你很勇敢！	Nǐ hěn yǒnggǎn!	You're very brave!
+4	害羞	hàixiū	shy	别害羞，说吧！	Bié hàixiū, shuō ba!	Don't be shy, say it!
+4	激动	jīdòng	excited	我激动得睡不着。	Wǒ jīdòng de shuì bu zháo.	I'm too excited to sleep.
+4	无聊	wúliáo	bored, boring	这部电影很无聊。	Zhè bù diànyǐng hěn wúliáo.	This movie is boring.
+4	羡慕	xiànmù	to envy, admire	我很羡慕你的中文。	Wǒ hěn xiànmù nǐ de Zhōngwén.	I really envy your Chinese.
+4	故意	gùyì	on purpose	对不起，我不是故意的。	Duìbuqǐ, wǒ bú shì gùyì de.	Sorry, I didn't mean to.
+4	可惜	kěxī	what a pity	真可惜，你不能来。	Zhēn kěxī, nǐ bù néng lái.	What a pity you can't come.
+4	值得	zhíde	to be worth	这本书值得一读。	Zhè běn shū zhíde yì dú.	This book is worth reading.
+4	方法	fāngfǎ	method	你学中文的方法是什么？	Nǐ xué Zhōngwén de fāngfǎ shì shénme?	What's your method for learning Chinese?
+4	目的	mùdì	purpose, goal	你来这儿的目的是什么？	Nǐ lái zhèr de mùdì shì shénme?	What's your purpose for coming here?
+4	计划	jìhuà	plan	我们按计划进行。	Wǒmen àn jìhuà jìnxíng.	We'll proceed according to plan.
+4	准时	zhǔnshí	on time	请准时到。	Qǐng zhǔnshí dào.	Please arrive on time.
+4	预订	yùdìng	to book, reserve	我想预订一张桌子。	Wǒ xiǎng yùdìng yì zhāng zhuōzi.	I'd like to book a table.
+4	推荐	tuījiàn	to recommend	你能推荐一家饭馆吗？	Nǐ néng tuījiàn yì jiā fànguǎn ma?	Can you recommend a restaurant?
+4	味道	wèidào	taste, flavor	这道菜味道不错。	Zhè dào cài wèidào búcuò.	This dish tastes pretty good.
+4	热闹	rènao	lively, bustling	夜市很热闹。	Yèshì hěn rènao.	The night market is lively.
+4	安静	ānjìng	quiet	图书馆很安静。	Túshūguǎn hěn ānjìng.	The library is quiet.
+4	随便	suíbiàn	casual, whatever	随便坐！	Suíbiàn zuò!	Sit wherever you like!
+4	厉害	lìhai	awesome, impressive	你太厉害了！	Nǐ tài lìhai le!	You're amazing!
+4	开玩笑	kāi wánxiào	to joke	我是开玩笑的。	Wǒ shì kāi wánxiào de.	I was just kidding.
+4	麻烦	máfan	trouble, to bother	麻烦你了！	Máfan nǐ le!	Sorry to trouble you!
+4	联系	liánxì	to contact	我们保持联系吧。	Wǒmen bǎochí liánxì ba.	Let's keep in touch.
+4	见面	jiànmiàn	to meet up	我们什么时候见面？	Wǒmen shénme shíhou jiànmiàn?	When shall we meet?
+4	聊天	liáotiān	to chat	我们喝杯茶聊聊天吧。	Wǒmen hē bēi chá liáoliao tiān ba.	Let's have tea and chat.
+4	好像	hǎoxiàng	to seem, seem like	好像要下雨了。	Hǎoxiàng yào xià yǔ le.	It looks like it's going to rain.
+4	干杯	gānbēi	cheers!	为我们的友谊干杯！	Wèi wǒmen de yǒuyì gānbēi!	Cheers to our friendship!

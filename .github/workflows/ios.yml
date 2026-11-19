@@ -1,0 +1,42 @@
+# Builds Meitian.ipa on a macOS runner (iOS apps need Apple's SDK).
+# Every push to main produces the .ipa as a downloadable artifact;
+# pushing a tag like v1.0.0 also attaches it to a GitHub release.
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    name: Build Meitian.ipa
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build
+        run: scripts/build-ipa.sh
+      - name: Show build log on failure
+        if: failure()
+        run: grep -E "error|Error" -A3 build/xcodebuild.log | head -200 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meitian-ipa
+          path: build/Meitian.ipa
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Měitiān ${{ github.ref_name }}
+          files: build/Meitian.ipa
+          body: |
+            Unsigned **Meitian.ipa** for iPhone (iOS 17 or later).
+            Install it with Sideloadly, AltStore or SideStore (signs it with your Apple ID), or with TrollStore.
