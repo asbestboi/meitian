@@ -323,19 +323,21 @@ final class ArenaStore {
         r.name = rival.name
         r.avatar = rival.avatar
         r.lastPlayed = .now
-        let earned: Int
+        let core: Outcome
         switch outcome {
         case .win:
             wins += 1; r.wins += 1; streak += 1
             bestStreak = max(bestStreak, streak)
-            earned = 40 + bonus + min(streak - 1, 5) * 5
+            core = .win
         case .loss:
             losses += 1; r.losses += 1; streak = 0
-            earned = 10
+            core = .loss
         case .draw:
             draws += 1; r.draws += 1
-            earned = 20
+            core = .draw
         }
+        // payout rules live in the shared Rust core
+        let earned = Int(matchCoins(outcome: core, bonus: UInt32(clamping: bonus), streak: UInt32(clamping: streak)))
         rivals[rival.id] = r
         coins += earned
         totalDamage += damage

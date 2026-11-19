@@ -736,7 +736,7 @@ struct LocalDuelView: View {
         let correct = option.id == questions[index].word.id
         if correct {
             let ms = Int(Date.now.timeIntervalSince(shownAt) * 1000)
-            let damage = 12 + max(0, (4000 - ms) / 400)
+            let damage = Int(duelDamage(reactionMs: UInt32(clamping: ms)))
             lastDamage = damage
             roundWinner = p
             resolved = true

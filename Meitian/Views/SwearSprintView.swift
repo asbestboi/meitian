@@ -27,7 +27,7 @@ struct SwearSprintView: View {
 
     static let seconds = 60.0
 
-    private var multiplier: Int { min(1 + combo / 3, 5) }
+    private var multiplier: Int { Int(sprintMultiplier(combo: UInt32(clamping: combo))) }
     private var pool: [Word] { WordBank.swears.filter { store.cards[$0.id] != nil } + newWords }
 
     var body: some View {
@@ -233,7 +233,7 @@ struct SwearSprintView: View {
             Text("points").font(.rounded(.headline, weight: .bold)).foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 stat("\(correct)/\(answered)", "right")
-                stat("×\(min(1 + bestCombo / 3, 5))", "top combo")
+                stat("×\(sprintMultiplier(combo: UInt32(clamping: bestCombo)))", "top combo")
                 stat("+\(correct * 3)", "XP")
             }
             Spacer()

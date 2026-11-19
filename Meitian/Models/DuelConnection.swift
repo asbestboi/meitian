@@ -15,16 +15,15 @@ struct WireQuestion: Codable, Hashable {
         return QuizQuestion(word: w, kind: kind == 0 ? .hanziToMeaning : .meaningToHanzi, options: opts)
     }
 
-    static func make(pool: [Word], count: Int) -> [WireQuestion] {
-        var out: [WireQuestion] = []
-        var bag: [Word] = []
-        for i in 0..<count {
-            if bag.isEmpty { bag = pool.shuffled() }
-            let w = bag.removeLast()
-            let q = QuizQuestion.make(for: w, kind: i % 2 == 0 ? .hanziToMeaning : .meaningToHanzi, pool: pool)
-            out.append(WireQuestion(wordId: w.id, kind: i % 2, options: q.options.map(\.id)))
+    /// Built by the shared Rust core.
+    static func make(poolIds: [String], count: Int) -> [WireQuestion] {
+        battleQuestions(poolIds: poolIds, count: UInt32(clamping: count)).map {
+            WireQuestion(wordId: $0.wordId, kind: Int($0.kind), options: $0.optionIds)
         }
-        return out
+    }
+
+    static func make(pool: [Word], count: Int) -> [WireQuestion] {
+        make(poolIds: pool.map(\.id), count: count)
     }
 }
 

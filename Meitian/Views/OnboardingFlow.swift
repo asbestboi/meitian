@@ -232,12 +232,7 @@ struct OnboardingFlow: View {
                 questions: questions,
                 allowPinyin: false,
                 onAnswer: { q, right in results.append((level: q.word.level, right: right)) },
-                shouldContinue: { answered in
-                    // after each block of 3, stop if that level wasn't passed
-                    guard answered % 3 == 0 else { return true }
-                    let level = questions[answered - 1].word.level
-                    return results.filter { $0.level == level && $0.right }.count >= 2
-                },
+                shouldContinue: { _ in Placement.shouldContinue(results: results) },
                 onDone: { _ in
                     confirmed = Placement.confirmedLevel(results: results)
                     go(.result)

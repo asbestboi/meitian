@@ -233,13 +233,8 @@ final class SpeechListener {
     /// Accepts the exact characters, or the same syllables (tones ignored), so homophones still count.
     static func matches(_ transcript: String, word: Word) -> Bool {
         let hanzi = String(transcript.filter(Pinyin.isHanzi))
-        if hanzi.contains(word.hanzi) { return true }
-        let heard = toneless(hanzi.applyingTransform(.mandarinToLatin, reverse: false) ?? "")
-        let want = toneless(word.pinyin)
-        return !want.isEmpty && heard.contains(want)
-    }
-
-    static func toneless(_ s: String) -> String {
-        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).filter(\.isLetter)
+        // the platform transliterates to pinyin; the comparison rules live in the Rust core
+        let latin = hanzi.applyingTransform(.mandarinToLatin, reverse: false) ?? ""
+        return speechMatches(heardHanzi: hanzi, heardLatin: latin, targetHanzi: word.hanzi, targetPinyin: word.pinyin)
     }
 }

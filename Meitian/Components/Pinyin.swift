@@ -6,89 +6,18 @@ enum PinyinPrefs {
     static let toneColors = "toneColors"
 }
 
-/// Pinyin helpers: tone detection and splitting words like "xièxie" into syllables.
+/// Pinyin helpers. The logic lives in the shared Rust core (meitian_core), so iOS and Android agree.
 enum Pinyin {
-    private static let initials = ["zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h",
-                                   "j", "q", "x", "r", "z", "c", "s", "y", "w"]
-    private static let finals: Set<String> = [
-        "a", "o", "e", "ai", "ei", "ao", "ou", "an", "en", "ang", "eng", "ong", "er",
-        "i", "ia", "ie", "iao", "iu", "ian", "in", "iang", "ing", "iong",
-        "u", "ua", "uo", "uai", "ui", "uan", "un", "uang", "ueng", "ue",
-        "ü", "üe", "üan", "ün",
-    ]
-    private static let marks: [Character: (Character, Int)] = [
-        "ā": ("a", 1), "á": ("a", 2), "ǎ": ("a", 3), "à": ("a", 4),
-        "ē": ("e", 1), "é": ("e", 2), "ě": ("e", 3), "è": ("e", 4),
-        "ī": ("i", 1), "í": ("i", 2), "ǐ": ("i", 3), "ì": ("i", 4),
-        "ō": ("o", 1), "ó": ("o", 2), "ǒ": ("o", 3), "ò": ("o", 4),
-        "ū": ("u", 1), "ú": ("u", 2), "ǔ": ("u", 3), "ù": ("u", 4),
-        "ǖ": ("ü", 1), "ǘ": ("ü", 2), "ǚ": ("ü", 3), "ǜ": ("ü", 4),
-    ]
-
-    static func base(_ c: Character) -> Character {
-        let lower = Character(c.lowercased())
-        return marks[lower]?.0 ?? lower
-    }
-
     /// 1–4, or 5 for the neutral tone.
-    static func tone(of syllable: String) -> Int {
-        for c in syllable.lowercased() { if let t = marks[c]?.1 { return t } }
-        return 5
-    }
+    static func tone(of syllable: String) -> Int { Int(pinyinTone(syllable: syllable)) }
 
     /// Splits one pinyin word ("Zhōngguó") into syllables, or nil if it can't.
-    static func syllables(_ word: String) -> [String]? {
-        let chars = Array(word)
-        let b = chars.map(base)
-        let n = chars.count
-        var i = 0
-        var out: [String] = []
-        while i < n {
-            var initLen = 0
-            for ini in initials {
-                let ic = Array(ini)
-                if i + ic.count <= n && Array(b[i..<(i + ic.count)]) == ic { initLen = ic.count; break }
-            }
-            // erhua: the final "r" in "nǎr" belongs to 儿
-            if b[i] == "r", i == n - 1, !out.isEmpty {
-                out.append(String(chars[i]))
-                break
-            }
-            let start = i + initLen
-            var len = 0
-            if start < n {
-                for l in stride(from: min(4, n - start), through: 1, by: -1) {
-                    let f = String(b[start..<(start + l)])
-                    // "er" only stands alone (儿, 二); after an initial it's erhua ("zhèr")
-                    if finals.contains(f) && !(f == "er" && initLen > 0) {
-                        len = l
-                        break
-                    }
-                }
-            }
-            guard len > 0 else { return nil }
-            // "dàngāo" is dàn‑gāo, not dàng‑āo: give a trailing n/g to the next syllable if it starts with a vowel
-            let end = start + len
-            if end < n, len > 1, "aeo".contains(b[end]), "ng".contains(b[end - 1]),
-               finals.contains(String(b[start..<(end - 1)])) {
-                len -= 1
-            }
-            out.append(String(chars[i..<(start + len)]))
-            i = start + len
-        }
-        return out
-    }
+    static func syllables(_ word: String) -> [String]? { pinyinSyllables(word: word) }
 
     /// All syllables of a phrase/sentence ("Nǐ hǎo, wǒ jiào Xiǎomíng.") or nil.
-    static func allSyllables(_ text: String) -> [String]? {
-        var result: [String] = []
-        for token in text.split(whereSeparator: { !$0.isLetter }) {
-            guard let s = syllables(String(token)) else { return nil }
-            result += s
-        }
-        return result
-    }
+    static func allSyllables(_ text: String) -> [String]? { pinyinAllSyllables(text: text) }
 
+    /// Cheap per-character check used when filtering text in views.
     static func isHanzi(_ c: Character) -> Bool {
         guard let v = c.unicodeScalars.first?.value else { return false }
         return (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v)
@@ -173,16 +102,8 @@ struct RubyText: View {
     }
 
     private var units: [Unit]? {
-        guard let syl = Pinyin.allSyllables(pinyin) else { return nil }
-        let chars = Array(hanzi)
-        guard chars.filter(Pinyin.isHanzi).count == syl.count else { return nil }
-        var k = 0
-        return chars.enumerated().map { i, c in
-            if Pinyin.isHanzi(c) {
-                defer { k += 1 }
-                return Unit(id: i, char: String(c), syllable: syl[k])
-            }
-            return Unit(id: i, char: String(c), syllable: nil)
+        rubyUnits(hanzi: hanzi, pinyin: pinyin)?.enumerated().map { i, u in
+            Unit(id: i, char: u.character, syllable: u.syllable)
         }
     }
 

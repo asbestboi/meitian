@@ -133,11 +133,10 @@ final class DuelMatch {
 
     func hostStart(mode: DuelMode) {
         guard isHost, !incompatible, let opponent else { return }
-        let level = max(1, min(me.level, opponent.level))
-        var pool = WordBank.all.filter { $0.level <= level }
-        // street words join the pool only when both players have them on
-        if me.swearsOn && opponent.swearsOn { pool += WordBank.swears }
-        let list = WireQuestion.make(pool: pool, count: mode == .duel ? 40 : 80)
+        // words up to the lower level; street words only when both have them on (rules in the Rust core)
+        let pool = battlePool(levelA: UInt8(clamping: me.level), levelB: UInt8(clamping: opponent.level),
+                              swearsA: me.swearsOn, swearsB: opponent.swearsOn)
+        let list = WireQuestion.make(poolIds: pool, count: mode == .duel ? 40 : 80)
         connection.send(.start(mode: mode, questions: list))
         begin(mode: mode, wire: list)
     }
@@ -234,7 +233,7 @@ final class DuelMatch {
         var ms = 0
         if let best {
             ms = best.value.ms
-            damage = 12 + max(0, (4000 - ms) / 400) // 12–22, faster hits harder
+            damage = Int(duelDamage(reactionMs: UInt32(clamping: ms))) // 12–22, faster hits harder
             let target = best.key == me.id ? opp.id : me.id
             hp[target] = max(0, hp(of: target) - damage)
         }
@@ -326,7 +325,7 @@ final class DuelMatch {
 
     private func handle(_ msg: DuelMessage) {
         switch msg {
-        case .hello(let card) where card.swearsOn != me.swearsOn:
+        case .hello(let card) where !canMatch(mySwears: me.swearsOn, theirSwears: card.swearsOn):
             // swears on and swears off don't mix: refuse the match on both phones
             if opponent == nil { sayHello() }
             opponent = card

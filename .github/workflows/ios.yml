@@ -22,6 +22,8 @@ jobs:
         run: brew install xcodegen
       - name: Xcode version
         run: xcodebuild -version
+      - name: Test shared Rust core
+        run: cd core && cargo test --release
       - name: Build
         run: scripts/build-ipa.sh
       - name: Show build log on failure

@@ -9,15 +9,16 @@ struct CardState: Codable, Hashable {
     var wrong: Int = 0
     var learnedOn: String
 
-    static let intervals = [0, 1, 2, 4, 8, 16, 32] // days, indexed by box
-
+    /// Leitner grading from the shared Rust core.
     mutating func grade(_ right: Bool, now: Date = .now) {
-        if right { correct += 1; box = min(box + 1, CardState.intervals.count - 1) }
-        else { wrong += 1; box = 1 }
-        due = Calendar.current.date(byAdding: .day, value: CardState.intervals[box], to: Calendar.current.startOfDay(for: now)) ?? now
+        if right { correct += 1 } else { wrong += 1 }
+        let step = srsGrade(boxLevel: UInt8(clamping: box), right: right)
+        box = Int(step.boxLevel)
+        due = Calendar.current.date(byAdding: .day, value: Int(step.daysUntilDue),
+                                    to: Calendar.current.startOfDay(for: now)) ?? now
     }
 
-    var mastered: Bool { box >= 4 }
+    var mastered: Bool { srsIsMastered(boxLevel: UInt8(clamping: box)) }
 }
 
 enum FriendKind: String, Codable, CaseIterable, Identifiable {
@@ -248,36 +249,17 @@ final class AppStore {
 
     // MARK: stats
 
-    var streak: Int {
-        var count = 0
-        var date = Date.now
-        if !(days[AppStore.key(for: date)]?.active ?? false) {
-            date = Calendar.current.date(byAdding: .day, value: -1, to: date) ?? date
-        }
-        while days[AppStore.key(for: date)]?.active ?? false {
-            count += 1
-            date = Calendar.current.date(byAdding: .day, value: -1, to: date) ?? date
-        }
-        return count
+    /// Active days as day numbers for the Rust streak logic.
+    private var activeDayNumbers: [Int64] {
+        days.filter { $0.value.active }.compactMap { dayNumber(dayKey: $0.key) }
     }
 
-    var bestStreak: Int {
-        let active = Set(days.filter { $0.value.active }.map(\.key))
-        var best = 0
-        for k in active {
-            guard let d = AppStore.date(from: k) else { continue }
-            let prev = Calendar.current.date(byAdding: .day, value: -1, to: d)!
-            if active.contains(AppStore.key(for: prev)) { continue } // not a run start
-            var run = 0
-            var cur = d
-            while active.contains(AppStore.key(for: cur)) {
-                run += 1
-                cur = Calendar.current.date(byAdding: .day, value: 1, to: cur)!
-            }
-            best = max(best, run)
-        }
-        return best
+    var streak: Int {
+        let today = dayNumber(dayKey: AppStore.key(for: .now)) ?? 0
+        return Int(currentStreak(activeDays: activeDayNumbers, today: today))
     }
+
+    var bestStreak: Int { Int(Meitian.bestStreak(activeDays: activeDayNumbers)) }
 
     static func date(from key: String) -> Date? {
         let p = key.split(separator: "-").compactMap { Int($0) }
@@ -285,14 +267,11 @@ final class AppStore {
         return Calendar.current.date(from: DateComponents(year: p[0], month: p[1], day: p[2]))
     }
 
-    /// XP needed per player level grows gently.
-    var playerLevel: Int { Int((Double(xp) / 100).squareRoot()) + 1 }
-    var levelProgress: Double {
-        let lo = Double((playerLevel - 1) * (playerLevel - 1) * 100)
-        let hi = Double(playerLevel * playerLevel * 100)
-        return (Double(xp) - lo) / (hi - lo)
-    }
-    var xpToNextLevel: Int { playerLevel * playerLevel * 100 - xp }
+    /// XP needed per player level grows gently (formula in the Rust core).
+    private var level: PlayerLevel { Meitian.playerLevel(xp: UInt32(clamping: max(xp, 0))) }
+    var playerLevel: Int { Int(level.level) }
+    var levelProgress: Double { level.progress }
+    var xpToNextLevel: Int { Int(level.xpToNext) }
 
     func learnedCount(level: Int) -> Int {
         WordBank.words(level: level).filter { cards[$0.id] != nil }.count

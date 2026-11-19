@@ -162,19 +162,8 @@ struct TodayView: View {
     }
 
     private var phraseOfTheDay: some View {
-        let phrases: [(String, String, String)] = [
-            ("慢慢来", "màn man lái", "Take your time."),
-            ("没关系", "méi guānxi", "It doesn't matter / no worries."),
-            ("加油", "jiāyóu", "You can do it!"),
-            ("一路平安", "yí lù píng'ān", "Have a safe trip."),
-            ("好久不见", "hǎo jiǔ bú jiàn", "Long time no see."),
-            ("马马虎虎", "mǎma hūhū", "So-so (literally: horse horse tiger tiger)."),
-            ("吃了吗？", "chī le ma?", "Have you eaten? (a friendly hello)"),
-            ("小菜一碟", "xiǎo cài yì dié", "Piece of cake (a small dish)."),
-            ("入乡随俗", "rù xiāng suí sú", "When in Rome, do as the Romans do."),
-            ("一言为定", "yì yán wéi dìng", "It's a deal!"),
-        ]
-        let p = phrases[Challenge.seed(store.todayKey) % phrases.count]
+        let c = Meitian.phraseOfTheDay(dayKey: store.todayKey)
+        let p = (c.hanzi, c.pinyin, c.meaning)
         return VStack(alignment: .leading, spacing: 10) {
             Text("Phrase of the day").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
             HStack {

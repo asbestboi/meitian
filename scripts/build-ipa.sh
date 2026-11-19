@@ -9,6 +9,7 @@ cd "$(dirname "$0")/.."
 
 BUILD=${GITHUB_RUN_NUMBER:-1}
 mkdir -p build
+scripts/build-core-ios.sh
 xcodegen generate
 
 xcodebuild \

@@ -22,6 +22,19 @@ struct Word: Identifiable, Hashable, Codable {
     var intensityLabel: String { ["", "mild", "rude", "very strong"][min(max(intensity, 0), 3)] }
 }
 
+extension Word {
+    init(_ c: CoreWord) {
+        self.init(id: c.id, level: Int(c.level), hanzi: c.hanzi, pinyin: c.pinyin, meaning: c.meaning,
+                  example: c.example, examplePinyin: c.examplePinyin, exampleMeaning: c.exampleMeaning,
+                  intensity: Int(c.intensity))
+    }
+
+    var core: CoreWord {
+        CoreWord(id: id, level: UInt8(level), hanzi: hanzi, pinyin: pinyin, meaning: meaning, example: example,
+                 examplePinyin: examplePinyin, exampleMeaning: exampleMeaning, intensity: UInt8(intensity))
+    }
+}
+
 /// App-wide settings stored with @AppStorage (kept out of the save files so old saves still load).
 enum Prefs {
     static let swears = "swearWords"
@@ -55,12 +68,12 @@ enum Prefs {
     }
 }
 
-/// The built-in vocabulary: words.tsv (HSK 1–4 style levels) plus the opt-in street deck in swears.tsv.
+/// The built-in vocabulary, compiled into the shared Rust core: HSK 1–4 plus the opt-in street deck.
 enum WordBank {
     static let streetLevel = 5
     /// Regular vocabulary only. Street words live in `swears`.
-    static let all: [Word] = load("words")
-    static let swears: [Word] = load("swears")
+    static let all: [Word] = allWords().map(Word.init)
+    static let swears: [Word] = swearWords().map(Word.init)
     static let byId: [String: Word] = Dictionary(uniqueKeysWithValues: (all + swears).map { ($0.id, $0) })
     static let levels = [1, 2, 3, 4]
 
@@ -69,22 +82,6 @@ enum WordBank {
 
     /// Words a learner with the given swear setting may see.
     static func visible(swears on: Bool) -> [Word] { on ? all + swears : all }
-
-    private static func load(_ name: String) -> [Word] {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "tsv"),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        var result: [Word] = []
-        for line in text.split(whereSeparator: \.isNewline) {
-            if line.hasPrefix("#") { continue }
-            let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard f.count >= 7, let level = Int(f[0]) else { continue }
-            var w = Word(id: "\(level)-\(f[1])", level: level, hanzi: f[1], pinyin: f[2], meaning: f[3],
-                         example: f[4], examplePinyin: f[5], exampleMeaning: f[6])
-            if f.count >= 8, let i = Int(f[7]) { w.intensity = i }
-            result.append(w)
-        }
-        return result
-    }
 
     static let levelNames: [Int: String] = [
         0: "New Explorer",
