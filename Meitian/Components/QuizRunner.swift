@@ -162,9 +162,10 @@ struct QuizRunner: View {
             Group {
                 switch listener.state {
                 case .listening: Text(listener.heard.isEmpty ? "Listening… say “\(q.word.hanzi)”" : "Heard: \(listener.heard)")
-                case .missed: Text(listener.heard.isEmpty ? "Didn't catch that. Tap and try again." : "Heard “\(listener.heard)”. Try again!")
+                case .missed: Text(!listener.problem.isEmpty ? listener.problem
+                                   : listener.heard.isEmpty ? "Didn't catch that. Tap and try again." : "Heard “\(listener.heard)”. Try again!")
                 case .denied: Text("Allow Microphone and Speech Recognition in Settings to use speaking.")
-                case .unavailable: Text("Speech recognition isn't available right now.")
+                case .unavailable: Text(listener.problem.isEmpty ? "Speech recognition isn't available right now." : listener.problem)
                 default: Text("Tap the mic and say the word")
                 }
             }

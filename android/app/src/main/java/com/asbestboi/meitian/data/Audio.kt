@@ -138,6 +138,9 @@ class SpeechListener(private val context: Context) {
         private set
     var heard by mutableStateOf("")
         private set
+    /** Why the last attempt failed, in plain words (empty for an ordinary miss). */
+    var problem by mutableStateOf("")
+        private set
 
     private var recognizer: SpeechRecognizer? = null
     private val han: Transliterator? = runCatching { Transliterator.getInstance("Han-Latin") }.getOrNull()
@@ -145,7 +148,11 @@ class SpeechListener(private val context: Context) {
     fun start(word: uniffi.meitian_core.CoreWord) {
         stop()
         heard = ""
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) { state = State.Unavailable; return }
+        problem = ""
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            problem = "No background speech service on this phone. Use Google voice input below."
+            state = State.Unavailable; return
+        }
         val r = SpeechRecognizer.createSpeechRecognizer(context)
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
@@ -155,8 +162,18 @@ class SpeechListener(private val context: Context) {
                 if (state != State.Listening) return
                 // a partial result may already contain the word
                 if (heard.isNotEmpty() && matches(heard, word)) { finish(State.Matched); return }
+                problem = when (error) {
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
+                        "Chinese speech recognition needs internet."
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Allow the microphone for Měitiān in Settings."
+                    SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+                        "This phone's speech service has no Chinese. Use Google voice input below."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "The speech service is busy, try again."
+                    SpeechRecognizer.ERROR_CLIENT -> "The speech service stopped. Try again, or use Google voice input below."
+                    else -> ""   // no match / speech timeout: an ordinary miss
+                }
                 finish(if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) State.Unavailable else State.Missed)
+                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE || error == SpeechRecognizer.ERROR_CLIENT) State.Unavailable else State.Missed)
             }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -208,5 +225,13 @@ class SpeechListener(private val context: Context) {
         if (state == State.Listening) state = State.Idle
     }
 
-    fun reset() { stop(); state = State.Idle; heard = "" }
+    fun reset() { stop(); state = State.Idle; heard = ""; problem = "" }
+
+    /** Result from Google's voice-input popup (the fallback when the background service can't do Chinese). */
+    fun dialogResult(results: List<String>, word: uniffi.meitian_core.CoreWord) {
+        heard = results.firstOrNull() ?: ""
+        problem = ""
+        state = if (results.any { matches(it, word) }) State.Matched else State.Missed
+        Sfx.play(if (state == State.Matched) Sfx.Sound.Correct else Sfx.Sound.MicOff)
+    }
 }

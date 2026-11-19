@@ -30,7 +30,9 @@ final class SFX {
     var enabled: Bool { UserDefaults.standard.object(forKey: Prefs.sounds) as? Bool ?? true }
 
     func play(_ sound: Sound) {
-        guard enabled, let buffer = buffers[sound] else { return }
+        // Never touch the audio session while the microphone is recording: switching it to playback
+        // silences the mic and speech recognition hears nothing.
+        guard enabled, !SpeechListener.isRecording, let buffer = buffers[sound] else { return }
         if !engine.isRunning {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try? engine.start()
@@ -133,8 +135,15 @@ final class SpeechListener {
     private(set) var state: State = .idle
     private(set) var heard = ""
 
+    /// True while the mic is open; sound effects and text-to-speech stay quiet meanwhile.
+    static var isRecording = false
+
+    /// Why the last attempt failed, in plain words (shown under the mic).
+    private(set) var problem = ""
+
     @ObservationIgnored private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-    @ObservationIgnored private let engine = AVAudioEngine()
+    // a fresh engine per attempt: one reused across audio-session changes can stop delivering audio
+    @ObservationIgnored private var engine = AVAudioEngine()
     @ObservationIgnored private var request: SFSpeechAudioBufferRecognitionRequest?
     @ObservationIgnored private var task: SFSpeechRecognitionTask?
     @ObservationIgnored private var target: Word?
@@ -158,13 +167,21 @@ final class SpeechListener {
     }
 
     private func begin() {
-        guard let recognizer, recognizer.isAvailable else { state = .unavailable; return }
+        problem = ""
+        guard let recognizer else { problem = "Chinese speech recognition isn't supported on this iPhone."; state = .unavailable; return }
+        guard recognizer.isAvailable else {
+            problem = "Speech recognition needs internet and Siri & Dictation turned on (Settings → General → Keyboard → Enable Dictation)."
+            state = .unavailable
+            return
+        }
         Speaker.shared.stop() // don't record our own text-to-speech
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker, .allowBluetooth])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch { state = .unavailable; return }
+        } catch { problem = "The microphone is busy (\(error.localizedDescription))."; state = .unavailable; return }
+        SpeechListener.isRecording = true
+        engine = AVAudioEngine()
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -175,15 +192,24 @@ final class SpeechListener {
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { state = .unavailable; return }
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            SpeechListener.isRecording = false
+            problem = "No microphone input. Is another app using the mic?"
+            state = .unavailable
+            return
+        }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak req] buffer, _ in
             req?.append(buffer)
         }
         engine.prepare()
-        do { try engine.start() } catch { state = .unavailable; return }
+        do { try engine.start() } catch {
+            SpeechListener.isRecording = false
+            problem = "Couldn't start the microphone (\(error.localizedDescription))."
+            state = .unavailable
+            return
+        }
 
-        SFX.shared.play(.micOn)
         state = .listening
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             DispatchQueue.main.async {
@@ -196,10 +222,17 @@ final class SpeechListener {
                     }
                     if result.isFinal { self.finish(.missed) }
                 }
-                if error != nil {
+                if let error {
                     // the last partial result may already be right
-                    if let w = self.target, !self.heard.isEmpty, SpeechListener.matches(self.heard, word: w) { self.finish(.matched) }
-                    else { self.finish(.missed) }
+                    if let w = self.target, !self.heard.isEmpty, SpeechListener.matches(self.heard, word: w) { self.finish(.matched); return }
+                    let code = (error as NSError).code
+                    // 1101/1107/1110: no speech or nothing recognised — just a miss
+                    if ![1101, 1107, 1110, 203, 216].contains(code) {
+                        self.problem = (code == 1700 || code == 201)
+                            ? "Turn on Siri & Dictation: Settings → General → Keyboard → Enable Dictation."
+                            : "Speech recognition error \(code): \(error.localizedDescription)"
+                    }
+                    self.finish(.missed)
                 }
             }
         }
@@ -222,6 +255,7 @@ final class SpeechListener {
         timeout = nil
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
+        SpeechListener.isRecording = false
         request?.endAudio()
         task?.cancel()
         request = nil

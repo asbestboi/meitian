@@ -379,6 +379,24 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
         pendingWord = null
         if (ok && w != null) listener.start(w)
     }
+    // fallback: Google's own voice-input popup (works on phones whose background service lacks Chinese)
+    var dialogWord by remember { mutableStateOf<CoreWord?>(null) }
+    val voiceDialog = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+    ) { r ->
+        val w = dialogWord ?: return@rememberLauncherForActivityResult
+        listener.dialogResult(r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS) ?: emptyList(), w)
+    }
+    fun openVoiceDialog(w: CoreWord) {
+        dialogWord = w
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说：${w.hanzi}")
+        }
+        runCatching { voiceDialog.launch(intent) }
+    }
     fun startListening(w: CoreWord) {
         val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -448,7 +466,9 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                     contentAlignment = Alignment.Center,
                 ) { Text(if (listening) "〰️" else "🎙️", fontSize = 40.sp) }
                 Text(
-                    if (micDenied) "Allow the microphone in Settings to use speaking." else when (listener.state) {
+                    if (micDenied) "Allow the microphone in Settings to use speaking."
+                    else if (listener.problem.isNotEmpty()) listener.problem
+                    else when (listener.state) {
                         SpeechListener.State.Listening -> if (listener.heard.isEmpty()) "Listening… say “${q.word.hanzi}”" else "Heard: ${listener.heard}"
                         SpeechListener.State.Missed -> if (listener.heard.isEmpty()) "Didn't catch that. Try again." else "Heard “${listener.heard}”. Try again!"
                         SpeechListener.State.Unavailable -> "Speech recognition isn't available on this phone."
@@ -456,6 +476,10 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                     },
                     color = if (listener.state == SpeechListener.State.Missed) Street.c.red else Street.c.secondary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 )
+                if (answered == null && (listener.state == SpeechListener.State.Unavailable || tries >= 1)) {
+                    Text("🎙️ Use Google voice input", color = Street.c.sky, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { openVoiceDialog(q.word) }.padding(6.dp))
+                }
                 if (answered == null && (tries >= 2 || micDenied || listener.state == SpeechListener.State.Unavailable)) {
                     Text("Skip this one", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { answer(false) })
                 }

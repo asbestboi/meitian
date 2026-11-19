@@ -15,6 +15,7 @@ final class Speaker {
     }
 
     func say(_ text: String, slow: Bool = false) {
+        guard !SpeechListener.isRecording else { return } // would switch the session away from the mic
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
