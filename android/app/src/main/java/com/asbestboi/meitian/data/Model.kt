@@ -19,6 +19,7 @@ import uniffi.meitian_core.Outcome
 import uniffi.meitian_core.allWords
 import uniffi.meitian_core.currentStreak
 import uniffi.meitian_core.dayNumber
+import uniffi.meitian_core.knownLevel
 import uniffi.meitian_core.matchCoins
 import uniffi.meitian_core.playerLevel
 import uniffi.meitian_core.quizOptions
@@ -130,6 +131,8 @@ data class Profile(
     val dailyGoal: Int = 5,
     val onboarded: Boolean = false,
     val friend: String = "chinese",
+    /** Set once levels started needing a level-up test (older saves get their finished levels confirmed). */
+    val levelTests: Boolean = true,
 )
 
 data class Settings(
@@ -181,7 +184,7 @@ class AppState(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("meitian", Context.MODE_PRIVATE)
 
-    init { load() }
+    init { load(); migrateToLevelTests() }
 
     fun refreshDay() { todayKey = LocalDate.now().toString() }
 
@@ -195,17 +198,35 @@ class AppState(private val context: Context) {
 
     val startLevel get() = (profile.confirmedLevel + 1).coerceIn(1, Words.maxLevel)
 
-    val currentLevel: Int
-        get() = Words.levels.firstOrNull { l -> l >= startLevel && Words.level(l).any { cards[it.id] == null } } ?: Words.maxLevel
+    /** The HSK level the learner is on: new words and stories come from here. Moving up takes the level-up test. */
+    val currentLevel: Int get() = startLevel
+
+    /** Every word of the current level learned: time for the level-up test. */
+    val levelComplete: Boolean get() = Words.level(currentLevel).let { w -> w.isNotEmpty() && w.all { cards[it.id] != null } }
+
+    /** Is there a level above to unlock? */
+    val canLevelUp: Boolean get() = profile.confirmedLevel < Words.maxLevel
+
+    /** Passing the test for [level] confirms it, unlocking the next level's words and stories. */
+    fun passLevelTest(level: Int) {
+        profile = profile.copy(confirmedLevel = maxOf(profile.confirmedLevel, level))
+        addXP(100)
+    }
+
+    /** Before level-up tests, finishing a level's words moved you up by itself. Confirm those levels once. */
+    private fun migrateToLevelTests() {
+        if (profile.levelTests) return
+        val levels = (1..Words.maxLevel.coerceAtLeast(1)).toList()
+        val known = knownLevel(profile.confirmedLevel.coerceIn(0, 255).toUByte(),
+            levels.map { learnedCount(it).toUInt() }, levels.map { Words.level(it).size.toUInt() })
+        profile = profile.copy(confirmedLevel = known.toInt(), levelTests = true)
+        save()
+    }
 
     fun todaysWords(): List<CoreWord> {
         if (today.newWordIds.isNotEmpty()) return today.newWordIds.mapNotNull { Words[it] }
-        val picked = mutableListOf<CoreWord>()
-        var level = startLevel
-        while (picked.size < profile.dailyGoal && level <= Words.maxLevel) {
-            picked += Words.level(level).filter { cards[it.id] == null && it !in picked }.take(profile.dailyGoal - picked.size)
-            level++
-        }
+        // only from the current level: the next one opens with the level-up test
+        val picked = Words.level(currentLevel).filter { cards[it.id] == null }.take(profile.dailyGoal).toMutableList()
         if (settings.swears) Words.swears.firstOrNull { cards[it.id] == null }?.let { picked += it }
         if (picked.isEmpty()) picked += cards.entries.sortedBy { it.value.box }.take(profile.dailyGoal).mapNotNull { Words[it.key] }
         today = today.copy(newWordIds = picked.map { it.id })
@@ -217,13 +238,7 @@ class AppState(private val context: Context) {
      *  Empty until today's words are learned, or when everything has been learned. */
     fun nextLessonWords(): List<CoreWord> {
         if (!today.learnedDone) return emptyList()
-        val picked = mutableListOf<CoreWord>()
-        var level = currentLevel
-        while (picked.size < profile.dailyGoal && level <= Words.maxLevel) {
-            picked += Words.level(level).filter { cards[it.id] == null && it !in picked }.take(profile.dailyGoal - picked.size)
-            level++
-        }
-        return picked
+        return Words.level(currentLevel).filter { cards[it.id] == null }.take(profile.dailyGoal)
     }
 
     /** Where the learner is on their current HSK level's path of lessons. */
@@ -392,6 +407,7 @@ class AppState(private val context: Context) {
         o.put("profile", JSONObject().apply {
             put("name", profile.name); put("claimed", profile.claimedLevel); put("confirmed", profile.confirmedLevel)
             put("goal", profile.dailyGoal); put("onboarded", profile.onboarded); put("friend", profile.friend)
+            put("levelTests", profile.levelTests)
         })
         o.put("settings", JSONObject().apply {
             val s = settings
@@ -441,7 +457,7 @@ class AppState(private val context: Context) {
             xp = o.optInt("xp")
             o.optJSONObject("profile")?.let { p ->
                 profile = Profile(p.optString("name"), p.optInt("claimed"), p.optInt("confirmed"), p.optInt("goal", 5),
-                    p.optBoolean("onboarded"), p.optString("friend", "chinese"))
+                    p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"))
             }
             o.optJSONObject("settings")?.let { s ->
                 settings = Settings(s.optBoolean("pinyin", true), s.optBoolean("tones", true), s.optBoolean("swears"),

@@ -84,6 +84,7 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
             Badge("🔥 ${app.streak}"); HSpacer(6.dp); Badge("⭐ ${app.xp}")
         }
         MilestoneCard()
+        LevelTestCard(onPracticeWeak = goToPractice)
         // today's words: dark hero card with a lime accent (same on iOS)
         var appeared by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { appeared = true }
@@ -414,6 +415,11 @@ fun ProgressScreen() {
             }
             Text("✅ Retake placement quiz", fontWeight = FontWeight.Bold, color = Street.c.text,
                 modifier = Modifier.clickable { nav.show { OnboardingScreen(retakeOnly = true) { nav.close() } } })
+            if (app.canLevelUp) {
+                val level = app.currentLevel
+                Text("🎓 Skip ahead: take the HSK $level test", fontWeight = FontWeight.Bold, color = Street.c.text,
+                    modifier = Modifier.clickable { nav.show { LevelTest(level) { nav.close() } } })
+            }
             Text(if (confirmReset) "⚠️ Tap again to delete everything (can't be undone)" else "🗑️ Reset all progress", fontWeight = FontWeight.Bold, color = Street.c.red,
                 modifier = Modifier.clickable { if (confirmReset) { app.resetAll(); confirmReset = false } else confirmReset = true })
         }

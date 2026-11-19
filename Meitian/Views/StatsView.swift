@@ -7,6 +7,7 @@ struct StatsView: View {
     @State private var confirmClear = false
     @Environment(ArenaStore.self) private var arena
     @State private var retake = false
+    @State private var levelTest = false
     @State private var confirmReset = false
     @State private var reminderTime = Date.now
     @AppStorage(PinyinPrefs.show) private var showPinyin = true
@@ -44,6 +45,9 @@ struct StatsView: View {
             .background(Theme.background.ignoresSafeArea())
             .scrollIndicators(.hidden)
             .navigationTitle("Progress")
+        }
+        .fullScreenCover(isPresented: $levelTest) {
+            LevelTestView(level: store.currentLevel).environment(store)
         }
         .fullScreenCover(isPresented: $retake) {
             OnboardingFlow(retakeOnly: true, onRetakeDone: { retake = false })
@@ -373,6 +377,14 @@ struct StatsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(16)
+            if store.canLevelUp {
+                Divider().padding(.leading, 16)
+                Button { levelTest = true } label: {
+                    Label("Skip ahead: take the HSK \(store.currentLevel) test", systemImage: "graduationcap.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(16)
+            }
             Divider().padding(.leading, 16)
             Button(role: .destructive) { confirmReset = true } label: {
                 Label("Reset all progress", systemImage: "trash")

@@ -10,6 +10,7 @@ struct TodayView: View {
     /// After today's words: the next lesson, as many as the learner wants.
     @State private var nextWords: [Word] = []
     @State private var lessonWords: [Word] = []
+    @State private var testLevel: LevelRef?
     @State private var learning = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -20,6 +21,7 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     MilestoneCard()
+                    LevelTestCard(onStart: { testLevel = LevelRef(level: $0) })
                     wordsCard
                     StoryOfTheDayCard()
                     challengeCard
@@ -40,6 +42,9 @@ struct TodayView: View {
         .onChange(of: store.profile.dailyGoal) { _, _ in reloadWords() }
         .fullScreenCover(isPresented: $learning, onDismiss: reloadWords) {
             LearnSession(words: lessonWords).environment(store)
+        }
+        .fullScreenCover(item: $testLevel, onDismiss: reloadWords) { ref in
+            LevelTestView(level: ref.level, onPracticeWeak: goToPractice).environment(store)
         }
     }
 

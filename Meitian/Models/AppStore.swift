@@ -69,6 +69,8 @@ struct Profile: Codable, Hashable {
     var reminderHour = 19
     var reminderMinute = 0
     var preferredFriend: FriendKind = .chinese
+    /// Set once levels started needing a level-up test (older saves get their finished levels confirmed).
+    var levelTests: Bool? = true
 }
 
 private struct SaveFile: Codable {
@@ -106,6 +108,19 @@ final class AppStore {
         cards = file.cards
         days = file.days
         xp = file.xp
+        migrateToLevelTests()
+    }
+
+    /// Before level-up tests, finishing a level's words moved you up by itself. Confirm those levels once
+    /// so nobody gets pushed back.
+    private func migrateToLevelTests() {
+        guard profile.levelTests != true else { return }
+        let levels = Array(1...max(WordBank.maxLevel, 1))
+        profile.confirmedLevel = Int(knownLevel(confirmed: UInt8(clamping: profile.confirmedLevel),
+                                                learnedPerLevel: levels.map { UInt32(learnedCount(level: $0)) },
+                                                totalPerLevel: levels.map { UInt32(WordBank.words(level: $0).count) }))
+        profile.levelTests = true
+        save()
     }
 
     func save() {
@@ -150,12 +165,23 @@ final class AppStore {
     /// Placement confirmed levels are already known, so new words start one above.
     var startLevel: Int { min(max(profile.confirmedLevel + 1, 1), WordBank.maxLevel) }
 
-    /// The level the learner is currently pulling new words from.
-    var currentLevel: Int {
-        for level in WordBank.levels where level >= startLevel {
-            if WordBank.words(level: level).contains(where: { cards[$0.id] == nil }) { return level }
-        }
-        return WordBank.maxLevel
+    /// The HSK level the learner is on: new words and stories come from here (and below for stories).
+    /// Moving up takes passing the level-up test.
+    var currentLevel: Int { startLevel }
+
+    /// Every word of the current level learned: time for the level-up test.
+    var levelComplete: Bool {
+        let words = WordBank.words(level: currentLevel)
+        return !words.isEmpty && words.allSatisfy { cards[$0.id] != nil }
+    }
+
+    /// Is there a level above to unlock?
+    var canLevelUp: Bool { profile.confirmedLevel < WordBank.maxLevel }
+
+    /// Passing the test for `level` confirms it, unlocking the next level's words and stories.
+    func passLevelTest(_ level: Int) {
+        profile.confirmedLevel = max(profile.confirmedLevel, level)
+        addXP(100)
     }
 
     /// Today's new words, picked once per day and then fixed.
@@ -163,13 +189,8 @@ final class AppStore {
         if !today.newWordIds.isEmpty {
             return today.newWordIds.compactMap(WordBank.word)
         }
-        var picked: [Word] = []
-        var level = startLevel
-        while picked.count < profile.dailyGoal && level <= WordBank.maxLevel {
-            let fresh = WordBank.words(level: level).filter { cards[$0.id] == nil && !picked.contains($0) }
-            picked.append(contentsOf: fresh.prefix(profile.dailyGoal - picked.count))
-            level += 1
-        }
+        // only from the current level: the next one opens with the level-up test
+        var picked = Array(WordBank.words(level: currentLevel).filter { cards[$0.id] == nil }.prefix(profile.dailyGoal))
         // street mode: one swear word a day on top of the regular ones
         if Prefs.swearsOn, let street = WordBank.swears.first(where: { cards[$0.id] == nil }) {
             picked.append(street)
@@ -188,14 +209,7 @@ final class AppStore {
     /// Empty while today's words aren't learned yet, or when everything has been learned.
     func nextLessonWords() -> [Word] {
         guard today.learnedDone else { return [] }
-        var picked: [Word] = []
-        var level = currentLevel
-        while picked.count < profile.dailyGoal && level <= WordBank.maxLevel {
-            let fresh = WordBank.words(level: level).filter { cards[$0.id] == nil && !picked.contains($0) }
-            picked.append(contentsOf: fresh.prefix(profile.dailyGoal - picked.count))
-            level += 1
-        }
-        return picked
+        return Array(WordBank.words(level: currentLevel).filter { cards[$0.id] == nil }.prefix(profile.dailyGoal))
     }
 
     /// Where the learner is on their current HSK level's path of lessons.

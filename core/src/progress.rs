@@ -119,6 +119,47 @@ pub fn placement_should_continue(answers: Vec<PlacementAnswer>) -> bool {
     answers.iter().filter(|a| a.level == level && a.right).count() >= 2
 }
 
+/// Questions in an HSK level-up test.
+#[uniffi::export]
+pub fn level_test_size() -> u32 {
+    20
+}
+
+/// A level-up test is passed with 80% or more right.
+#[uniffi::export]
+pub fn level_test_passed(right: u32, total: u32) -> bool {
+    total > 0 && right * 5 >= total * 4
+}
+
+/// Words for an HSK level-up test: the level's words the learner has learned come first (shuffled),
+/// topped up with the rest of the level when they're testing out early. Never repeats a word.
+#[uniffi::export]
+pub fn level_test_word_ids(level_ids: Vec<String>, learned_ids: Vec<String>, seed: u64) -> Vec<String> {
+    let learned: std::collections::HashSet<&String> = learned_ids.iter().collect();
+    let mut rng = fastrand::Rng::with_seed(seed);
+    let (mut known, mut rest): (Vec<String>, Vec<String>) = level_ids.into_iter().partition(|id| learned.contains(id));
+    known.dedup();
+    rest.dedup();
+    rng.shuffle(&mut known);
+    rng.shuffle(&mut rest);
+    known.into_iter().chain(rest).take(level_test_size() as usize).collect()
+}
+
+/// Levels the learner already knows: the placement result, raised through every following level whose
+/// words have all been learned (so nobody loses a level when level-up tests arrive).
+/// `learned_per_level` and `total_per_level` are indexed by level − 1.
+#[uniffi::export]
+pub fn known_level(confirmed: u8, learned_per_level: Vec<u32>, total_per_level: Vec<u32>) -> u8 {
+    let mut level = confirmed;
+    while let (Some(&l), Some(&t)) = (learned_per_level.get(level as usize), total_per_level.get(level as usize)) {
+        if t == 0 || l < t {
+            break;
+        }
+        level += 1;
+    }
+    level
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +200,23 @@ mod tests {
         assert_eq!(placement_level(vec![a(1, true), a(1, true), a(1, false), a(2, false), a(2, false), a(2, true)]), 1);
         assert_eq!(placement_level(vec![a(1, false), a(1, false), a(1, true), a(2, true), a(2, true), a(2, true)]), 0);
         assert!(!placement_should_continue(vec![a(1, true), a(1, false), a(1, false)]));
+    }
+
+    #[test]
+    fn level_tests() {
+        assert!(level_test_passed(16, 20) && !level_test_passed(15, 20) && !level_test_passed(0, 0));
+        let level: Vec<String> = (0..30).map(|i| format!("1-{i}")).collect();
+        let learned: Vec<String> = (0..5).map(|i| format!("1-{i}")).collect();
+        let ids = level_test_word_ids(level.clone(), learned.clone(), 7);
+        assert_eq!(ids.len(), 20);
+        assert!(ids[..5].iter().all(|id| learned.contains(id)), "learned words first");
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 20, "no repeats");
+        assert_eq!(level_test_word_ids(level[..3].to_vec(), vec![], 1).len(), 3);
+        assert_eq!(known_level(0, vec![150, 150, 10], vec![150, 150, 300]), 2);
+        assert_eq!(known_level(1, vec![3, 0], vec![150, 150]), 1);
+        assert_eq!(known_level(0, vec![], vec![]), 0);
     }
 }
