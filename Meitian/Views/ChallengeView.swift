@@ -121,7 +121,7 @@ struct ChallengeView: View {
             if checked.count == c.steps.count {
                 reflection(c).transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
-                Text("Tick off the steps as you go. 你可以的！")
+                Text("Tick off the steps as you go. 你可以的！(nǐ kěyǐ de · you can do it!)")
                     .font(.rounded(.footnote)).foregroundStyle(.secondary)
             }
         }
@@ -139,8 +139,7 @@ struct ChallengeView: View {
                 .buttonStyle(PressableStyle())
                 SpeakButton(text: w.example, size: 36, tint: Theme.jade)
             }
-            Text(w.example).font(.hanzi(26, weight: .semibold))
-            Text(w.examplePinyin).font(.rounded(.subheadline, weight: .medium)).foregroundStyle(Theme.jade)
+            RubyText(hanzi: w.example, pinyin: w.examplePinyin, size: 26, weight: .semibold, alwaysShow: true)
             Text(w.exampleMeaning).font(.rounded(.subheadline)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -213,14 +212,14 @@ struct ChallengeView: View {
         return VStack(spacing: 18) {
             Text("🏆").font(.system(size: 80))
             Text("Challenge complete!").font(.system(size: 28, weight: .bold, design: .rounded))
-            Text("You used \(word.hanzi) with a \(log.friend == .chinese ? "Chinese" : "non‑Chinese") friend today. That's how words stick. 你真棒！")
+            Text("You used \(word.hanzi) with a \(log.friend == .chinese ? "Chinese" : "non‑Chinese") friend today. That's how words stick. 你真棒！(nǐ zhēn bàng · you're great!)")
                 .font(.rounded(.body)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             if !log.note.isEmpty {
                 Text("“\(log.note)”").font(.rounded(.body, weight: .medium)).italic()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardSurface(padding: 16)
             }
-            Text("New challenge tomorrow. 明天见！")
+            Text("New challenge tomorrow. 明天见！(míngtiān jiàn)")
                 .font(.rounded(.subheadline, weight: .semibold))
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(.ultraThinMaterial, in: Capsule())
@@ -238,7 +237,12 @@ struct ChallengeView: View {
                 HStack(spacing: 12) {
                     Text(log.friend.emoji).font(.title2)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(WordBank.word(log.wordId)?.hanzi ?? "—").font(.hanzi(20, weight: .semibold))
+                        HStack(spacing: 8) {
+                            Text(WordBank.word(log.wordId)?.hanzi ?? "—").font(.hanzi(20, weight: .semibold))
+                            if let w = WordBank.word(log.wordId) {
+                                PinyinText(pinyin: w.pinyin, font: .rounded(.subheadline, weight: .bold))
+                            }
+                        }
                         Text(day).font(.rounded(.caption)).foregroundStyle(.secondary)
                     }
                     Spacer()

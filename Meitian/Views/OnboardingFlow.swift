@@ -120,9 +120,8 @@ struct OnboardingFlow: View {
     private var nameStep: some View {
         VStack(alignment: .leading, spacing: 24) {
             backButton(to: .welcome)
-            Text("你叫什么名字？")
-                .font(.hanzi(34, weight: .bold))
-            Text("What's your name? (nǐ jiào shénme míngzi?)")
+            RubyText(hanzi: "你叫什么名字？", pinyin: "Nǐ jiào shénme míngzi?", size: 34, weight: .bold, alwaysShow: true)
+            Text("What's your name?")
                 .font(.rounded(.body)).foregroundStyle(.secondary)
             TextField("Your name", text: $name)
                 .font(.rounded(.title2, weight: .semibold))
@@ -138,6 +137,7 @@ struct OnboardingFlow: View {
                     SpeakButton(text: "我叫\(name)。", size: 36)
                 }
                 .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
+                PinyinText(pinyin: "Wǒ jiào \(name).", font: .rounded(.headline, weight: .bold))
                 Text("That's how you say “My name is \(name).”").font(.rounded(.footnote)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -230,6 +230,7 @@ struct OnboardingFlow: View {
             }
             QuizRunner(
                 questions: questions,
+                allowPinyin: false,
                 onAnswer: { q, right in results.append((level: q.word.level, right: right)) },
                 shouldContinue: { answered in
                     // after each block of 3, stop if that level wasn't passed
@@ -285,7 +286,7 @@ struct OnboardingFlow: View {
 
     private var resultTitle: String {
         if confirmed > claimed { return "You're better than you think! 🎉" }
-        if confirmed == claimed { return confirmed == 0 ? "Let's begin together" : "Confirmed! 太棒了" }
+        if confirmed == claimed { return confirmed == 0 ? "Let's begin together" : "Confirmed! 太棒了 (tài bàng le)" }
         return "Let's build a solid base"
     }
 

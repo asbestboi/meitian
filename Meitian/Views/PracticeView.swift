@@ -133,7 +133,7 @@ struct PracticeView: View {
         return HStack(spacing: 14) {
             Text(w.hanzi).font(.hanzi(26, weight: .semibold)).frame(minWidth: 56, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(w.pinyin).font(.rounded(.subheadline, weight: .bold)).foregroundStyle(Theme.levelColor(w.level))
+                PinyinText(pinyin: w.pinyin, font: .rounded(.subheadline, weight: .bold))
                 Text(w.meaning).font(.rounded(.subheadline)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
@@ -160,8 +160,9 @@ struct WordDetail: View {
             VStack(spacing: 18) {
                 Pill(text: "HSK \(word.level)", color: Theme.levelColor(word.level))
                     .padding(.top, 24)
-                Text(word.hanzi).font(.hanzi(84, weight: .semibold))
-                Text(word.pinyin).font(.rounded(.title2, weight: .bold)).foregroundStyle(Theme.levelColor(word.level))
+                RubyText(hanzi: word.hanzi, pinyin: word.pinyin, size: word.hanzi.count > 3 ? 56 : 76,
+                         weight: .semibold, alignment: .center)
+                PinyinText(pinyin: word.pinyin, font: .rounded(.title2, weight: .bold))
                 Text(word.meaning).font(.rounded(.title3, weight: .medium))
                 HStack(spacing: 14) {
                     SpeakButton(text: word.hanzi, size: 56)
@@ -176,11 +177,10 @@ struct WordDetail: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top) {
-                        Text(word.example).font(.hanzi(22, weight: .medium))
+                        RubyText(hanzi: word.example, pinyin: word.examplePinyin, size: 22, alwaysShow: true)
                         Spacer()
                         SpeakButton(text: word.example, size: 36, tint: Theme.jade)
                     }
-                    Text(word.examplePinyin).font(.rounded(.subheadline)).foregroundStyle(.secondary)
                     Text(word.exampleMeaning).font(.rounded(.subheadline, weight: .medium))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -275,7 +275,7 @@ struct PracticeSession: View {
                 Text("\(score)/\(questions.count)").font(.rounded(.largeTitle, weight: .heavy))
             }
             .frame(width: 180, height: 180)
-            Text(score == questions.count ? "Perfect! 完美！" : score * 2 >= questions.count ? "Nice work! 不错！" : "Keep going! 加油！")
+            Text(score == questions.count ? "Perfect! 完美 wánměi!" : score * 2 >= questions.count ? "Nice work! 不错 búcuò!" : "Keep going! 加油 jiāyóu!")
                 .font(.system(size: 28, weight: .bold, design: .rounded))
             Text(mode == .review ? "Words you missed will come back sooner." : "Every round makes them stick.")
                 .font(.rounded(.body)).foregroundStyle(.secondary)

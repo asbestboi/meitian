@@ -5,6 +5,8 @@ struct StatsView: View {
     @State private var retake = false
     @State private var confirmReset = false
     @State private var reminderTime = Date.now
+    @AppStorage(PinyinPrefs.show) private var showPinyin = true
+    @AppStorage(PinyinPrefs.toneColors) private var toneColors = true
 
     var body: some View {
         NavigationStack {
@@ -21,6 +23,7 @@ struct StatsView: View {
                     }
                     calendar
                     levels
+                    pinyinSettings
                     settings
                 }
                 .padding(.horizontal, 20)
@@ -151,6 +154,31 @@ struct StatsView: View {
             }
         }
         .cardSurface()
+    }
+
+    private var pinyinSettings: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Toggle(isOn: $showPinyin) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Show pinyin", systemImage: "character.phonetic")
+                    Text("Pinyin above characters on cards and quizzes. Turn it off to test your reading.")
+                        .font(.rounded(.caption)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(16)
+            Divider().padding(.leading, 16)
+            Toggle(isOn: $toneColors) {
+                Label("Tone colors", systemImage: "paintpalette.fill")
+            }
+            .padding(16)
+            if toneColors {
+                ToneLegend().padding(.horizontal, 16).padding(.bottom, 16)
+            }
+        }
+        .font(.rounded(.body))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .animation(Theme.spring, value: toneColors)
+        .sensoryFeedback(.selection, trigger: showPinyin)
     }
 
     private var settings: some View {

@@ -28,10 +28,9 @@ struct WordCardFace: View {
         VStack(spacing: 18) {
             Pill(text: "HSK \(word.level)", color: Theme.levelColor(word.level))
             Spacer()
-            Text(word.hanzi)
-                .font(.hanzi(word.hanzi.count > 2 ? 72 : 104, weight: .semibold))
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
+            RubyText(hanzi: word.hanzi, pinyin: word.pinyin,
+                     size: word.hanzi.count > 3 ? 56 : word.hanzi.count > 2 ? 68 : 96,
+                     weight: .semibold, alignment: .center)
             SpeakButton(text: word.hanzi, size: 52)
             Spacer()
             Label("Tap to flip", systemImage: "hand.tap.fill")
@@ -49,9 +48,7 @@ struct WordCardFace: View {
                 SpeakButton(text: word.hanzi)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(word.pinyin)
-                    .font(.rounded(.title2, weight: .bold))
-                    .foregroundStyle(Theme.levelColor(word.level))
+                PinyinText(pinyin: word.pinyin, font: .rounded(.title2, weight: .bold), color: Theme.levelColor(word.level))
                 Text(word.meaning)
                     .font(.rounded(.title3, weight: .medium))
             }
@@ -61,11 +58,10 @@ struct WordCardFace: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top) {
-                    Text(word.example).font(.hanzi(22, weight: .medium))
+                    RubyText(hanzi: word.example, pinyin: word.examplePinyin, size: 22, alwaysShow: true)
                     Spacer()
                     SpeakButton(text: word.example, size: 36, tint: Theme.jade)
                 }
-                Text(word.examplePinyin).font(.rounded(.subheadline)).foregroundStyle(.secondary)
                 Text(word.exampleMeaning).font(.rounded(.subheadline, weight: .medium))
             }
             .padding(16)

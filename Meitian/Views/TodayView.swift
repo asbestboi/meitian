@@ -4,6 +4,7 @@ struct TodayView: View {
     @Environment(AppStore.self) private var store
     var goToChallenge: () -> Void
     var goToPractice: () -> Void
+    @AppStorage(PinyinPrefs.show) private var showPinyin = true
 
     @State private var words: [Word] = []
     @State private var learning = false
@@ -32,20 +33,24 @@ struct TodayView: View {
         }
     }
 
-    private var greeting: String {
+    private var greeting: (hanzi: String, pinyin: String, english: String) {
         let h = Calendar.current.component(.hour, from: .now)
-        if h < 11 { return "早上好" }
-        if h < 14 { return "中午好" }
-        if h < 18 { return "下午好" }
-        return "晚上好"
+        if h < 11 { return ("早上好", "Zǎoshang hǎo", "Good morning") }
+        if h < 14 { return ("中午好", "Zhōngwǔ hǎo", "Good noon") }
+        if h < 18 { return ("下午好", "Xiàwǔ hǎo", "Good afternoon") }
+        return ("晚上好", "Wǎnshang hǎo", "Good evening")
     }
 
     private var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(greeting)，\(store.profile.name)")
+                Text("\(greeting.hanzi)，\(store.profile.name)")
                     .font(.hanzi(28, weight: .bold))
                     .lineLimit(1).minimumScaleFactor(0.7)
+                HStack(spacing: 6) {
+                    PinyinText(pinyin: greeting.pinyin, font: .rounded(.subheadline, weight: .bold))
+                    Text("· \(greeting.english)").font(.rounded(.subheadline)).foregroundStyle(.secondary)
+                }
                 Text(Date.now.formatted(.dateTime.weekday(.wide).month().day()))
                     .font(.rounded(.subheadline, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -74,9 +79,11 @@ struct TodayView: View {
                     ForEach(words) { w in
                         VStack(spacing: 4) {
                             Text(w.hanzi).font(.hanzi(28, weight: .semibold))
-                            Text(done ? w.pinyin : "?")
-                                .font(.rounded(.caption, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                            if done || showPinyin {
+                                PinyinText(pinyin: w.pinyin, font: .rounded(.caption, weight: .bold))
+                            } else {
+                                Text("?").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
+                            }
                         }
                         .frame(minWidth: 64)
                         .padding(.vertical, 12).padding(.horizontal, 10)
@@ -173,8 +180,7 @@ struct TodayView: View {
             Text("Phrase of the day").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(p.0).font(.hanzi(30, weight: .bold))
-                    Text(p.1).font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(Theme.red)
+                    RubyText(hanzi: p.0, pinyin: p.1, size: 30, weight: .bold, alwaysShow: true)
                     Text(p.2).font(.rounded(.subheadline))
                 }
                 Spacer()
@@ -258,6 +264,7 @@ struct LearnSession: View {
             Spacer()
             Text("🎉").font(.system(size: 90))
             Text("太棒了！").font(.hanzi(44, weight: .heavy)).foregroundStyle(Theme.warmGradient)
+            Text("tài bàng le · awesome!").font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
             Text("You learned \(words.count) new words today")
                 .font(.rounded(.title3, weight: .semibold))
             HStack(spacing: 12) {

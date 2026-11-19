@@ -4,6 +4,8 @@ import SwiftUI
 struct QuizRunner: View {
     let questions: [QuizQuestion]
     var showProgress = true
+    /// Off for the placement test, which checks whether you can read characters.
+    var allowPinyin = true
     var onAnswer: (QuizQuestion, Bool) -> Void = { _, _ in }
     /// Return false to stop early (used by the adaptive placement test).
     var shouldContinue: (Int) -> Bool = { _ in true }
@@ -15,6 +17,9 @@ struct QuizRunner: View {
     @State private var shake: CGFloat = 0
     @State private var rightTick = 0
     @State private var wrongTick = 0
+    @AppStorage(PinyinPrefs.show) private var showPinyin = true
+
+    private var pinyinOn: Bool { allowPinyin && showPinyin }
 
     private var q: QuizQuestion? { index < questions.count ? questions[index] : nil }
 
@@ -60,7 +65,12 @@ struct QuizRunner: View {
         switch q.kind {
         case .hanziToMeaning:
             VStack(spacing: 10) {
-                Text(q.word.hanzi).font(.hanzi(72, weight: .semibold)).minimumScaleFactor(0.5).lineLimit(1)
+                if allowPinyin {
+                    RubyText(hanzi: q.word.hanzi, pinyin: q.word.pinyin, size: q.word.hanzi.count > 3 ? 52 : 68,
+                             weight: .semibold, alignment: .center)
+                } else {
+                    Text(q.word.hanzi).font(.hanzi(72, weight: .semibold)).minimumScaleFactor(0.5).lineLimit(1)
+                }
                 SpeakButton(text: q.word.hanzi, size: 40)
             }
         case .meaningToHanzi:
@@ -93,12 +103,19 @@ struct QuizRunner: View {
             }
             onAnswer(q, right)
         } label: {
-            Text(q.label(for: option))
-                .font(isHanzi ? .hanzi(30, weight: .medium) : .rounded(.headline, weight: .semibold))
-                .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.6)
-                .lineLimit(2)
-                .foregroundStyle(.primary)
+            VStack(spacing: 2) {
+                Text(q.label(for: option))
+                    .font(isHanzi ? .hanzi(30, weight: .medium) : .rounded(.headline, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(2)
+                    .foregroundStyle(.primary)
+                if isHanzi && pinyinOn {
+                    PinyinText(pinyin: option.pinyin, font: .rounded(.caption, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
                 .frame(maxWidth: .infinity, minHeight: 74)
                 .padding(.horizontal, 8)
                 .background(bg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -112,9 +129,16 @@ struct QuizRunner: View {
     private func feedback(_ q: QuizQuestion, right: Bool) -> some View {
         VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                Text(right ? ["太好了!", "对了!", "厉害!", "Nice!"][index % 4] : "Almost!")
-                    .font(.rounded(.title3, weight: .heavy))
-                    .foregroundStyle(right ? Theme.jade : Theme.red)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(right ? ["太好了!", "对了!", "厉害!", "Nice!"][index % 4] : "Almost!")
+                        .font(.rounded(.title3, weight: .heavy))
+                        .foregroundStyle(right ? Theme.jade : Theme.red)
+                    if right && index % 4 < 3 {
+                        Text(["tài hǎo le · great", "duì le · correct", "lìhai · awesome"][index % 4])
+                            .font(.rounded(.caption, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("\(q.word.hanzi) · \(q.word.pinyin)").font(.rounded(.subheadline, weight: .bold))
