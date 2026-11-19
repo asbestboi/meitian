@@ -23,8 +23,10 @@ run() {
     local name=$1
     rm -rf ~/Library/Logs/DiagnosticReports/Meitian* 2>/dev/null
     xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null
-    timeout 25 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE" > "$OUT/$name-console.txt" 2>&1 &
+    xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE" > "$OUT/$name-console.txt" 2>&1 &
+    local pid=$!
     sleep 15
+    kill "$pid" 2>/dev/null
     xcrun simctl io "$DEVICE" screenshot "$OUT/$name.png" >/dev/null 2>&1
     if xcrun simctl spawn "$DEVICE" launchctl list | grep -q "$BUNDLE"; then
         echo "✅ $name: app is running"
@@ -40,6 +42,10 @@ run() {
         failed=1
     done
     echo "----- console ($name)"; tail -40 "$OUT/$name-console.txt"
+    echo "----- system log ($name)"
+    xcrun simctl spawn "$DEVICE" log show --last 1m --style compact \
+        --predicate 'process == "Meitian" AND (messageType == error OR messageType == fault OR eventMessage CONTAINS[c] "fatal" OR eventMessage CONTAINS[c] "crash")' \
+        2>/dev/null | tail -60
 }
 
 run fresh
