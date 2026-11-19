@@ -344,6 +344,7 @@ fun OnlineBattle(close: () -> Unit) {
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); match.close() }
     }
+    LaunchedEffect(Unit) { link.startLan() }
     LaunchedEffect(granted) { if (granted) link.start() else launcher.launch(battlePermissions()) }
     LaunchedEffect(link.state) { if (link.state == BattleLink.State.Connected) match.hello() }
 
@@ -363,21 +364,25 @@ fun OnlineBattle(close: () -> Unit) {
         } else if (scanning) {
             Scanner(onCancel = { scanning = false }) { code ->
                 scanning = false
-                val id = DuelQR.playerId(code)
+                val info = DuelQR.info(code)
                 message = when {
-                    id == null -> "That's not a Měitiān duel code."
-                    id == me.id -> "That's your own code 😄"
-                    else -> { link.connect(id); null }
+                    info == null -> "That's not a Měitiān duel code."
+                    info.playerId == me.id -> "That's your own code 😄"
+                    // Android ↔ iPhone: over the same Wi‑Fi or a hotspot
+                    info.os == "ios" && (info.addrs.isEmpty() || info.port.toInt() == 0) ->
+                        "Your friend's iPhone isn't on Wi‑Fi. Join the same Wi‑Fi (or turn on a hotspot) and scan again."
+                    info.os == "ios" -> { link.connectLan(info); null }
+                    else -> { link.connect(info.playerId); null }
                 }
             }
         } else {
             Column(Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { CloseButton(close); Spacer(Modifier.weight(1f)); Text("battle a friend", style = street(22.sp), color = Street.c.text); Spacer(Modifier.weight(1f)) }
                 PlayerCardView(me, compact = true)
-                val bmp = remember { runCatching { BarcodeEncoder().encodeBitmap(DuelQR.payload(me.id), BarcodeFormat.QR_CODE, 640, 640) }.getOrNull() }
+                val bmp = remember(link.lanPort) { runCatching { BarcodeEncoder().encodeBitmap(link.qrPayload(), BarcodeFormat.QR_CODE, 640, 640) }.getOrNull() }
                 bmp?.let { Image(it.asImageBitmap(), "Your duel QR code", Modifier.size(240.dp).clip(RoundedCornerShape(18.dp)).background(Color.White).border(3.dp, Street.c.ink, RoundedCornerShape(18.dp)).padding(10.dp)) }
                 Text("Your friend scans this code, or you scan theirs.", color = Street.c.secondary, textAlign = TextAlign.Center)
-                Badge(when (link.state) {
+                Badge(if (link.lanUnreachable) "Can't reach your friend. Same Wi‑Fi or a hotspot?" else when (link.state) {
                     BattleLink.State.Connecting -> "Connecting… keep the phones close"
                     BattleLink.State.Connected -> "Connected! Saying hello…"
                     BattleLink.State.Reconnecting -> "Reconnecting…"
@@ -386,7 +391,7 @@ fun OnlineBattle(close: () -> Unit) {
                 message?.let { Text(it, color = Street.c.red, fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.weight(1f))
                 BigButton("Scan friend's code") { message = null; scanning = true }
-                Text("Both phones need Bluetooth and Wi‑Fi on. No internet or account needed. Android battles Android (iPhones use Apple's own link).",
+                Text("Android + Android: Bluetooth / Wi‑Fi. Android + iPhone: the same Wi‑Fi, or one phone's hotspot. No internet or account needed.",
                     fontSize = 12.sp, color = Street.c.secondary, textAlign = TextAlign.Center)
             }
         }

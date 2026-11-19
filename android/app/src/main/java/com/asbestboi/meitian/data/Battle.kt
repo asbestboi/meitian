@@ -27,18 +27,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import uniffi.meitian_core.DuelQrInfo
+import uniffi.meitian_core.LanLink
+import uniffi.meitian_core.LanListener
+import uniffi.meitian_core.LanState
 import uniffi.meitian_core.Outcome
+import uniffi.meitian_core.duelQrPayload
+import uniffi.meitian_core.lanAddresses
+import uniffi.meitian_core.parseDuelQr
 import uniffi.meitian_core.battlePool
 import uniffi.meitian_core.battleQuestions
 import uniffi.meitian_core.blitzWinner
 import uniffi.meitian_core.canMatch
 import uniffi.meitian_core.duelDamage
 
-/** QR payload, identical to iOS: "meitian-duel:<player id>". */
+/** QR payload, built and parsed by the Rust core (same as iOS):
+ *  "meitian-duel:<player id>?os=android&lan=<addresses>&port=<port>". */
 object DuelQR {
     const val PREFIX = "meitian-duel:"
     fun payload(id: String) = PREFIX + id
-    fun playerId(code: String): String? = code.takeIf { it.startsWith(PREFIX) }?.removePrefix(PREFIX)?.takeIf { it.length >= 32 }
+    fun info(code: String): DuelQrInfo? = parseDuelQr(code)
+    fun playerId(code: String): String? = info(code)?.playerId
 }
 
 /**
@@ -66,6 +75,67 @@ class BattleLink(context: Context, private val myId: String) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var ping: Job? = null
 
+    // Android ↔ iPhone over the same Wi‑Fi / hotspot (shared Rust link)
+    private var lan: LanLink? = null
+    var lanPort by mutableIntStateOf(0)
+        private set
+    var lanActive = false
+        private set
+    /** A scanned iPhone couldn't be reached over Wi‑Fi (UI shows a hint). */
+    var lanUnreachable by mutableStateOf(false)
+        private set
+
+    private val lanListener = object : LanListener {
+        override fun onState(state: LanState) { scope.launch { lanState(state) } }
+        override fun onMessage(json: String) {
+            scope.launch {
+                if (!lanActive) return@launch
+                val o = runCatching { JSONObject(json) }.getOrNull() ?: return@launch
+                if (o.optString("t") != "ping") onMessage(o)
+            }
+        }
+    }
+
+    /** Start accepting iPhones on the local network (works without Bluetooth permissions). */
+    fun startLan() {
+        if (lan != null) return
+        val l = LanLink(myId, lanListener)
+        lanPort = l.listen().toInt()
+        lan = l
+    }
+
+    /** The code to show: includes this phone's Wi‑Fi addresses so an iPhone can connect. */
+    fun qrPayload(): String = duelQrPayload(myId, "android", lanAddresses(), lanPort.toUShort())
+
+    /** After scanning an iPhone's code: connect over Wi‑Fi / hotspot. */
+    fun connectLan(info: DuelQrInfo) {
+        val l = lan ?: return
+        if (info.playerId == myId) return
+        target = info.playerId
+        lanUnreachable = false
+        if (state != State.Connected) state = State.Connecting
+        l.join(info.addrs, info.port, info.playerId)
+    }
+
+    private fun lanState(s: LanState) {
+        when (s) {
+            LanState.CONNECTED -> {
+                val wasReconnecting = state == State.Reconnecting
+                lanActive = true
+                lanUnreachable = false
+                client.stopAdvertising(); client.stopDiscovery()   // Nearby isn't needed for this match
+                state = State.Connected
+                if (wasReconnecting) onReconnected()
+            }
+            LanState.RECONNECTING -> if (lanActive) {
+                if (state == State.Connected) onDropped()
+                state = State.Reconnecting
+            }
+            LanState.UNREACHABLE -> if (!lanActive) lanUnreachable = true
+            else -> {}
+        }
+    }
+
     private val payloads = object : PayloadCallback() {
         override fun onPayloadReceived(id: String, p: Payload) {
             val bytes = p.asBytes() ?: return
@@ -86,7 +156,9 @@ class BattleLink(context: Context, private val myId: String) {
         }
 
         override fun onConnectionResult(id: String, result: ConnectionResolution) {
+            if (lanActive) { client.disconnectFromEndpoint(id); return }
             if (result.status.isSuccess) {
+                lan?.stop(); lan = null   // Android ↔ Android: Nearby carries the match
                 val wasReconnecting = state == State.Reconnecting
                 endpoint = id
                 state = State.Connected
@@ -102,7 +174,7 @@ class BattleLink(context: Context, private val myId: String) {
         }
 
         override fun onDisconnected(id: String) {
-            if (id != endpoint) return
+            if (id != endpoint || lanActive) return
             endpoint = null
             ping?.cancel()
             onDropped()
@@ -155,11 +227,13 @@ class BattleLink(context: Context, private val myId: String) {
     }
 
     fun send(o: JSONObject) {
+        if (lanActive) { lan?.send(o.toString()); return }
         val ep = endpoint ?: return
         client.sendPayload(ep, Payload.fromBytes(o.toString().toByteArray()))
     }
 
     fun stop() {
+        lan?.stop(); lan = null; lanActive = false
         ping?.cancel()
         client.stopAllEndpoints(); client.stopAdvertising(); client.stopDiscovery()
         state = State.Idle
@@ -303,7 +377,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
             val target = if (best.key == me.id) o.id else me.id
             hp[target] = (hpOf(target) - dmg).coerceAtLeast(0)
         }
-        send("result") { put("w", best?.key ?: ""); put("hp", JSONObject(hp.toMap())); put("d", dmg) }
+        send("result") { put("i", i); put("w", best?.key ?: ""); put("hp", JSONObject(hp.toMap())); put("d", dmg); put("ms", best?.value?.second ?: 0) }
         applyResult(best?.key, hp.toMap(), dmg)
         val t = token
         scope.launch {

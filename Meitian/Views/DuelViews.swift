@@ -239,6 +239,9 @@ struct OnlineDuelView: View {
     }
 
     private var statusText: (String, Color) {
+        if connection?.lanUnreachable == true {
+            return ("Can't reach your friend. Same Wi‑Fi or a hotspot?", Theme.red)
+        }
         switch connection?.state ?? .idle {
         case .connecting: return ("Connecting… keep the phones close", Theme.gold)
         case .connected: return ("Connected! Saying hello…", Theme.jade)
@@ -260,7 +263,7 @@ struct OnlineDuelView: View {
             if let card = match?.me {
                 PlayerCardView(card: card, compact: true)
             }
-            QRCodeView(text: DuelQR.payload(for: arena.playerId))
+            QRCodeView(text: connection?.qrPayload ?? DuelQR.payload(for: arena.playerId))
                 .padding(18)
                 .background(.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .frame(maxWidth: 260)
@@ -285,7 +288,7 @@ struct OnlineDuelView: View {
                 scanMessage = nil
                 scanning = true
             }
-            Text("Both phones need Bluetooth or Wi‑Fi turned on. No internet or account needed.")
+            Text("iPhone + iPhone: Bluetooth or Wi‑Fi. iPhone + Android: the same Wi‑Fi, or one phone's hotspot. No internet or account needed.")
                 .font(.rounded(.caption)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .padding(20)
@@ -294,11 +297,18 @@ struct OnlineDuelView: View {
     private var scanner: some View {
         ZStack {
             QRScannerView { code in
-                if let id = DuelQR.playerId(from: code) {
-                    if id == arena.playerId {
+                if let info = DuelQR.info(from: code) {
+                    if info.playerId == arena.playerId {
                         scanMessage = "That's your own code 😄"
+                    } else if info.os == "android" {
+                        // iPhone ↔ Android: over the same Wi‑Fi or a hotspot
+                        if info.addrs.isEmpty || info.port == 0 {
+                            scanMessage = "Your friend's phone isn't on Wi‑Fi. Join the same Wi‑Fi (or turn on a hotspot) and scan again."
+                        } else {
+                            connection?.connectLAN(info)
+                        }
                     } else {
-                        connection?.connect(to: id)
+                        connection?.connect(to: info.playerId)
                     }
                 } else {
                     scanMessage = "That's not a Měitiān duel code."

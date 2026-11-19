@@ -51,15 +51,104 @@ struct MatchSnapshot: Codable {
     var winner: String?
 }
 
-/// QR payload: "meitian-duel:<player id>"
+/// QR payload (built and parsed by the Rust core so Android reads it too):
+/// "meitian-duel:<player id>?os=ios&lan=<addresses>&port=<port>"
 enum DuelQR {
     static let prefix = "meitian-duel:"
     static func payload(for id: String) -> String { prefix + id }
-    static func playerId(from payload: String) -> String? {
-        guard payload.hasPrefix(prefix) else { return nil }
-        let id = String(payload.dropFirst(prefix.count))
-        return UUID(uuidString: id) != nil ? id : nil
+    static func info(from payload: String) -> DuelQrInfo? { parseDuelQr(code: payload) }
+    static func playerId(from payload: String) -> String? { info(from: payload)?.playerId }
+}
+
+/// The battle protocol as plain JSON, identical to the Android app's messages. Used on the
+/// iPhone ↔ Android Wi‑Fi link (iPhone ↔ iPhone keeps Multipeer with Swift's own encoding).
+enum CanonicalWire {
+    private static func modeName(_ m: DuelMode) -> String { m == .duel ? "Duel" : "Blitz" }
+    private static func mode(_ s: Any?) -> DuelMode { (s as? String) == "Blitz" ? .blitz : .duel }
+
+    private static func questions(_ q: [WireQuestion]) -> [[String: Any]] {
+        q.map { ["w": $0.wordId, "k": $0.kind, "o": $0.options] }
     }
+
+    private static func questions(_ any: Any?) -> [WireQuestion] {
+        (any as? [[String: Any]] ?? []).compactMap { o in
+            guard let w = o["w"] as? String, let k = o["k"] as? Int, let opts = o["o"] as? [String] else { return nil }
+            return WireQuestion(wordId: w, kind: k, options: opts)
+        }
+    }
+
+    private static func hp(_ any: Any?) -> [String: Int] {
+        (any as? [String: Any] ?? [:]).compactMapValues { ($0 as? NSNumber)?.intValue }
+    }
+
+    private static func winner(_ any: Any?) -> String? {
+        guard let s = any as? String, !s.isEmpty else { return nil }
+        return s
+    }
+
+    static func encode(_ m: DuelMessage) -> String? {
+        var o: [String: Any]
+        switch m {
+        case .hello(let card):
+            guard let data = try? JSONEncoder().encode(card),
+                  let c = try? JSONSerialization.jsonObject(with: data) else { return nil }
+            o = ["t": "hello", "card": c]
+        case .start(let mode, let q):
+            o = ["t": "start", "mode": modeName(mode), "q": questions(q)]
+        case .round(let i):
+            o = ["t": "round", "i": i]
+        case .answer(let i, let correct, let ms):
+            o = ["t": "answer", "i": i, "ok": correct, "ms": ms]
+        case .result(let i, let w, let hp, let damage, let ms):
+            o = ["t": "result", "i": i, "w": w ?? "", "hp": hp, "d": damage, "ms": ms]
+        case .progress(let score, let done):
+            o = ["t": "progress", "s": score, "done": done]
+        case .finished(let w):
+            o = ["t": "finished", "w": w ?? ""]
+        case .backToLobby:
+            o = ["t": "lobby"]
+        case .resume(let s):
+            o = ["t": "resume", "mode": modeName(s.mode), "q": questions(s.questions), "i": s.index, "hp": s.hp,
+                 "inGame": s.inGame, "finished": s.finished, "w": s.winner ?? ""]
+        case .ping:
+            o = ["t": "ping"]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: o) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String) -> DuelMessage? {
+        guard let data = json.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let t = o["t"] as? String else { return nil }
+        let int = { (k: String) -> Int in (o[k] as? NSNumber)?.intValue ?? 0 }
+        let bool = { (k: String) -> Bool in (o[k] as? NSNumber)?.boolValue ?? false }
+        switch t {
+        case "hello":
+            guard let c = o["card"], let d = try? JSONSerialization.data(withJSONObject: c),
+                  let card = try? JSONDecoder().decode(PlayerCard.self, from: d) else { return nil }
+            return .hello(card)
+        case "start": return .start(mode: mode(o["mode"]), questions: questions(o["q"]))
+        case "round": return .round(index: int("i"))
+        case "answer": return .answer(index: int("i"), correct: bool("ok"), ms: int("ms"))
+        case "result": return .result(index: int("i"), winner: winner(o["w"]), hp: hp(o["hp"]), damage: int("d"), ms: int("ms"))
+        case "progress": return .progress(score: int("s"), done: bool("done"))
+        case "finished": return .finished(winner: winner(o["w"]))
+        case "lobby": return .backToLobby
+        case "resume":
+            return .resume(MatchSnapshot(mode: mode(o["mode"]), questions: questions(o["q"]), index: int("i"), hp: hp(o["hp"]),
+                                         inGame: bool("inGame"), finished: bool("finished"), winner: winner(o["w"])))
+        case "ping": return .ping
+        default: return nil
+        }
+    }
+}
+
+/// Receives LAN events on Rust's threads and hands them to the main thread.
+private final class LanBridge: LanListener, @unchecked Sendable {
+    weak var owner: DuelConnection?
+    func onState(state: LanState) { DispatchQueue.main.async { [weak self] in self?.owner?.lanState(state) } }
+    func onMessage(json: String) { DispatchQueue.main.async { [weak self] in self?.owner?.lanMessage(json) } }
 }
 
 /// Offline, server-free link between two phones (Bluetooth / peer-to-peer Wi‑Fi).
@@ -98,6 +187,19 @@ final class DuelConnection: NSObject {
     @ObservationIgnored private var retryTimer: Timer?
     @ObservationIgnored private var pingTimer: Timer?
 
+    // iPhone ↔ Android over Wi‑Fi / hotspot (shared Rust link)
+    @ObservationIgnored private var lan: LanLink?
+    @ObservationIgnored private let lanBridge = LanBridge()
+    @ObservationIgnored private var lanPort: UInt16 = 0
+    @ObservationIgnored private(set) var lanActive = false
+    /// A scanned Android phone couldn't be reached over Wi‑Fi (UI shows a hint).
+    private(set) var lanUnreachable = false
+
+    /// The code to show: includes this phone's Wi‑Fi addresses so an Android phone can connect.
+    var qrPayload: String {
+        duelQrPayload(playerId: myId, os: "ios", addrs: lanAddresses(), port: lanPort)
+    }
+
     init(myId: String, name: String) {
         self.myId = myId
         let display = String((name.isEmpty ? "Player" : name).prefix(20))
@@ -118,6 +220,10 @@ final class DuelConnection: NSObject {
         startDiscovery()
         state = .searching
         startRetryTimer()
+        lanBridge.owner = self
+        let link = LanLink(myId: myId, listener: lanBridge)
+        lanPort = link.listen()
+        lan = link
     }
 
     func stop() {
@@ -132,6 +238,10 @@ final class DuelConnection: NSObject {
         targetId = nil
         partnerId = nil
         reconnectingSince = nil
+        lan?.stop()
+        lan = nil
+        lanActive = false
+        lanUnreachable = false
         state = .idle
     }
 
@@ -144,7 +254,21 @@ final class DuelConnection: NSObject {
         inviteIfNeeded()
     }
 
+    /// After scanning an Android phone's code: connect over Wi‑Fi / hotspot.
+    func connectLAN(_ info: DuelQrInfo) {
+        guard info.playerId != myId, let lan else { return }
+        targetId = info.playerId
+        lanUnreachable = false
+        if state == .connected { return }
+        state = .connecting(info.playerId)
+        lan.join(addrs: info.addrs, port: info.port, playerId: info.playerId)
+    }
+
     func send(_ message: DuelMessage) {
+        if lanActive {
+            if let json = CanonicalWire.encode(message) { lan?.send(json: json) }
+            return
+        }
         guard let session, !session.connectedPeers.isEmpty,
               let data = try? JSONEncoder().encode(message) else { return }
         try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
@@ -158,8 +282,39 @@ final class DuelConnection: NSObject {
 
     /// Call when the app comes back to the foreground: the radio may have been suspended.
     func wake() {
-        guard partnerId != nil, state != .connected else { return }
+        guard !lanActive, partnerId != nil, state != .connected else { return } // the LAN link reconnects by itself
         dropped()
+    }
+
+    // MARK: LAN events (main thread)
+
+    fileprivate func lanState(_ s: LanState) {
+        switch s {
+        case .connected:
+            let wasReconnecting = state == .reconnecting
+            lanActive = true
+            lanUnreachable = false
+            stopDiscovery()            // Multipeer isn't needed for this match
+            retryTimer?.invalidate()
+            state = .connected
+            reconnectingSince = nil
+            if wasReconnecting { onReconnected?() }
+        case .reconnecting:
+            guard lanActive else { return }
+            if state == .connected { onDropped?() }
+            state = .reconnecting
+            if reconnectingSince == nil { reconnectingSince = .now }
+        case .unreachable:
+            if !lanActive { lanUnreachable = true }
+        default:
+            break
+        }
+    }
+
+    fileprivate func lanMessage(_ json: String) {
+        guard lanActive, let msg = CanonicalWire.decode(json) else { return }
+        if case .ping = msg { return }
+        onMessage?(msg)
     }
 
     // MARK: internals
@@ -227,6 +382,7 @@ final class DuelConnection: NSObject {
     }
 
     private func dropped() {
+        guard !lanActive else { return }
         if state == .connected { onDropped?() }
         pingTimer?.invalidate()
         state = .reconnecting
@@ -238,6 +394,9 @@ final class DuelConnection: NSObject {
     }
 
     private func didConnect(_ peerID: MCPeerID) {
+        guard !lanActive else { return }
+        lan?.stop() // iPhone ↔ iPhone: Multipeer carries the match
+        lan = nil
         let wasReconnecting = state == .reconnecting
         if partnerId == nil, let id = targetId ?? found.first(where: { $0.value == peerID })?.key {
             partnerId = id

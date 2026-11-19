@@ -1,6 +1,6 @@
 [package]
 name = "meitian_core"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2021"
 description = "Shared logic for the Měitiān iOS and Android apps: words, pinyin, spaced repetition, quizzes, battles."
 publish = false
@@ -18,6 +18,7 @@ uniffi = { version = "0.32", features = ["cli"] }
 fastrand = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+libc = "0.2"
 
 [profile.release]
 opt-level = 3

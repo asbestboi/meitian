@@ -6,7 +6,7 @@ A playful app for learning a little Chinese every day, for **iPhone** (SwiftUI) 
 - **New words daily.** Pick 3, 5 or 8 words a day. Swipe through flip cards (right = got it, left = again), hear native pronunciation, then take a quick quiz.
 - **Friend challenge.** Every day you get a mission to use one of today's words in a real sentence, with a **Chinese friend** (ask, sneak it in, voice message…) or a **non‑Chinese friend** (teach them, charades, secret code…). Tick off the steps, rate how it went, add a note, and get +50 XP.
 - **Pinyin everywhere for beginners.** Pinyin sits right above each character (ruby style), colored by tone (1 red, 2 orange, 3 green, 4 blue). Switch it off in Progress when you want to test your reading; the placement quiz never shows it.
-- **Arena: battle friends offline.** Scan each other's QR code and the phones link directly over Bluetooth / peer‑to‑peer Wi‑Fi (MultipeerConnectivity), so no server or internet is needed. ⚔️ **Duel**: same question for both, first right answer hits (faster = harder), knock their HP to 0. ⚡️ **Blitz**: 45‑second race, most correct wins. 📱 **Same‑phone duel**: split screen on one phone. Wins earn 🪙 coins for the shop (avatars, card frames, titles, hit effects), and you get battle stats plus head‑to‑head records per rival.
+- **Arena: battle friends offline.** Scan each other's QR code and the phones link directly over Bluetooth / peer‑to‑peer Wi‑Fi (MultipeerConnectivity), so no server or internet is needed. ⚔️ **Duel**: same question for both, first right answer hits (faster = harder), knock their HP to 0. ⚡️ **Blitz**: 45‑second race, most correct wins. 📱 **Same‑phone duel**: split screen on one phone. Wins earn 🪙 coins for the shop (avatars, card frames, titles, particle hit effects, auras), and you get battle stats plus head‑to‑head records per rival.
 - **Spaced repetition** reviews, listening drills and a speed mix.
 - **Streaks, XP, levels** and an activity calendar. Daily reminder notifications.
 
@@ -47,9 +47,15 @@ android/     Android app (Kotlin, Jetpack Compose). scripts/build-core-android.s
              core with cargo-ndk and generates the Kotlin bindings; then `./gradlew assembleRelease`.
 ```
 
-Battles are offline and peer-to-peer: iPhones use MultipeerConnectivity, Android phones use
-Nearby Connections. The two can't talk to each other, so battles are iPhone↔iPhone or
-Android↔Android. Both pair by scanning the same `meitian-duel:<id>` QR codes.
+Battles are offline and peer-to-peer. iPhone↔iPhone uses MultipeerConnectivity and
+Android↔Android uses Nearby Connections (Bluetooth / Wi‑Fi). **iPhone↔Android** goes over the
+same Wi‑Fi or one phone's hotspot: each phone listens on a TCP port and puts its local addresses
+in its QR code (`meitian-duel:<id>?os=…&lan=…&port=…`); the scanning phone connects. That link
+(handshake, keep-alive, auto-reconnect) lives in the Rust core (`core/src/lan.rs`), and the
+messages are the same JSON on both platforms.
+
+Lessons are downloaded from [meitian-content](https://github.com/asbestboi/meitian-content)
+(GitHub Pages): HSK 1–6 words, graded Tatoeba sentences and illustrated stories, cached for offline use.
 
 ## Get the Android app
 
