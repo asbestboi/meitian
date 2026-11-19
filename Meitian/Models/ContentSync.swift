@@ -47,15 +47,19 @@ final class ContentSync {
         return files.reduce(0) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
     }
 
-    /// Load the cache, then refresh from the network if the last check is over a day old.
+    /// Load the cache, then check for new lessons. The manifest is tiny and packs are only downloaded
+    /// when they changed, so this runs on every launch.
     func start(level: Int) async {
         await loadCached()
+        await refresh(level: level)
+    }
+
+    /// Coming back to the app: check again if the last check is more than 15 minutes old.
+    /// (iOS keeps apps suspended for days, so launch alone isn't enough.)
+    func refreshIfStale(level: Int) async {
         let last = UserDefaults.standard.double(forKey: Self.checkedKey)
-        if Date.now.timeIntervalSince1970 - last > 24 * 3600 || stats.sentences == 0 {
-            await refresh(level: level)
-        } else {
-            status = .ready
-        }
+        guard Date.now.timeIntervalSince1970 - last > 15 * 60 else { return }
+        await refresh(level: level)
     }
 
     /// Load every pack already on disk (as listed by the cached manifest).

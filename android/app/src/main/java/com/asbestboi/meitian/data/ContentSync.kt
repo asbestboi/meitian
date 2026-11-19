@@ -54,12 +54,16 @@ object ContentSync {
     fun setAllLevels(c: Context, on: Boolean) = prefs(c).edit().putBoolean("all", on).apply()
     fun cacheBytes(c: Context): Long = dir(c).listFiles()?.sumOf { it.length() } ?: 0L
 
-    /** Load the cache, then refresh from the network if the last check is over a day old. */
+    /** Load the cache, then check for new lessons. */
     suspend fun start(c: Context, level: Int) {
         loadCached(c)
-        val last = prefs(c).getLong("checked", 0)
-        if (System.currentTimeMillis() - last > 24 * 3600_000L || stats.sentences == 0u) refresh(c, level)
-        else status = Status.Ready
+        // the manifest is tiny and packs only download when they changed: check on every launch
+        refresh(c, level)
+    }
+
+    /** Coming back to the app: check again if the last check is more than 15 minutes old. */
+    suspend fun refreshIfStale(c: Context, level: Int) {
+        if (System.currentTimeMillis() - prefs(c).getLong("checked", 0) > 15 * 60_000L) refresh(c, level)
     }
 
     suspend fun loadCached(c: Context) {

@@ -29,7 +29,10 @@ struct MeitianApp: App {
                     Task { await content.refresh(level: store.profile.confirmedLevel + 1) }
                 }
                 .onChange(of: phase) { _, p in
-                    if p == .active { store.refreshDay() }
+                    if p == .active {
+                        store.refreshDay()
+                        Task { await content.refreshIfStale(level: store.profile.confirmedLevel + 1) }
+                    }
                     if p == .background { store.save(); arena.save() }
                 }
         }

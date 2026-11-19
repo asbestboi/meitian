@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.data.AppState
 import com.asbestboi.meitian.data.ContentSync
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.asbestboi.meitian.data.Sfx
 import com.asbestboi.meitian.data.Speaker
 import com.asbestboi.meitian.ui.ArenaScreen
@@ -68,7 +70,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::app.isInitialized) app.refreshDay()
+        if (::app.isInitialized) {
+            app.refreshDay()
+            val level = app.profile.confirmedLevel + 1
+            lifecycleScope.launch { ContentSync.refreshIfStale(applicationContext, level) }
+        }
     }
 
     override fun onPause() {
