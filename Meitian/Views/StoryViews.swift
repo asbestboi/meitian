@@ -737,6 +737,7 @@ struct StoryPlayer: View {
             if !revisit {
                 StoryProgress.markRead(story.id)
                 store.addXP(20 + correct * 5)
+                store.count(.story)
             }
             withAnimation(Theme.bouncy) { finished = true }
             confetti += 1

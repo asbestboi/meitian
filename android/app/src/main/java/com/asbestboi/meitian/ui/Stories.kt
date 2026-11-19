@@ -385,7 +385,7 @@ fun StoryPlayer(story: Story, close: () -> Unit) {
                     else -> {
                         if (!revisit) {
                             StoryProgress.markRead(ctx, story.id)
-                            app.addXP(20 + correct * 5)
+                            app.addXP(20 + correct * 5); app.count(com.asbestboi.meitian.data.AppState.Counter.Story)
                         }
                         finished = true; confetti++
                         Sfx.play(Sfx.Sound.Win)

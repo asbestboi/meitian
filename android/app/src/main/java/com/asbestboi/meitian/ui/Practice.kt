@@ -199,7 +199,10 @@ fun PracticeSession(mode: PracticeMode, close: () -> Unit) {
             if (questions.isEmpty()) Text("Nothing to practice yet. Learn some words first!", color = Street.c.secondary)
             else if (s == null) QuizRunner(questions, onAnswer = { q, right ->
                 if (mode == PracticeMode.Review) app.grade(q.word, right) else if (right) app.addXP(2)
-            }, onDone = { score = it; confetti++ })
+            }, onDone = {
+                score = it; confetti++
+                if (mode == PracticeMode.Listening || mode == PracticeMode.Speaking) app.count(com.asbestboi.meitian.data.AppState.Counter.ListenSpeak)
+            })
             else Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Spacer(Modifier.weight(1f))
                 Text("$s/${questions.size}", style = street(90.sp), color = Street.c.text)

@@ -308,6 +308,7 @@ struct PracticeSession: View {
                         else if right { store.addXP(2) }
                     }, onDone: { correct in
                         score = correct
+                        if mode == .listening || mode == .speaking { store.count(.listenSpeak) }
                         withAnimation(Theme.bouncy) { finished = true }
                         confetti += 1
                     })

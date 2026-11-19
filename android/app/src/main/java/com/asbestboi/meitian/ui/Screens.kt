@@ -135,6 +135,7 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
                 Text(if (done) "practice them again ↻" else "learn today's words →", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.Black)
             }
         }
+        QuestCard()
         StoryOfTheDayCard()
         // challenge
         val challenge = dailyChallenge(app.todayKey, words, if (app.profile.friend == "chinese") Friend.CHINESE else Friend.NON_CHINESE)
@@ -200,7 +201,10 @@ fun LearnSession(words: List<CoreWord>, close: () -> Unit) {
                     questions = words.shuffled().mapIndexed { i, w -> Question.make(w, kinds[i % kinds.size], pool) }
                     phase = 1
                 }
-                1 -> QuizRunner(questions, onDone = { c -> score = c; app.finishLearning(words, c); phase = 2; confetti++ })
+                1 -> QuizRunner(questions, onDone = { c ->
+                    score = c; app.finishLearning(words, c); phase = 2; confetti++
+                    if (c == questions.size) app.count(com.asbestboi.meitian.data.AppState.Counter.Perfect)
+                })
                 else -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Spacer(Modifier.weight(1f))
                     Text("🎉", fontSize = 90.sp)

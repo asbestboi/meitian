@@ -17,8 +17,17 @@ import uniffi.meitian_core.milestoneAt
 import uniffi.meitian_core.milestonesReached
 import uniffi.meitian_core.Outcome
 import uniffi.meitian_core.allWords
-import uniffi.meitian_core.currentStreak
+import uniffi.meitian_core.DayStats
+import uniffi.meitian_core.Quest
+import uniffi.meitian_core.QuestStatus
+import uniffi.meitian_core.dailyQuests
 import uniffi.meitian_core.dayNumber
+import uniffi.meitian_core.freezesToUse
+import uniffi.meitian_core.questStatus
+import uniffi.meitian_core.questsAllDoneBonus
+import uniffi.meitian_core.streakFreezeMax
+import uniffi.meitian_core.streakFreezePrice
+import uniffi.meitian_core.streakWithFreezes
 import uniffi.meitian_core.knownLevel
 import uniffi.meitian_core.matchCoins
 import uniffi.meitian_core.playerLevel
@@ -119,6 +128,14 @@ data class DayLog(
     val lessons: Int = 0,
     /** Daily XP milestones already celebrated. */
     val milestones: Int = 0,
+    /** Quest counters. */
+    val stories: Int = 0,
+    val perfect: Int = 0,
+    val sentences: Int = 0,
+    val listenSpeak: Int = 0,
+    /** Quest ids claimed today, and whether the all-done bonus was paid. */
+    val claimed: List<String> = emptyList(),
+    val allQuestsBonus: Boolean = false,
 ) {
     val active get() = learnedDone || reviewed > 0 || challenge != null
     fun challengeFor(friend: String): ChallengeLog? = listOfNotNull(challenge, bonus).firstOrNull { it.friend == friend }
@@ -133,6 +150,9 @@ data class Profile(
     val friend: String = "chinese",
     /** Set once levels started needing a level-up test (older saves get their finished levels confirmed). */
     val levelTests: Boolean = true,
+    /** Streak freezes held, and the days they covered (day numbers). */
+    val freezes: Int = 0,
+    val frozenDays: List<Long> = emptyList(),
 )
 
 data class Settings(
@@ -181,12 +201,75 @@ class AppState(private val context: Context) {
     var todayKey by mutableStateOf(LocalDate.now().toString())
     /** Milestones reached by the last XP gain, waiting to be celebrated. */
     val milestoneQueue = mutableStateListOf<Milestone>()
+    /** Set when freezes just saved the streak (shown once on Today). */
+    var freezeNotice by mutableStateOf<Int?>(null)
 
     private val prefs = context.getSharedPreferences("meitian", Context.MODE_PRIVATE)
 
-    init { load(); migrateToLevelTests() }
+    init { load(); migrateToLevelTests(); applyFreezes() }
 
-    fun refreshDay() { todayKey = LocalDate.now().toString() }
+    fun refreshDay() { todayKey = LocalDate.now().toString(); applyFreezes() }
+
+    // ----- quests & streak freezes -----
+
+    val dayStats: DayStats
+        get() = today.let { t ->
+            DayStats(t.xp.coerceAtLeast(0).toUInt(), t.reviewed.toUInt(), t.stories.toUInt(),
+                ((if (t.learnedDone) 1 else 0) + t.lessons).toUInt(), t.perfect.toUInt(), t.sentences.toUInt(), t.listenSpeak.toUInt())
+        }
+
+    val quests: List<QuestStatus> get() = dayStats.let { s -> dailyQuests(todayKey).map { questStatus(it, s) } }
+
+    fun isClaimed(q: Quest) = q.id in today.claimed
+
+    /** Marks a finished quest claimed and pays its coins into the Arena wallet (plus the bonus for the last one). */
+    fun claimQuest(q: QuestStatus): Int {
+        if (!q.done || isClaimed(q.quest)) return 0
+        var t = today.copy(claimed = today.claimed + q.quest.id)
+        var coins = q.quest.reward.toInt()
+        if (dailyQuests(todayKey).all { it.id in t.claimed } && !t.allQuestsBonus) {
+            t = t.copy(allQuestsBonus = true)
+            coins += questsAllDoneBonus().toInt()
+        }
+        today = t
+        arena = arena.copy(coins = arena.coins + coins)
+        save()
+        return coins
+    }
+
+    enum class Counter { Story, Perfect, Sentences, ListenSpeak }
+
+    fun count(c: Counter) {
+        val t = today
+        today = when (c) {
+            Counter.Story -> t.copy(stories = t.stories + 1)
+            Counter.Perfect -> t.copy(perfect = t.perfect + 1)
+            Counter.Sentences -> t.copy(sentences = t.sentences + 1)
+            Counter.ListenSpeak -> t.copy(listenSpeak = t.listenSpeak + 1)
+        }
+        save()
+    }
+
+    val canHoldMoreFreezes get() = profile.freezes < streakFreezeMax().toInt()
+
+    fun buyFreeze(): Boolean {
+        val price = streakFreezePrice().toInt()
+        if (!canHoldMoreFreezes || arena.coins < price) return false
+        arena = arena.copy(coins = arena.coins - price)
+        profile = profile.copy(freezes = profile.freezes + 1)
+        save()
+        return true
+    }
+
+    /** Spends freezes on days missed since the last activity, if that keeps the streak alive. */
+    private fun applyFreezes() {
+        if (profile.freezes <= 0) return
+        val days = freezesToUse(activeDays, profile.frozenDays, todayNumber, profile.freezes.toUInt())
+        if (days.isEmpty()) return
+        profile = profile.copy(freezes = profile.freezes - days.size, frozenDays = profile.frozenDays + days)
+        freezeNotice = streak
+        save()
+    }
 
     val todayNumber: Long get() = dayNumber(todayKey) ?: LocalDate.now().toEpochDay()
 
@@ -321,8 +404,8 @@ class AppState(private val context: Context) {
     // ----- stats -----
 
     private val activeDays get() = days.filter { it.value.active }.keys.mapNotNull { dayNumber(it) }
-    val streak: Int get() = currentStreak(activeDays, todayNumber).toInt()
-    val bestStreak: Int get() = uniffi.meitian_core.bestStreak(activeDays).toInt()
+    val streak: Int get() = streakWithFreezes(activeDays, profile.frozenDays, todayNumber).toInt()
+    val bestStreak: Int get() = maxOf(uniffi.meitian_core.bestStreak(activeDays).toInt(), streak)
     val level get() = playerLevel(xp.coerceAtLeast(0).toUInt())
     fun learnedCount(level: Int) = Words.level(level).count { cards[it.id] != null }
     val masteredCount get() = cards.values.count { it.mastered }
@@ -392,7 +475,7 @@ class AppState(private val context: Context) {
     fun resetAll() {
         val id = arena.playerId
         profile = Profile(); settings = settings.copy(swears = false); arena = Arena(playerId = id); xp = 0
-        cards.clear(); days.clear(); milestoneQueue.clear()
+        cards.clear(); days.clear(); milestoneQueue.clear(); freezeNotice = null
         // progress kept outside the save: story history (ui.StoryProgress) and the sprint best
         context.getSharedPreferences("stories", Context.MODE_PRIVATE).edit().clear().apply()
         prefs.edit().remove("sprintBest").apply()
@@ -407,7 +490,7 @@ class AppState(private val context: Context) {
         o.put("profile", JSONObject().apply {
             put("name", profile.name); put("claimed", profile.claimedLevel); put("confirmed", profile.confirmedLevel)
             put("goal", profile.dailyGoal); put("onboarded", profile.onboarded); put("friend", profile.friend)
-            put("levelTests", profile.levelTests)
+            put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
         })
         o.put("settings", JSONObject().apply {
             val s = settings
@@ -422,6 +505,8 @@ class AppState(private val context: Context) {
                 put(k, JSONObject().apply {
                     put("ids", JSONArray(d.newWordIds)); put("done", d.learnedDone); put("rev", d.reviewed); put("xp", d.xp)
                     put("les", d.lessons); put("ms", d.milestones)
+                    put("st", d.stories); put("pf", d.perfect); put("se", d.sentences); put("ls", d.listenSpeak)
+                    put("cl", JSONArray(d.claimed)); put("allq", d.allQuestsBonus)
                     d.challenge?.let { c ->
                         put("ch", JSONObject().apply {
                             put("w", c.wordId); put("f", c.friend); put("m", c.mood ?: -1); put("n", c.note); put("t", c.at)
@@ -457,7 +542,8 @@ class AppState(private val context: Context) {
             xp = o.optInt("xp")
             o.optJSONObject("profile")?.let { p ->
                 profile = Profile(p.optString("name"), p.optInt("claimed"), p.optInt("confirmed"), p.optInt("goal", 5),
-                    p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"))
+                    p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"),
+                    p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList())
             }
             o.optJSONObject("settings")?.let { s ->
                 settings = Settings(s.optBoolean("pinyin", true), s.optBoolean("tones", true), s.optBoolean("swears"),
@@ -477,7 +563,9 @@ class AppState(private val context: Context) {
                     fun log(c: JSONObject) = ChallengeLog(c.getString("w"), c.getString("f"), c.optInt("m", -1).takeIf { it >= 0 }, c.optString("n"), c.optLong("t"))
                     val ch = x.optJSONObject("ch")?.let(::log)
                     val ch2 = x.optJSONObject("ch2")?.let(::log)
-                    days[k] = DayLog(ids, x.optBoolean("done"), x.optInt("rev"), x.optInt("xp"), ch, ch2, x.optInt("les"), x.optInt("ms"))
+                    days[k] = DayLog(ids, x.optBoolean("done"), x.optInt("rev"), x.optInt("xp"), ch, ch2, x.optInt("les"), x.optInt("ms"),
+                        x.optInt("st"), x.optInt("pf"), x.optInt("se"), x.optInt("ls"),
+                        x.optJSONArray("cl")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(), x.optBoolean("allq"))
                 }
             }
             o.optJSONObject("arena")?.let { a ->

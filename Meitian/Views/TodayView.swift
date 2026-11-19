@@ -23,6 +23,7 @@ struct TodayView: View {
                     MilestoneCard()
                     LevelTestCard(onStart: { testLevel = LevelRef(level: $0) })
                     wordsCard
+                    QuestCard()
                     StoryOfTheDayCard()
                     challengeCard
                     reviewCard
@@ -326,6 +327,7 @@ struct LearnSession: View {
                     QuizRunner(questions: questions, onDone: { correct in
                         score = correct
                         store.finishLearning(words, quizCorrect: correct)
+                        if correct == questions.count { store.count(.perfect) }
                         withAnimation(Theme.bouncy) { phase = .done }
                         confetti += 1
                     })

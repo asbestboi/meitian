@@ -421,6 +421,7 @@ struct SentenceSession: View {
     private func next() {
         if index + 1 >= exercises.count {
             store.addXP(correct * 4)
+            store.count(.sentences)
             withAnimation(Theme.bouncy) { finished = true }
             if correct > 0 { confetti += 1; SFX.shared.play(.win) }
             return

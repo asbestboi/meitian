@@ -48,6 +48,14 @@ struct DayLog: Codable, Hashable {
     var lessons: Int?
     /// Daily XP milestones already celebrated today.
     var milestones: Int?
+    /// Quest counters (optional so older saves still decode).
+    var stories: Int?
+    var perfect: Int?
+    var sentences: Int?
+    var listenSpeak: Int?
+    /// Quest ids already claimed today, and whether the all-done bonus was paid.
+    var claimed: [String]?
+    var allQuestsBonus: Bool?
 
     /// The day's challenge log for one friend type.
     func challenge(for friend: FriendKind) -> ChallengeLog? {
@@ -71,6 +79,9 @@ struct Profile: Codable, Hashable {
     var preferredFriend: FriendKind = .chinese
     /// Set once levels started needing a level-up test (older saves get their finished levels confirmed).
     var levelTests: Bool? = true
+    /// Streak freezes held, and the days they covered (day numbers).
+    var freezes: Int?
+    var frozenDays: [Int64]?
 }
 
 private struct SaveFile: Codable {
@@ -88,6 +99,8 @@ final class AppStore {
     var xp = 0
     /// Milestones reached by the last XP gain, waiting to be celebrated.
     var milestoneQueue: [Milestone] = []
+    /// Set when freezes just saved the streak (shown once on Today).
+    var freezeNotice: Int?
 
     /// Bumped whenever the day rolls over so views refresh.
     var todayKey = AppStore.key(for: .now)
@@ -97,7 +110,10 @@ final class AppStore {
         return dir.appendingPathComponent("meitian.json")
     }()
 
-    init() { load() }
+    init() {
+        load()
+        applyFreezes()
+    }
 
     // MARK: persistence
 
@@ -136,6 +152,7 @@ final class AppStore {
         days = [:]
         xp = 0
         milestoneQueue.removeAll()
+        freezeNotice = nil
         // progress kept outside the save file
         StoryProgress.reset()
         UserDefaults.standard.removeObject(forKey: "sprintBest")
@@ -153,6 +170,74 @@ final class AppStore {
     func refreshDay() {
         let k = AppStore.key(for: .now)
         if k != todayKey { todayKey = k }
+        applyFreezes()
+    }
+
+    // MARK: quests & streak freezes
+
+    var dayStats: DayStats {
+        let t = today
+        return DayStats(xp: UInt32(clamping: max(t.xp, 0)), reviewed: UInt32(clamping: t.reviewed),
+                        stories: UInt32(clamping: t.stories ?? 0), lessons: UInt32(clamping: (t.learnedDone ? 1 : 0) + (t.lessons ?? 0)),
+                        perfect: UInt32(clamping: t.perfect ?? 0), sentences: UInt32(clamping: t.sentences ?? 0),
+                        listenSpeak: UInt32(clamping: t.listenSpeak ?? 0))
+    }
+
+    var quests: [QuestStatus] {
+        let stats = dayStats
+        return dailyQuests(dayKey: todayKey).map { questStatus(quest: $0, stats: stats) }
+    }
+
+    func isClaimed(_ q: Quest) -> Bool { today.claimed?.contains(q.id) ?? false }
+
+    /// Marks a finished quest as claimed and returns the coins it pays (plus the bonus for the last one).
+    func claimQuest(_ q: QuestStatus) -> Int {
+        guard q.done, !isClaimed(q.quest) else { return 0 }
+        var t = today
+        t.claimed = (t.claimed ?? []) + [q.quest.id]
+        var coins = Int(q.quest.reward)
+        let all = dailyQuests(dayKey: todayKey).allSatisfy { t.claimed?.contains($0.id) ?? false }
+        if all && t.allQuestsBonus != true {
+            t.allQuestsBonus = true
+            coins += Int(questsAllDoneBonus())
+        }
+        today = t
+        save()
+        return coins
+    }
+
+    enum Counter { case story, perfect, sentences, listenSpeak }
+
+    func count(_ c: Counter) {
+        var t = today
+        switch c {
+        case .story: t.stories = (t.stories ?? 0) + 1
+        case .perfect: t.perfect = (t.perfect ?? 0) + 1
+        case .sentences: t.sentences = (t.sentences ?? 0) + 1
+        case .listenSpeak: t.listenSpeak = (t.listenSpeak ?? 0) + 1
+        }
+        today = t
+        save()
+    }
+
+    var freezes: Int { profile.freezes ?? 0 }
+    var canHoldMoreFreezes: Bool { freezes < Int(streakFreezeMax()) }
+
+    func addFreeze() {
+        profile.freezes = min(freezes + 1, Int(streakFreezeMax()))
+        save()
+    }
+
+    /// Spends freezes on days missed since the last activity, if that keeps the streak alive.
+    private func applyFreezes() {
+        guard freezes > 0, let today = dayNumber(dayKey: AppStore.key(for: .now)) else { return }
+        let days = freezesToUse(activeDays: activeDayNumbers, frozenDays: profile.frozenDays ?? [], today: today,
+                                owned: UInt32(freezes))
+        guard !days.isEmpty else { return }
+        profile.freezes = freezes - days.count
+        profile.frozenDays = (profile.frozenDays ?? []) + days
+        freezeNotice = streak
+        save()
     }
 
     var today: DayLog {
@@ -341,10 +426,10 @@ final class AppStore {
 
     var streak: Int {
         let today = dayNumber(dayKey: AppStore.key(for: .now)) ?? 0
-        return Int(currentStreak(activeDays: activeDayNumbers, today: today))
+        return Int(streakWithFreezes(activeDays: activeDayNumbers, frozenDays: profile.frozenDays ?? [], today: today))
     }
 
-    var bestStreak: Int { Int(Meitian.bestStreak(activeDays: activeDayNumbers)) }
+    var bestStreak: Int { max(Int(Meitian.bestStreak(activeDays: activeDayNumbers)), streak) }
 
     static func date(from key: String) -> Date? {
         let p = key.split(separator: "-").compactMap { Int($0) }

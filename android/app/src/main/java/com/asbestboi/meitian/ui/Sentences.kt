@@ -212,6 +212,7 @@ fun SentenceSession(close: () -> Unit) {
                         if (right) correct++
                         if (i + 1 >= exercises.size) {
                             app.addXP(correct * 4)
+                            app.count(com.asbestboi.meitian.data.AppState.Counter.Sentences)
                             finished = true
                             if (correct > 0) { confetti++; Sfx.play(Sfx.Sound.Win) }
                         } else index = i + 1

@@ -12,6 +12,7 @@ pub mod lan;
 pub mod milestones;
 pub mod pinyin;
 pub mod progress;
+pub mod quests;
 pub mod stories;
 pub mod words;
 
@@ -24,5 +25,6 @@ pub use lan::*;
 pub use milestones::*;
 pub use pinyin::*;
 pub use progress::*;
+pub use quests::*;
 pub use stories::*;
 pub use words::*;
