@@ -1,0 +1,48 @@
+# Builds Meitian.apk: the shared Rust core (cargo-ndk) + the Kotlin/Compose app.
+# Every push to main produces the .apk as an artifact; a tag like v1.4.0 also attaches it to the release.
+name: Android
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Build Meitian.apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Rust targets + cargo-ndk
+        run: |
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --locked
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      - name: Test shared Rust core
+        run: cd core && cargo test --release
+      - name: Build Rust core for Android
+        run: scripts/build-core-android.sh
+      - name: Build APK
+        run: |
+          cd android
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../Meitian.apk
+          ls -la ../Meitian.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meitian-apk
+          path: Meitian.apk
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Meitian.apk
