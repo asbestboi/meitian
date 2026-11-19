@@ -2,6 +2,7 @@ package com.asbestboi.meitian.data
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,6 +10,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.meitian_core.CoreWord
 import uniffi.meitian_core.Friend
+import uniffi.meitian_core.LessonPath
+import uniffi.meitian_core.Milestone
+import uniffi.meitian_core.MilestoneProgress
+import uniffi.meitian_core.milestoneAt
+import uniffi.meitian_core.milestonesReached
 import uniffi.meitian_core.Outcome
 import uniffi.meitian_core.allWords
 import uniffi.meitian_core.currentStreak
@@ -108,6 +114,10 @@ data class DayLog(
     val challenge: ChallengeLog? = null,
     /** The other friend type's challenge on the same day (bonus). */
     val bonus: ChallengeLog? = null,
+    /** Extra lessons finished after the day's words. */
+    val lessons: Int = 0,
+    /** Daily XP milestones already celebrated. */
+    val milestones: Int = 0,
 ) {
     val active get() = learnedDone || reviewed > 0 || challenge != null
     fun challengeFor(friend: String): ChallengeLog? = listOfNotNull(challenge, bonus).firstOrNull { it.friend == friend }
@@ -166,6 +176,8 @@ class AppState(private val context: Context) {
     val cards = mutableStateMapOf<String, Card>()
     val days = mutableStateMapOf<String, DayLog>()
     var todayKey by mutableStateOf(LocalDate.now().toString())
+    /** Milestones reached by the last XP gain, waiting to be celebrated. */
+    val milestoneQueue = mutableStateListOf<Milestone>()
 
     private val prefs = context.getSharedPreferences("meitian", Context.MODE_PRIVATE)
 
@@ -201,11 +213,43 @@ class AppState(private val context: Context) {
         return picked
     }
 
+    /** The next lesson after today's words: more new words from the learner's level, as many as they like.
+     *  Empty until today's words are learned, or when everything has been learned. */
+    fun nextLessonWords(): List<CoreWord> {
+        if (!today.learnedDone) return emptyList()
+        val picked = mutableListOf<CoreWord>()
+        var level = currentLevel
+        while (picked.size < profile.dailyGoal && level <= Words.maxLevel) {
+            picked += Words.level(level).filter { cards[it.id] == null && it !in picked }.take(profile.dailyGoal - picked.size)
+            level++
+        }
+        return picked
+    }
+
+    /** Where the learner is on their current HSK level's path of lessons. */
+    val lessonPath: LessonPath
+        get() = uniffi.meitian_core.lessonPath(learnedCount(currentLevel).toUInt(), Words.level(currentLevel).size.toUInt(), profile.dailyGoal.coerceAtLeast(1).toUInt())
+
+    val milestoneProgress: MilestoneProgress get() = uniffi.meitian_core.milestoneProgress(today.xp.coerceAtLeast(0).toUInt())
+
+    /** Hands out any milestones today's XP just reached (bonus XP goes to the total, not today's bar). */
+    private fun checkMilestones() {
+        val t = today
+        val reached = milestonesReached(t.xp.coerceAtLeast(0).toUInt()).toInt()
+        if (reached <= t.milestones) return
+        val fresh = (t.milestones + 1..reached).map { milestoneAt(it.toUInt()) }
+        today = t.copy(milestones = reached)
+        xp += fresh.sumOf { it.bonus.toInt() }
+        milestoneQueue += fresh
+    }
+
     fun finishLearning(words: List<CoreWord>, quizCorrect: Int) {
+        val extraLesson = today.learnedDone && words.any { cards[it.id] == null }
         words.forEach { if (cards[it.id] == null) cards[it.id] = Card(dueDay = todayNumber + 1) }
         val gained = words.size * 10 + quizCorrect * 5
-        today = today.copy(learnedDone = true, xp = today.xp + gained)
+        today = today.copy(learnedDone = true, xp = today.xp + gained, lessons = today.lessons + if (extraLesson) 1 else 0)
         xp += gained
+        checkMilestones()
         save()
     }
 
@@ -217,6 +261,7 @@ class AppState(private val context: Context) {
     fun addXP(amount: Int) {
         today = today.copy(xp = today.xp + amount, reviewed = today.reviewed + 1)
         xp += amount
+        checkMilestones()
         save()
     }
 
@@ -236,6 +281,7 @@ class AppState(private val context: Context) {
         val gained = if (right) 5 else 1
         today = today.copy(reviewed = today.reviewed + 1, xp = today.xp + gained)
         xp += gained
+        checkMilestones()
         save()
     }
 
@@ -253,6 +299,7 @@ class AppState(private val context: Context) {
             xp += gained
             t.copy(bonus = log, xp = t.xp + gained)
         }
+        checkMilestones()
         save()
     }
 
@@ -354,6 +401,7 @@ class AppState(private val context: Context) {
             days.forEach { (k, d) ->
                 put(k, JSONObject().apply {
                     put("ids", JSONArray(d.newWordIds)); put("done", d.learnedDone); put("rev", d.reviewed); put("xp", d.xp)
+                    put("les", d.lessons); put("ms", d.milestones)
                     d.challenge?.let { c ->
                         put("ch", JSONObject().apply {
                             put("w", c.wordId); put("f", c.friend); put("m", c.mood ?: -1); put("n", c.note); put("t", c.at)
@@ -409,7 +457,7 @@ class AppState(private val context: Context) {
                     fun log(c: JSONObject) = ChallengeLog(c.getString("w"), c.getString("f"), c.optInt("m", -1).takeIf { it >= 0 }, c.optString("n"), c.optLong("t"))
                     val ch = x.optJSONObject("ch")?.let(::log)
                     val ch2 = x.optJSONObject("ch2")?.let(::log)
-                    days[k] = DayLog(ids, x.optBoolean("done"), x.optInt("rev"), x.optInt("xp"), ch, ch2)
+                    days[k] = DayLog(ids, x.optBoolean("done"), x.optInt("rev"), x.optInt("xp"), ch, ch2, x.optInt("les"), x.optInt("ms"))
                 }
             }
             o.optJSONObject("arena")?.let { a ->

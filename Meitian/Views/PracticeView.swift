@@ -305,7 +305,7 @@ struct PracticeSession: View {
                 } else if !questions.isEmpty {
                     QuizRunner(questions: questions, onAnswer: { q, right in
                         if mode == .review { store.grade(q.word, right: right) }
-                        else if right { store.xp += 2; store.save() }
+                        else if right { store.addXP(2) }
                     }, onDone: { correct in
                         score = correct
                         withAnimation(Theme.bouncy) { finished = true }

@@ -113,6 +113,8 @@ fun Root() {
                 BackHandler { overlay.close() }
                 Box(Modifier.fillMaxSize().background(Street.c.paper).windowInsetsPadding(WindowInsets.safeDrawing)) { c() }
             }
+            // milestones reached during a lesson or game pop up once it's closed
+            if (app.profile.onboarded && overlay.content == null) com.asbestboi.meitian.ui.MilestoneCelebration()
         }
     }
 }

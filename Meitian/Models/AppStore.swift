@@ -44,6 +44,10 @@ struct DayLog: Codable, Hashable {
     var challenge: ChallengeLog?
     /// The other friend type's challenge on the same day (bonus).
     var bonusChallenge: ChallengeLog?
+    /// Extra lessons finished after the day's words (optional so older saves still decode).
+    var lessons: Int?
+    /// Daily XP milestones already celebrated today.
+    var milestones: Int?
 
     /// The day's challenge log for one friend type.
     func challenge(for friend: FriendKind) -> ChallengeLog? {
@@ -80,6 +84,8 @@ final class AppStore {
     var cards: [String: CardState] = [:]
     var days: [String: DayLog] = [:]
     var xp = 0
+    /// Milestones reached by the last XP gain, waiting to be celebrated.
+    var milestoneQueue: [Milestone] = []
 
     /// Bumped whenever the day rolls over so views refresh.
     var todayKey = AppStore.key(for: .now)
@@ -173,7 +179,45 @@ final class AppStore {
         return picked
     }
 
+    /// The next lesson after today's words: more new words from the learner's level, as many as they like.
+    /// Empty while today's words aren't learned yet, or when everything has been learned.
+    func nextLessonWords() -> [Word] {
+        guard today.learnedDone else { return [] }
+        var picked: [Word] = []
+        var level = currentLevel
+        while picked.count < profile.dailyGoal && level <= WordBank.maxLevel {
+            let fresh = WordBank.words(level: level).filter { cards[$0.id] == nil && !picked.contains($0) }
+            picked.append(contentsOf: fresh.prefix(profile.dailyGoal - picked.count))
+            level += 1
+        }
+        return picked
+    }
+
+    /// Where the learner is on their current HSK level's path of lessons.
+    var lessonPath: LessonPath {
+        let level = currentLevel
+        return Meitian.lessonPath(learned: UInt32(learnedCount(level: level)),
+                                  total: UInt32(WordBank.words(level: level).count),
+                                  lessonSize: UInt32(max(profile.dailyGoal, 1)))
+    }
+
+    var milestoneProgress: MilestoneProgress { Meitian.milestoneProgress(xpToday: UInt32(clamping: max(today.xp, 0))) }
+
+    /// Hands out any milestones today's XP just reached (bonus XP goes to the total, not today's bar).
+    private func checkMilestones() {
+        var t = today
+        let reached = Int(milestonesReached(xpToday: UInt32(clamping: max(t.xp, 0))))
+        let done = t.milestones ?? 0
+        guard reached > done else { return }
+        let fresh = (done + 1...reached).map { milestoneAt(index: UInt32($0)) }
+        t.milestones = reached
+        today = t
+        xp += fresh.reduce(0) { $0 + Int($1.bonus) }
+        milestoneQueue.append(contentsOf: fresh)
+    }
+
     func finishLearning(_ words: [Word], quizCorrect: Int) {
+        let extraLesson = today.learnedDone && words.contains { cards[$0.id] == nil }
         for w in words where cards[w.id] == nil {
             var s = CardState(learnedOn: todayKey)
             s.due = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now)) ?? .now
@@ -182,9 +226,11 @@ final class AppStore {
         var t = today
         let gained = words.count * 10 + quizCorrect * 5
         if !t.learnedDone { t.learnedDone = true }
+        if extraLesson { t.lessons = (t.lessons ?? 0) + 1 }
         t.xp += gained
         today = t
         xp += gained
+        checkMilestones()
         save()
     }
 
@@ -218,6 +264,7 @@ final class AppStore {
         t.reviewed += 1 // counts as activity for the streak
         today = t
         xp += amount
+        checkMilestones()
         save()
     }
 
@@ -231,6 +278,7 @@ final class AppStore {
         t.xp += gained
         today = t
         xp += gained
+        checkMilestones()
         save()
     }
 
@@ -248,6 +296,7 @@ final class AppStore {
             t.bonusChallenge = log
         }
         today = t
+        checkMilestones()
         save()
     }
 

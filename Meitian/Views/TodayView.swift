@@ -7,6 +7,9 @@ struct TodayView: View {
     @AppStorage(PinyinPrefs.show) private var showPinyin = true
 
     @State private var words: [Word] = []
+    /// After today's words: the next lesson, as many as the learner wants.
+    @State private var nextWords: [Word] = []
+    @State private var lessonWords: [Word] = []
     @State private var learning = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -16,6 +19,7 @@ struct TodayView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     header
+                    MilestoneCard()
                     wordsCard
                     StoryOfTheDayCard()
                     challengeCard
@@ -29,14 +33,24 @@ struct TodayView: View {
             .scrollIndicators(.hidden)
         }
         .onAppear {
-            words = store.todaysWords()
+            reloadWords()
             withAnimation(reduceMotion ? nil : Theme.bouncy.delay(0.05)) { appeared = true }
         }
-        .onChange(of: store.todayKey) { _, _ in words = store.todaysWords() }
-        .onChange(of: store.profile.dailyGoal) { _, _ in words = store.todaysWords() }
-        .fullScreenCover(isPresented: $learning) {
-            LearnSession(words: words).environment(store)
+        .onChange(of: store.todayKey) { _, _ in reloadWords() }
+        .onChange(of: store.profile.dailyGoal) { _, _ in reloadWords() }
+        .fullScreenCover(isPresented: $learning, onDismiss: reloadWords) {
+            LearnSession(words: lessonWords).environment(store)
         }
+    }
+
+    private func reloadWords() {
+        words = store.todaysWords()
+        nextWords = store.nextLessonWords()
+    }
+
+    private func start(_ batch: [Word]) {
+        lessonWords = batch
+        learning = true
     }
 
     private var greeting: (hanzi: String, pinyin: String, english: String) {
@@ -73,7 +87,74 @@ struct TodayView: View {
         .padding(.top, 12)
     }
 
+    @ViewBuilder
     private var wordsCard: some View {
+        if store.today.learnedDone && !nextWords.isEmpty {
+            nextLessonCard
+        } else {
+            todaysWordsCard
+        }
+    }
+
+    /// Duolingo-style: once the day's words are in, the next lesson on the path is right there.
+    private var nextLessonCard: some View {
+        let path = store.lessonPath
+        let extra = store.today.lessons ?? 0
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("keep going ✦").font(.rounded(.title2, weight: .heavy))
+                    Text("HSK \(store.currentLevel) · lesson \(path.lesson) of \(path.lessons)")
+                        .font(.rounded(.subheadline, weight: .semibold)).opacity(0.7)
+                }
+                Spacer()
+                if extra > 0 {
+                    Text("+\(extra) today").font(.rounded(.subheadline, weight: .heavy)).foregroundStyle(Theme.lime)
+                }
+            }
+            .foregroundStyle(.white)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule().fill(Theme.limeGradient).frame(width: max(8, geo.size.width * CGFloat(path.progress)))
+                }
+            }
+            .frame(height: 8)
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(nextWords) { w in
+                        Text(w.hanzi).font(.hanzi(24, weight: .semibold))
+                            .frame(minWidth: 48)
+                            .padding(.vertical, 10).padding(.horizontal, 6)
+                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            Button { start(nextWords) } label: {
+                HStack {
+                    Text("start lesson \(path.lesson)")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.rounded(.headline, weight: .bold))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 22).padding(.vertical, 17)
+                .background(Color(red: 0.78, green: 1.0, blue: 0.24), in: Capsule())
+            }
+            .buttonStyle(PressableStyle())
+            Button { start(words) } label: {
+                Label("practice today's words again", systemImage: "arrow.clockwise")
+                    .font(.rounded(.subheadline, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .streetBlock(Theme.nightGradient)
+    }
+
+    private var todaysWordsCard: some View {
         let done = store.today.learnedDone
         return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
@@ -110,7 +191,7 @@ struct TodayView: View {
             }
             .scrollIndicators(.hidden)
             .environment(\.colorScheme, .dark)
-            Button { learning = true } label: {
+            Button { start(words) } label: {
                 HStack {
                     Text(done ? "practice them again" : "learn today's words")
                     Spacer()

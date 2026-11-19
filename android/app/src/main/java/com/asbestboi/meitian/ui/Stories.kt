@@ -71,7 +71,9 @@ import uniffi.meitian_core.StoryLine
 import uniffi.meitian_core.StoryQuestion
 import uniffi.meitian_core.nextStory
 import uniffi.meitian_core.shelfStories
+import uniffi.meitian_core.storyAvailability
 import uniffi.meitian_core.storyById
+import uniffi.meitian_core.storyFitsLevel
 import uniffi.meitian_core.storyImageUrls
 import uniffi.meitian_core.storyOfTheDay
 import uniffi.meitian_core.storyWordIds
@@ -105,7 +107,8 @@ object StoryProgress {
         val readIds = read(c)
         prefs(c).getString(key, null)?.let { id ->
             val s = storyById(id)
-            if (s != null && id !in readIds && (s.style == "chat") == chat && (s.date.isEmpty() || s.date <= dayKey)) return s
+            if (s != null && id !in readIds && (s.style == "chat") == chat && (s.date.isEmpty() || s.date <= dayKey) &&
+                storyFitsLevel(s, level.coerceIn(0, 255).toUByte())) return s
         }
         val s = nextStory(chat, dayKey, level.coerceIn(0, 255).toUByte(), readIds, kotlin.random.Random.nextLong().toULong())
         prefs(c).edit().apply { if (s == null) remove(key) else putString(key, s.id) }.apply()
@@ -198,15 +201,17 @@ fun StoryHub(chats: Boolean = false) {
     val nav = LocalNav.current
     val ctx = LocalContext.current
     // recomputed when content changes, the day changes, or a story screen closes
-    val key = Triple(ContentSync.generation, app.todayKey, nav.content == null)
+    val key = listOf(ContentSync.generation, app.todayKey, nav.content == null, app.currentLevel)
     val all = remember(key, chats) { shelfStories(app.todayKey).filter { (it.style == "chat") == chats } }
     if (all.isEmpty()) return
+    val cap = app.currentLevel.coerceAtLeast(1)
+    val fits = remember(key, chats) { storyAvailability(chats, app.todayKey, app.currentLevel.coerceIn(0, 255).toUByte()) }
     val history = remember(key, chats) { val byId = all.associateBy { it.id }; StoryProgress.read(ctx).reversed().mapNotNull { byId[it] } }
     val next = remember(key, chats) { StoryProgress.next(ctx, chats, app.todayKey, app.currentLevel) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (chats) "chats 💬" else "stories ✦", style = street(22.sp), color = Street.c.text, modifier = Modifier.weight(1f))
-            Text("${history.size} / ${all.size} read", fontSize = 12.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
+            Text("${history.count { it.level.toInt() <= cap }} / ${fits.atLevel} read", fontSize = 12.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
         }
         if (next != null) {
             Row(Modifier.fillMaxWidth().block(Street.night()).clickable { prefetchStory(ctx, next); nav.show { StoryPlayer(next) { nav.close() } } }.padding(18.dp),
@@ -221,7 +226,9 @@ fun StoryHub(chats: Boolean = false) {
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFC6FF3D)).padding(horizontal = 14.dp, vertical = 8.dp))
             }
         } else {
-            Text(if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
+            val kind = if (chats) "chat" else "story"
+            Text(if (fits.aboveLevel > 0u) "You've read every HSK $cap $kind ✦ ${fits.aboveLevel} more unlock at higher HSK levels."
+                else if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
                 color = Street.c.secondary, modifier = Modifier.fillMaxWidth().card().padding(16.dp))
         }
         if (history.isNotEmpty()) {

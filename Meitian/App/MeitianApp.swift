@@ -77,5 +77,6 @@ struct MainTabs: View {
                 .tag(4)
         }
         .sensoryFeedback(.selection, trigger: tab)
+        .overlay { MilestoneCelebration() }
     }
 }

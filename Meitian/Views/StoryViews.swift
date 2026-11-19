@@ -32,7 +32,8 @@ enum StoryProgress {
         let d = UserDefaults.standard
         let readIds = read()
         if let id = d.string(forKey: pickKey(chat)), !readIds.contains(id), let s = storyById(id: id),
-           (s.style == "chat") == chat, s.date.isEmpty || s.date <= dayKey {
+           (s.style == "chat") == chat, s.date.isEmpty || s.date <= dayKey,
+           storyFitsLevel(story: s, maxLevel: UInt8(clamping: level)) {
             return s
         }
         guard let s = nextStory(chat: chat, dayKey: dayKey, maxLevel: UInt8(clamping: level), read: readIds,
@@ -192,6 +193,8 @@ struct StoryHub: View {
     @State private var next: Story?
     @State private var history: [Story] = []
     @State private var total = 0
+    /// Stories waiting at higher HSK levels (locked until the learner gets there).
+    @State private var above = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -200,7 +203,7 @@ struct StoryHub: View {
                 Sparkle(size: 12, color: chats ? Theme.sky : Theme.hot)
                 Spacer()
                 if total > 0 {
-                    Text("\(history.count) / \(total) read").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
+                    Text("\(history.filter { Int($0.level) <= max(store.currentLevel, 1) }.count) / \(total) read").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
                 }
             }
             mysteryCard
@@ -220,7 +223,7 @@ struct StoryHub: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .task(id: "\(content.generation)-\(store.todayKey)") { refresh() }
+        .task(id: "\(content.generation)-\(store.todayKey)-\(store.currentLevel)") { refresh() }
         .fullScreenCover(item: $open, onDismiss: refresh) { ref in
             StoryPlayer(story: ref.story).environment(store)
         }
@@ -248,8 +251,10 @@ struct StoryHub: View {
                 .streetBlock(Theme.nightGradient, padding: 18)
             }
             .buttonStyle(PressableStyle(scale: 0.98))
-        } else if total > 0 {
-            Text(chats ? "You've read every chat ✦ new ones arrive soon." : "You've read every story ✦ new ones arrive soon.")
+        } else if total > 0 || above > 0 {
+            Text(above > 0
+                 ? "You've read every HSK \(max(store.currentLevel, 1)) \(chats ? "chat" : "story") ✦ \(above) more unlock at higher HSK levels."
+                 : (chats ? "You've read every chat ✦ new ones arrive soon." : "You've read every story ✦ new ones arrive soon."))
                 .font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .cardSurface(padding: 16)
@@ -258,7 +263,9 @@ struct StoryHub: View {
 
     private func refresh() {
         let all = shelfStories(dayKey: store.todayKey).filter { ($0.style == "chat") == chats }
-        total = all.count
+        let fits = storyAvailability(chat: chats, dayKey: store.todayKey, maxLevel: UInt8(clamping: store.currentLevel))
+        total = Int(fits.atLevel)
+        above = Int(fits.aboveLevel)
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         history = StoryProgress.read().reversed().compactMap { byId[$0] }   // most recent first
         next = StoryProgress.next(chat: chats, dayKey: store.todayKey, level: store.currentLevel)

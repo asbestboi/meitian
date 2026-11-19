@@ -67,6 +67,8 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
     val nav = LocalNav.current
     var words by remember { mutableStateOf(listOf<CoreWord>()) }
     LaunchedEffect(app.todayKey, app.settings.swears) { words = app.todaysWords() }
+    // after today's words: the next lesson on the path, as many as the learner wants
+    val nextWords = remember(app.todayKey, app.today.learnedDone, app.cards.size, app.profile.dailyGoal) { app.nextLessonWords() }
     val h = LocalTime.now().hour
     val greet = when { h < 11 -> Triple("早上好", "Zǎoshang hǎo", "Good morning"); h < 14 -> Triple("中午好", "Zhōngwǔ hǎo", "Good noon")
         h < 18 -> Triple("下午好", "Xiàwǔ hǎo", "Good afternoon"); else -> Triple("晚上好", "Wǎnshang hǎo", "Good evening") }
@@ -81,10 +83,37 @@ fun TodayScreen(goToChallenge: () -> Unit, goToPractice: () -> Unit) {
             }
             Badge("🔥 ${app.streak}"); HSpacer(6.dp); Badge("⭐ ${app.xp}")
         }
+        MilestoneCard()
         // today's words: dark hero card with a lime accent (same on iOS)
         var appeared by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { appeared = true }
-        Column(Modifier.fillMaxWidth().block(Street.night()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (done && nextWords.isNotEmpty()) {
+            val path = app.lessonPath
+            Column(Modifier.fillMaxWidth().block(Street.night()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("keep going ✦", style = street(24.sp), color = Color.White)
+                        Text("HSK ${app.currentLevel} · lesson ${path.lesson} of ${path.lessons}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
+                    }
+                    if (app.today.lessons > 0) Text("+${app.today.lessons} today", fontWeight = FontWeight.ExtraBold, color = Color(0xFFC6FF3D))
+                }
+                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.12f))) {
+                    Box(Modifier.fillMaxWidth(path.progress.toFloat().coerceIn(0.03f, 1f)).height(8.dp).clip(RoundedCornerShape(50)).background(Color(0xFFC6FF3D)))
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    nextWords.forEach { w ->
+                        Text(w.hanzi, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                            modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.08f)).padding(horizontal = 12.dp, vertical = 8.dp))
+                    }
+                }
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(Color(0xFFC6FF3D))
+                    .clickable { nav.show { LearnSession(nextWords) { nav.close() } } }.padding(horizontal = 22.dp, vertical = 16.dp)) {
+                    Text("start lesson ${path.lesson} →", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.Black)
+                }
+                Text("↻ practice today's words again", fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.75f),
+                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().clickable { nav.show { LearnSession(words) { nav.close() } } }.padding(4.dp))
+            }
+        } else Column(Modifier.fillMaxWidth().block(Street.night()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (done) "today's words ✓" else "today's words", style = street(24.sp), color = Color.White, modifier = Modifier.weight(1f))
                 Text("${words.size}", style = street(24.sp), color = Color(0xFFC6FF3D))

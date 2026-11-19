@@ -164,20 +164,60 @@ struct StoryPack {
 }
 
 fn image(r: RawImage) -> StoryImage {
-    StoryImage { url: r.url, artist: r.artist, source: r.source }
+    StoryImage {
+        url: r.url,
+        artist: r.artist,
+        source: r.source,
+    }
 }
 
 fn tokens(t: Vec<(String, String)>, zh: &str, py: &str) -> Vec<Token> {
     if t.is_empty() {
         // No tokenization in the pack: one tappable chunk.
-        vec![Token { text: zh.to_string(), pinyin: py.to_string(), word_id: None }]
+        vec![Token {
+            text: zh.to_string(),
+            pinyin: py.to_string(),
+            word_id: None,
+        }]
     } else {
-        t.into_iter().map(|(text, pinyin)| Token { text, pinyin, word_id: None }).collect()
+        t.into_iter()
+            .map(|(text, pinyin)| Token {
+                text,
+                pinyin,
+                word_id: None,
+            })
+            .collect()
     }
 }
 
 fn line(l: RawLine) -> StoryLine {
-    StoryLine { speaker: l.who, image: l.image.map(image), tokens: tokens(l.t, &l.zh, &l.py), zh: l.zh, pinyin: l.py, en: l.en }
+    StoryLine {
+        speaker: l.who,
+        image: l.image.map(image),
+        tokens: tokens(l.t, &l.zh, &l.py),
+        zh: l.zh,
+        pinyin: l.py,
+        en: l.en,
+    }
+}
+
+/// Packs list the fitting reply first; mix the order so the answer isn't always in the same place.
+/// Seeded by story id + panel, so the order is the same on every launch and on both platforms.
+fn shuffle_replies(
+    mut options: Vec<ReplyOption>,
+    story_id: &str,
+    panel: usize,
+) -> Vec<ReplyOption> {
+    if options.len() < 2 {
+        return options;
+    }
+    let seed = story_id.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
+    });
+    let mut rng =
+        fastrand::Rng::with_seed(seed ^ (panel as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    rng.shuffle(&mut options);
+    options
 }
 
 fn store() -> &'static RwLock<Vec<Story>> {
@@ -186,47 +226,64 @@ fn store() -> &'static RwLock<Vec<Story>> {
 }
 
 pub(crate) fn load_stories(json: &str) -> Result<u32, ContentError> {
-    let pack: StoryPack = serde_json::from_str(json).map_err(|e| ContentError::Invalid { reason: e.to_string() })?;
+    let pack: StoryPack = serde_json::from_str(json).map_err(|e| ContentError::Invalid {
+        reason: e.to_string(),
+    })?;
     let mut stories: Vec<Story> = pack
         .stories
         .into_iter()
         .filter(|s| !s.panels.is_empty())
-        .map(|s| Story {
-            id: s.id,
-            title: s.title,
-            title_en: s.title_en,
-            level: s.level,
-            emoji: if s.emoji.is_empty() { "📖".into() } else { s.emoji },
-            cover: s.cover.map(image),
-            date: s.date,
-            style: s.style,
-            me: s.me,
-            panels: s
-                .panels
-                .into_iter()
-                .map(|p| StoryPanel {
-                    image: p.image.map(image),
-                    lines: p.lines.into_iter().map(line).collect(),
-                    reply: p
-                        .reply
-                        .map(|r| r.options)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|o| ReplyOption {
-                            tokens: tokens(o.t, &o.zh, &o.py),
-                            zh: o.zh,
-                            pinyin: o.py,
-                            en: o.en,
-                            correct: o.ok,
-                            reaction: o.then.map(line),
-                        })
-                        .collect(),
-                    question: p
-                        .question
-                        .filter(|q| (q.answer as usize) < q.options.len())
-                        .map(|q| StoryQuestion { prompt: q.q, options: q.options, answer: q.answer }),
-                })
-                .collect(),
+        .map(|s| {
+            let story_id = s.id.clone();
+            Story {
+                id: s.id,
+                title: s.title,
+                title_en: s.title_en,
+                level: s.level,
+                emoji: if s.emoji.is_empty() {
+                    "📖".into()
+                } else {
+                    s.emoji
+                },
+                cover: s.cover.map(image),
+                date: s.date,
+                style: s.style,
+                me: s.me,
+                panels: s
+                    .panels
+                    .into_iter()
+                    .enumerate()
+                    .map(|(pi, p)| StoryPanel {
+                        image: p.image.map(image),
+                        lines: p.lines.into_iter().map(line).collect(),
+                        reply: shuffle_replies(
+                            p.reply
+                                .map(|r| r.options)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|o| ReplyOption {
+                                    tokens: tokens(o.t, &o.zh, &o.py),
+                                    zh: o.zh,
+                                    pinyin: o.py,
+                                    en: o.en,
+                                    correct: o.ok,
+                                    reaction: o.then.map(line),
+                                })
+                                .collect(),
+                            &story_id,
+                            pi,
+                        ),
+                        question: p
+                            .question
+                            .filter(|q| (q.answer as usize) < q.options.len())
+                            .map(|q| StoryQuestion {
+                                prompt: q.q,
+                                options: q.options,
+                                answer: q.answer,
+                            }),
+                    })
+                    .collect(),
+            }
         })
         .collect();
     stories.sort_by(|a, b| (a.level, &a.id).cmp(&(b.level, &b.id)));
@@ -269,25 +326,53 @@ fn resolve(mut s: Story) -> Story {
 /// All stories, easiest first (tokens resolved to word ids for tap-to-lookup).
 #[uniffi::export]
 pub fn all_stories() -> Vec<Story> {
-    store().read().map(|s| s.clone()).unwrap_or_default().into_iter().map(resolve).collect()
+    store()
+        .read()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .map(resolve)
+        .collect()
 }
 
 #[uniffi::export]
 pub fn story_by_id(id: String) -> Option<Story> {
-    store().read().ok()?.iter().find(|s| s.id == id).cloned().map(resolve)
+    store()
+        .read()
+        .ok()?
+        .iter()
+        .find(|s| s.id == id)
+        .cloned()
+        .map(resolve)
 }
 
-/// The day's story: the daily story dated today if there is one, otherwise a pick at or below the
-/// learner's level from the undated stories (same on every launch that day).
+/// The learner's HSK level as a story cap (0 = beginner still reads HSK 1).
+fn cap(max_level: u8) -> u8 {
+    max_level.max(1)
+}
+
+/// Can a learner at `max_level` read this story? Stories are graded by HSK level, and a learner never
+/// gets one above their own level (it'd be full of words they haven't met yet).
+#[uniffi::export]
+pub fn story_fits_level(story: Story, max_level: u8) -> bool {
+    story.level <= cap(max_level)
+}
+
+/// The day's story: the daily story dated today if it's at or below the learner's level, otherwise a
+/// pick at or below the learner's level from the undated stories (same on every launch that day).
+/// `None` when nothing fits.
 #[uniffi::export]
 pub fn story_of_the_day(day_key: String, max_level: u8) -> Option<Story> {
     let all = store().read().ok()?.clone();
-    if let Some(s) = all.iter().find(|s| s.date == day_key) {
+    let cap = cap(max_level);
+    if let Some(s) = all.iter().find(|s| s.date == day_key && s.level <= cap) {
         return Some(resolve(s.clone()));
     }
-    let undated: Vec<Story> = all.iter().filter(|s| s.date.is_empty()).cloned().collect();
-    let fits: Vec<Story> = undated.iter().filter(|s| s.level <= max_level.max(1)).cloned().collect();
-    let pool = if fits.is_empty() { undated } else { fits };
+    let pool: Vec<Story> = all
+        .iter()
+        .filter(|s| s.date.is_empty() && s.level <= cap)
+        .cloned()
+        .collect();
     if pool.is_empty() {
         return None;
     }
@@ -298,23 +383,31 @@ pub fn story_of_the_day(day_key: String, max_level: u8) -> Option<Story> {
 /// Stories for the shelf: everything except daily stories whose day hasn't come yet.
 #[uniffi::export]
 pub fn shelf_stories(day_key: String) -> Vec<Story> {
-    all_stories().into_iter().filter(|s| s.date.is_empty() || s.date <= day_key).collect()
+    all_stories()
+        .into_iter()
+        .filter(|s| s.date.is_empty() || s.date <= day_key)
+        .collect()
 }
 
 /// The next unread story (or chat) for a learner, picked at random so it's a surprise. Never repeats a
-/// story in `read`; prefers stories at or one above the learner's level, then any unread one.
-/// `None` when everything has been read. Daily stories whose day hasn't come yet are skipped.
+/// story in `read` and never goes above the learner's HSK level; stories at the learner's own level
+/// come first, then easier ones. `None` when every story they can read has been read.
+/// Daily stories whose day hasn't come yet are skipped.
 #[uniffi::export]
-pub fn next_story(chat: bool, day_key: String, max_level: u8, read: Vec<String>, seed: u64) -> Option<Story> {
+pub fn next_story(
+    chat: bool,
+    day_key: String,
+    max_level: u8,
+    read: Vec<String>,
+    seed: u64,
+) -> Option<Story> {
+    let cap = cap(max_level);
     let unread: Vec<Story> = shelf_stories(day_key)
         .into_iter()
-        .filter(|s| (s.style == "chat") == chat && !read.contains(&s.id))
+        .filter(|s| (s.style == "chat") == chat && !read.contains(&s.id) && s.level <= cap)
         .collect();
-    let fits: Vec<Story> = unread.iter().filter(|s| s.level <= max_level.max(1) + 1).cloned().collect();
-    let pool = if fits.is_empty() { unread } else { fits };
-    if pool.is_empty() {
-        return None;
-    }
+    let top = unread.iter().map(|s| s.level).max()?;
+    let pool: Vec<Story> = unread.into_iter().filter(|s| s.level == top).collect();
     let mut rng = fastrand::Rng::with_seed(seed);
     Some(pool[rng.usize(..pool.len())].clone())
 }
@@ -322,7 +415,32 @@ pub fn next_story(chat: bool, day_key: String, max_level: u8, read: Vec<String>,
 /// How many stories (or chats) are available right now, read or not.
 #[uniffi::export]
 pub fn story_count_for(chat: bool, day_key: String) -> u32 {
-    shelf_stories(day_key).iter().filter(|s| (s.style == "chat") == chat).count() as u32
+    shelf_stories(day_key)
+        .iter()
+        .filter(|s| (s.style == "chat") == chat)
+        .count() as u32
+}
+
+/// How many stories (or chats) a learner at `max_level` can read right now, and how many more are
+/// waiting at higher levels.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct StoryAvailability {
+    pub at_level: u32,
+    pub above_level: u32,
+}
+
+#[uniffi::export]
+pub fn story_availability(chat: bool, day_key: String, max_level: u8) -> StoryAvailability {
+    let cap = cap(max_level);
+    let kind: Vec<Story> = shelf_stories(day_key)
+        .into_iter()
+        .filter(|s| (s.style == "chat") == chat)
+        .collect();
+    let at_level = kind.iter().filter(|s| s.level <= cap).count() as u32;
+    StoryAvailability {
+        at_level,
+        above_level: kind.len() as u32 - at_level,
+    }
 }
 
 /// Every picture a story uses (cover, panels, sent pictures), to preload when it opens.
@@ -331,7 +449,11 @@ pub fn story_image_urls(story: Story) -> Vec<String> {
     let mut urls: Vec<String> = story.cover.iter().map(|c| c.url.clone()).collect();
     for p in &story.panels {
         urls.extend(p.image.iter().map(|i| i.url.clone()));
-        urls.extend(p.lines.iter().filter_map(|l| l.image.as_ref().map(|i| i.url.clone())));
+        urls.extend(
+            p.lines
+                .iter()
+                .filter_map(|l| l.image.as_ref().map(|i| i.url.clone())),
+        );
     }
     urls.dedup();
     urls
@@ -369,8 +491,14 @@ mod tests {
            {"lines":[{"zh":"再见。"}],"question":{"q":"bad","options":["a"],"answer":5}}]}]}"#;
         assert_eq!(load_stories(json).unwrap(), 1);
         let s = story_by_id("tea".into()).unwrap();
-        assert_eq!(s.panels[0].lines[0].tokens[0].word_id.as_deref(), Some("1-你好"));
-        assert!(s.panels[1].question.is_none(), "out-of-range answers are dropped");
+        assert_eq!(
+            s.panels[0].lines[0].tokens[0].word_id.as_deref(),
+            Some("1-你好")
+        );
+        assert!(
+            s.panels[1].question.is_none(),
+            "out-of-range answers are dropped"
+        );
         assert_eq!(story_of_the_day("2026-11-19".into(), 1).unwrap().id, "tea");
         assert_eq!(story_word_ids(s.clone()), vec!["1-你好".to_string()]);
         assert_eq!(story_image_urls(s), vec!["https://x/1.jpg".to_string()]);
@@ -392,26 +520,172 @@ mod daily_tests {
         // note: other tests replace the global store, so load + check in one go
         load_stories(json).unwrap();
         let today = story_of_the_day("2026-11-20".into(), 1).unwrap();
-        assert_eq!(today.id, "d1", "the dated story wins even above the learner's level");
+        assert_eq!(
+            today.id, "a",
+            "a daily story above the learner's level is skipped"
+        );
+        let today = story_of_the_day("2026-11-20".into(), 3).unwrap();
+        assert_eq!(
+            today.id, "d1",
+            "the dated story wins at the learner's level"
+        );
         assert_eq!(today.style, "chat");
-        assert_eq!(today.panels[0].lines[0].image.as_ref().unwrap().url, "https://x/p.jpg");
-        assert_eq!(story_of_the_day("2026-12-01".into(), 1).unwrap().id, "a", "no daily: undated pick");
+        assert_eq!(
+            today.panels[0].lines[0].image.as_ref().unwrap().url,
+            "https://x/p.jpg"
+        );
+        assert_eq!(
+            story_of_the_day("2026-12-01".into(), 1).unwrap().id,
+            "a",
+            "no daily: undated pick"
+        );
         // next_story: chats only, never something already read, nothing from the future
-        assert_eq!(next_story(true, "2026-11-20".into(), 1, vec![], 1).unwrap().id, "d1");
-        assert!(next_story(true, "2026-11-20".into(), 1, vec!["d1".into()], 1).is_none(), "all chats read");
-        assert_eq!(next_story(false, "2026-11-20".into(), 1, vec![], 9).unwrap().id, "a", "d2 is still in the future");
+        assert!(
+            next_story(true, "2026-11-20".into(), 1, vec![], 1).is_none(),
+            "the only chat is HSK 3"
+        );
+        assert!(
+            next_story(true, "2026-11-20".into(), 2, vec![], 1).is_none(),
+            "HSK 2 can't read HSK 3 either"
+        );
+        assert_eq!(
+            next_story(true, "2026-11-20".into(), 3, vec![], 1)
+                .unwrap()
+                .id,
+            "d1"
+        );
+        assert!(
+            next_story(true, "2026-11-20".into(), 3, vec!["d1".into()], 1).is_none(),
+            "all chats read"
+        );
+        assert_eq!(
+            story_availability(true, "2026-11-20".into(), 1),
+            StoryAvailability {
+                at_level: 0,
+                above_level: 1
+            }
+        );
+        assert_eq!(
+            next_story(false, "2026-11-20".into(), 1, vec![], 9)
+                .unwrap()
+                .id,
+            "a",
+            "d2 is still in the future"
+        );
         assert_eq!(story_count_for(false, "2026-11-21".into()), 2);
-        let shelf: Vec<String> = shelf_stories("2026-11-20".into()).into_iter().map(|s| s.id).collect();
-        assert!(shelf.contains(&"d1".to_string()) && !shelf.contains(&"d2".to_string()), "future dailies hidden");
+        let shelf: Vec<String> = shelf_stories("2026-11-20".into())
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert!(
+            shelf.contains(&"d1".to_string()) && !shelf.contains(&"d2".to_string()),
+            "future dailies hidden"
+        );
         let json2 = r#"{"stories":[{"id":"r","title":"R","level":1,"style":"chat","me":"我","panels":[{"lines":[{"who":"丽丽","zh":"你好吗？"}],
           "reply":{"options":[{"zh":"我很好！","ok":true,"t":[["我","wǒ"],["很","hěn"],["好","hǎo"],["！",""]],"then":{"who":"丽丽","zh":"太好了！"}},
                               {"zh":"再见。","ok":false}]}}]}]}"#;
         load_stories(json2).unwrap();
         let r = story_by_id("r".into()).unwrap();
         let opts = &r.panels[0].reply;
+        assert!(story_fits_level(r.clone(), 0) && story_fits_level(r.clone(), 1));
         assert_eq!(opts.len(), 2);
-        assert!(opts[0].correct && !opts[1].correct);
-        assert_eq!(opts[0].reaction.as_ref().unwrap().zh, "太好了！");
-        assert_eq!(opts[0].tokens.len(), 4);
+        assert_eq!(opts.iter().filter(|o| o.correct).count(), 1);
+        let ok = opts.iter().find(|o| o.correct).unwrap();
+        assert_eq!(ok.reaction.as_ref().unwrap().zh, "太好了！");
+        assert_eq!(ok.tokens.len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+
+    #[test]
+    fn never_above_the_learners_level() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let json = r#"{"stories":[
+          {"id":"h1a","title":"1a","level":1,"panels":[{"lines":[{"zh":"好"}]}]},
+          {"id":"h1b","title":"1b","level":1,"panels":[{"lines":[{"zh":"好"}]}]},
+          {"id":"h2","title":"2","level":2,"panels":[{"lines":[{"zh":"好"}]}]},
+          {"id":"h3","title":"3","level":3,"panels":[{"lines":[{"zh":"好"}]}]}]}"#;
+        load_stories(json).unwrap();
+        let day = "2026-11-19".to_string();
+        for seed in 0..50 {
+            let s = next_story(false, day.clone(), 1, vec![], seed).unwrap();
+            assert_eq!(s.level, 1, "HSK 1 learners only get HSK 1 stories");
+            // an HSK 2 learner gets the HSK 2 story first, then HSK 1 ones
+            assert_eq!(
+                next_story(false, day.clone(), 2, vec![], seed).unwrap().id,
+                "h2"
+            );
+            assert_eq!(
+                next_story(false, day.clone(), 2, vec!["h2".into()], seed)
+                    .unwrap()
+                    .level,
+                1
+            );
+            assert!(
+                story_of_the_day(format!("2026-11-{:02}", seed % 28 + 1), 1)
+                    .unwrap()
+                    .level
+                    == 1
+            );
+        }
+        assert!(
+            next_story(false, day.clone(), 1, vec!["h1a".into(), "h1b".into()], 1).is_none(),
+            "no fallback to HSK 2"
+        );
+        assert_eq!(
+            next_story(false, day.clone(), 0, vec!["h1a".into()], 1)
+                .unwrap()
+                .id,
+            "h1b",
+            "beginners read HSK 1"
+        );
+        assert_eq!(
+            story_availability(false, day, 2),
+            StoryAvailability {
+                at_level: 3,
+                above_level: 1
+            }
+        );
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    use super::*;
+
+    #[test]
+    fn right_reply_moves_around() {
+        let opt = |zh: &str, ok| ReplyOption {
+            zh: zh.into(),
+            pinyin: String::new(),
+            en: String::new(),
+            tokens: vec![],
+            correct: ok,
+            reaction: None,
+        };
+        let mut positions = std::collections::HashSet::new();
+        for i in 0..40 {
+            let id = format!("chat-{i}");
+            let opts = shuffle_replies(
+                vec![opt("a", true), opt("b", false), opt("c", false)],
+                &id,
+                0,
+            );
+            let again = shuffle_replies(
+                vec![opt("a", true), opt("b", false), opt("c", false)],
+                &id,
+                0,
+            );
+            assert_eq!(opts, again, "same story + panel, same order");
+            positions.insert(opts.iter().position(|o| o.correct).unwrap());
+        }
+        assert_eq!(
+            positions.len(),
+            3,
+            "the right answer shows up in every slot"
+        );
     }
 }
