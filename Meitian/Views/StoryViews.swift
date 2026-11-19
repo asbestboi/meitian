@@ -66,10 +66,17 @@ struct FullScreenImage: View {
     @State private var offset: CGSize = .zero
     @State private var baseOffset: CGSize = .zero
 
+    /// The black fades as you drag the picture down to close it.
+    private var backgroundOpacity: Double {
+        guard scale <= 1 else { return 1 }
+        let drag = Double(abs(offset.height))
+        return max(0.4, 1.0 - drag / 500.0)
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-                .opacity(scale <= 1 ? max(0.4, 1 - abs(offset.height) / 500) : 1)
+                .opacity(backgroundOpacity)
             AsyncImage(url: URL(string: image.url)) { phase in
                 if case .success(let img) = phase {
                     img.resizable().scaledToFit()
