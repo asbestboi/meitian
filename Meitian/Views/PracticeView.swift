@@ -6,6 +6,7 @@ struct PracticeView: View {
     @State private var session: PracticeSession.Mode?
     @State private var search = ""
     @State private var levelFilter = 0
+    @State private var status: WordStatus = .all
     @State private var selected: Word?
     @State private var sprint = false
     @State private var sentences = false
@@ -18,6 +19,7 @@ struct PracticeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     reviewHero
+                    weakTile
                     sentenceTile
                     StoryHub()
                     StoryHub(chats: true)
@@ -101,6 +103,30 @@ struct PracticeView: View {
         .streetBlock(Theme.skyGradient)
     }
 
+    /// Practice the words you get wrong most (hidden until there are a few).
+    @ViewBuilder
+    private var weakTile: some View {
+        let weak = store.weakWords(limit: 12)
+        if weak.count >= 4 {
+            Button { session = .weak } label: {
+                HStack(spacing: 14) {
+                    Text("⚡").font(.system(size: 38))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Weak words").font(.rounded(.title3, weight: .bold))
+                        Text(weak.prefix(5).map(\.hanzi).joined(separator: " · ") + " — the ones you miss most")
+                            .font(.rounded(.caption, weight: .medium)).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.headline.weight(.bold)).foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.primary)
+                .cardSurface(padding: 16)
+            }
+            .buttonStyle(PressableStyle(scale: 0.98))
+        }
+    }
+
     private var sentenceTile: some View {
         let count = Int(content.stats.sentences)
         return Button { sentences = true } label: {
@@ -166,8 +192,19 @@ struct PracticeView: View {
 
     private var filtered: [Word] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return WordBank.visible(swears: swears).filter { w in
-            (levelFilter == 0 || w.level == levelFilter) &&
+        let weak = status == .weak ? Set(store.weakWords(limit: 200).map(\.id)) : []
+        let now = Date.now
+        return WordBank.visible(swears: swears).filter { (w: Word) -> Bool in
+            let card = store.cards[w.id]
+            let statusOK: Bool = switch status {
+            case .all: true
+            case .learned: card != nil
+            case .weak: weak.contains(w.id)
+            case .due: card.map { $0.due <= now } ?? false
+            case .mastered: card?.mastered ?? false
+            case .new: card == nil
+            }
+            return statusOK && (levelFilter == 0 || w.level == levelFilter) &&
             (q.isEmpty || w.hanzi.contains(q) || w.meaning.lowercased().contains(q) ||
              w.pinyin.folding(options: .diacriticInsensitive, locale: nil).lowercased()
                 .contains(q.folding(options: .diacriticInsensitive, locale: nil)))
@@ -183,6 +220,20 @@ struct PracticeView: View {
                 if swears { Text("🤬").tag(WordBank.streetLevel) }
             }
             .pickerStyle(.segmented)
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(WordStatus.allCases) { s in
+                        Button { withAnimation(Theme.spring) { status = s } } label: {
+                            Text(s.label).font(.rounded(.caption, weight: .bold))
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(status == s ? Theme.ink : Theme.card, in: Capsule())
+                                .foregroundStyle(status == s ? Theme.background : .primary)
+                        }
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            Text("\(filtered.count) words").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
             LazyVStack(spacing: 8) {
                 ForEach(filtered) { w in
                     Button { selected = w } label: { row(w) }
@@ -202,6 +253,15 @@ struct PracticeView: View {
             }
             Spacer()
             if let state {
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 2) {
+                        ForEach(1...6, id: \.self) { b in
+                            Capsule().fill(b <= state.box ? Theme.jade : Color.secondary.opacity(0.2)).frame(width: 5, height: 10)
+                        }
+                    }
+                    Text("✓\(state.correct) ✗\(state.wrong)").font(.rounded(.caption2, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("box \(state.box), \(state.correct) right, \(state.wrong) wrong")
                 Image(systemName: state.mastered ? "crown.fill" : "checkmark.circle.fill")
                     .foregroundStyle(state.mastered ? Theme.gold : Theme.jade)
                     .accessibilityLabel(state.mastered ? "Mastered" : "Learned")
@@ -271,7 +331,7 @@ struct WordDetail: View {
 
 /// Review / game session over learned words.
 struct PracticeSession: View {
-    enum Mode: String, Identifiable { case review, listening, speaking, mixed; var id: String { rawValue } }
+    enum Mode: String, Identifiable { case review, listening, speaking, mixed, weak; var id: String { rawValue } }
     let mode: Mode
 
     @Environment(AppStore.self) private var store
@@ -295,7 +355,7 @@ struct PracticeSession: View {
                     .foregroundStyle(.primary)
                     .accessibilityLabel("Close")
                     Spacer()
-                    Text(mode == .review ? "Review" : mode == .listening ? "Listening" : mode == .speaking ? "Speaking" : "Speed mix")
+                    Text(mode == .review ? "Review" : mode == .listening ? "Listening" : mode == .speaking ? "Speaking" : mode == .weak ? "Weak words" : "Speed mix")
                         .font(.rounded(.headline, weight: .bold))
                     Spacer()
                     Color.clear.frame(width: 40, height: 40)
@@ -304,7 +364,7 @@ struct PracticeSession: View {
                     results.transition(.scale(scale: 0.9).combined(with: .opacity))
                 } else if !questions.isEmpty {
                     QuizRunner(questions: questions, onAnswer: { q, right in
-                        if mode == .review { store.grade(q.word, right: right) }
+                        if mode == .review || mode == .weak { store.grade(q.word, right: right) }
                         else if right { store.addXP(2) }
                     }, onDone: { correct in
                         score = correct
@@ -334,6 +394,9 @@ struct PracticeSession: View {
         case .mixed:
             let kinds = QuizQuestion.mixedKinds()
             return learned.shuffled().prefix(10).map { QuizQuestion.make(for: $0, kind: kinds.randomElement()!, pool: learned) }
+        case .weak:
+            let kinds = QuizQuestion.mixedKinds()
+            return store.weakWords(limit: 12).enumerated().map { i, w in QuizQuestion.make(for: w, kind: kinds[i % kinds.count], pool: learned) }
         }
     }
 
@@ -351,6 +414,22 @@ struct PracticeSession: View {
                 .font(.rounded(.body)).foregroundStyle(.secondary)
             Spacer()
             BigButton(title: "Done", systemImage: "checkmark") { dismiss() }
+        }
+    }
+}
+
+/// Word library filter by how the learner is doing with each word.
+enum WordStatus: String, CaseIterable, Identifiable {
+    case all, learned, weak, due, mastered, new
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: "all"
+        case .learned: "learned"
+        case .weak: "⚡ weak"
+        case .due: "due"
+        case .mastered: "👑 mastered"
+        case .new: "not yet"
         }
     }
 }

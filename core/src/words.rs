@@ -191,6 +191,38 @@ pub fn quiz_options(answer_id: String, pool_ids: Vec<String>) -> Vec<String> {
     ids
 }
 
+/// One learned word's review record, for picking weak words.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CardStat {
+    pub id: String,
+    pub box_level: u8,
+    pub correct: u32,
+    pub wrong: u32,
+}
+
+/// How weak a word is: 0 = solid. Wrong-answer rate (smoothed so one slip doesn't dominate) plus a
+/// little extra for words still in the low Leitner boxes.
+#[uniffi::export]
+pub fn weakness(stat: CardStat) -> f64 {
+    let answered = stat.correct + stat.wrong;
+    if answered < 2 || stat.wrong == 0 {
+        return 0.0;
+    }
+    let rate = (stat.wrong as f64 + 0.5) / (answered as f64 + 2.0);
+    let low_box = (4.0 - stat.box_level.min(4) as f64).max(0.0) * 0.05;
+    rate + low_box
+}
+
+/// The learner's weakest words, weakest first (only words they've got wrong at least once and answered
+/// at least twice).
+#[uniffi::export]
+pub fn weak_word_ids(stats: Vec<CardStat>, limit: u32) -> Vec<String> {
+    let mut scored: Vec<(f64, String)> =
+        stats.into_iter().map(|s| (weakness(s.clone()), s.id)).filter(|(w, _)| *w > 0.0).collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.1.cmp(&b.1)));
+    scored.into_iter().take(limit as usize).map(|(_, id)| id).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,5 +244,16 @@ mod tests {
             assert_eq!(opts.len(), 4);
             assert_eq!(opts.iter().filter(|o| *o == id).count(), 1);
         }
+    }
+
+    #[test]
+    fn weak_words() {
+        let st = |id: &str, b, c, w| CardStat { id: id.into(), box_level: b, correct: c, wrong: w };
+        let ids = weak_word_ids(
+            vec![st("solid", 5, 10, 0), st("once", 2, 0, 1), st("bad", 1, 1, 5), st("meh", 3, 6, 2), st("slip", 5, 9, 1)],
+            10,
+        );
+        assert_eq!(ids, vec!["bad", "meh", "slip"]);
+        assert_eq!(weak_word_ids(vec![st("bad", 1, 1, 5), st("meh", 3, 6, 2)], 1), vec!["bad"]);
     }
 }

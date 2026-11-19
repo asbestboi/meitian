@@ -17,7 +17,9 @@ import uniffi.meitian_core.milestoneAt
 import uniffi.meitian_core.milestonesReached
 import uniffi.meitian_core.Outcome
 import uniffi.meitian_core.allWords
+import uniffi.meitian_core.CardStat
 import uniffi.meitian_core.DayStats
+import uniffi.meitian_core.weakWordIds
 import uniffi.meitian_core.Quest
 import uniffi.meitian_core.QuestStatus
 import uniffi.meitian_core.dailyQuests
@@ -366,6 +368,11 @@ class AppState(private val context: Context) {
     val dueWords: List<CoreWord>
         get() = cards.entries.filter { it.value.dueDay <= todayNumber }.sortedBy { it.value.dueDay }
             .mapNotNull { Words[it.key] }.filter { !it.isSwear || settings.swears }
+
+    /** The words the learner gets wrong most (weakest first). */
+    fun weakWords(limit: Int = 15): List<CoreWord> =
+        weakWordIds(cards.map { (id, c) -> CardStat(id, c.box.coerceIn(0, 255).toUByte(), c.correct.toUInt(), c.wrong.toUInt()) }, limit.toUInt())
+            .mapNotNull { Words[it] }.filter { !it.isSwear || settings.swears }
 
     val learnedWords: List<CoreWord> get() = Words.visible(settings.swears).filter { cards[it.id] != null }
 

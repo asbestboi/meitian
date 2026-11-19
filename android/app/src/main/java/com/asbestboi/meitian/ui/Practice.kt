@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -51,7 +52,10 @@ import kotlinx.coroutines.delay
 import uniffi.meitian_core.CoreWord
 import uniffi.meitian_core.sprintMultiplier
 
-enum class PracticeMode(val title: String) { Review("Review"), Listening("Listening"), Speaking("Speaking"), Mixed("Speed mix") }
+enum class PracticeMode(val title: String) { Review("Review"), Listening("Listening"), Speaking("Speaking"), Mixed("Speed mix"), Weak("Weak words") }
+
+/** Word library filter by how the learner is doing with each word. */
+enum class WordStatus(val label: String) { All("all"), Learned("learned"), Weak("⚡ weak"), Due("due"), Mastered("👑 mastered"), New("not yet") }
 
 @Composable
 fun PracticeScreen() {
@@ -59,14 +63,26 @@ fun PracticeScreen() {
     val nav = LocalNav.current
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableIntStateOf(0) }
+    var status by remember { mutableStateOf(WordStatus.All) }
     var detail by remember { mutableStateOf<CoreWord?>(null) }
     val learned = app.learnedWords
     val due = app.dueWords.size
 
-    val shown = remember(search, filter, app.settings.swears, Words.all.size) {
+    val weak = app.weakWords(12)
+    val shown = remember(search, filter, status, app.settings.swears, Words.all.size, app.cards.toMap()) {
         val q = search.trim().lowercase()
+        val weakIds = if (status == WordStatus.Weak) app.weakWords(200).map { it.id }.toSet() else emptySet()
         Words.visible(app.settings.swears).filter { w ->
-            (filter == 0 || w.lvl == filter) &&
+            val c = app.cards[w.id]
+            val statusOk = when (status) {
+                WordStatus.All -> true
+                WordStatus.Learned -> c != null
+                WordStatus.Weak -> w.id in weakIds
+                WordStatus.Due -> c != null && c.dueDay <= app.todayNumber
+                WordStatus.Mastered -> c?.mastered == true
+                WordStatus.New -> c == null
+            }
+            statusOk && (filter == 0 || w.lvl == filter) &&
                 (q.isEmpty() || w.hanzi.contains(q) || w.meaning.lowercase().contains(q) || uniffi.meitian_core.toneless(w.pinyin).contains(uniffi.meitian_core.toneless(q)))
         }
     }
@@ -90,6 +106,17 @@ fun PracticeScreen() {
                     Text("sentences", style = street(24.sp), color = Street.c.text)
                     Text(if (count > 0) "Build, fill and translate real sentences at your level." else "Downloading sentence lessons… needs internet once.",
                         fontSize = 13.sp, color = Street.c.secondary)
+                }
+                Text("›", style = street(28.sp), color = Street.c.secondary)
+            }
+        }
+        if (weak.size >= 4) item {
+            Row(Modifier.fillMaxWidth().card().clickable { nav.show { PracticeSession(PracticeMode.Weak) { nav.close() } } }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("⚡", fontSize = 36.sp); HSpacer(12.dp)
+                Column(Modifier.weight(1f)) {
+                    Text("weak words", style = street(24.sp), color = Street.c.text)
+                    Text(weak.take(5).joinToString(" · ") { it.hanzi } + " — the ones you miss most", fontSize = 13.sp, color = Street.c.secondary, maxLines = 1)
                 }
                 Text("›", style = street(28.sp), color = Street.c.secondary)
             }
@@ -132,6 +159,17 @@ fun PracticeScreen() {
                     }
                 }
             }
+            Gap(6.dp)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                WordStatus.entries.forEach { s ->
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(if (status == s) Street.c.ink else Street.c.card).clickable { status = s }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Text(s.label, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (status == s) Street.c.paper else Street.c.text)
+                    }
+                }
+            }
+            Gap(4.dp)
+            Text("${shown.size} words", fontSize = 12.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
         }
         items(shown, key = { it.id }) { w ->
             Row(Modifier.fillMaxWidth().streetCard(Street.c.card, Street.c.ink, shadow = 3.dp).clickable { detail = w }.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -142,6 +180,15 @@ fun PracticeScreen() {
                     Text(w.meaning, fontSize = 13.sp, color = Street.c.secondary, maxLines = 1)
                 }
                 val c = app.cards[w.id]
+                if (c != null) Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        (1..6).forEach { b ->
+                            Box(Modifier.size(width = 5.dp, height = 10.dp).clip(RoundedCornerShape(50))
+                                .background(if (b <= c.box) Street.c.jade else Street.c.secondary.copy(alpha = 0.2f)))
+                        }
+                    }
+                    Text("✓${c.correct} ✗${c.wrong}", fontSize = 11.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
+                }
                 Text(if (c == null) "·" else if (c.mastered) "👑" else "✅")
             }
         }
@@ -186,6 +233,7 @@ fun PracticeSession(mode: PracticeMode, close: () -> Unit) {
             PracticeMode.Listening -> learned.shuffled().take(10).map { Question.make(it, Kind.Listen, learned) }
             PracticeMode.Speaking -> learned.shuffled().take(8).map { Question.make(it, Kind.Speak, learned) }
             PracticeMode.Mixed -> learned.shuffled().take(10).map { Question.make(it, kinds.random(), learned) }
+            PracticeMode.Weak -> app.weakWords(12).mapIndexed { i, w -> Question.make(w, kinds[i % kinds.size], learned) }
         }
     }
     var score by remember { mutableStateOf<Int?>(null) }
@@ -198,7 +246,7 @@ fun PracticeSession(mode: PracticeMode, close: () -> Unit) {
             val s = score
             if (questions.isEmpty()) Text("Nothing to practice yet. Learn some words first!", color = Street.c.secondary)
             else if (s == null) QuizRunner(questions, onAnswer = { q, right ->
-                if (mode == PracticeMode.Review) app.grade(q.word, right) else if (right) app.addXP(2)
+                if (mode == PracticeMode.Review || mode == PracticeMode.Weak) app.grade(q.word, right) else if (right) app.addXP(2)
             }, onDone = {
                 score = it; confetti++
                 if (mode == PracticeMode.Listening || mode == PracticeMode.Speaking) app.count(com.asbestboi.meitian.data.AppState.Counter.ListenSpeak)

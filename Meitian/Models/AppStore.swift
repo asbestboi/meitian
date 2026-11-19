@@ -348,6 +348,13 @@ final class AppStore {
             .filter { !$0.isSwear || Prefs.swearsOn }
     }
 
+    /// The words the learner gets wrong most (weakest first).
+    func weakWords(limit: Int = 15) -> [Word] {
+        let stats = cards.map { CardStat(id: $0.key, boxLevel: UInt8(clamping: $0.value.box),
+                                         correct: UInt32(clamping: $0.value.correct), wrong: UInt32(clamping: $0.value.wrong)) }
+        return weakWordIds(stats: stats, limit: UInt32(limit)).compactMap(WordBank.word).filter { !$0.isSwear || Prefs.swearsOn }
+    }
+
     var learnedWords: [Word] {
         WordBank.visible(swears: Prefs.swearsOn).filter { cards[$0.id] != nil }
     }
