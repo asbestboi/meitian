@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StatsView: View {
     @Environment(AppStore.self) private var store
+    @Environment(ArenaStore.self) private var arena
     @State private var retake = false
     @State private var confirmReset = false
     @State private var reminderTime = Date.now
@@ -226,9 +227,10 @@ struct StatsView: View {
                 Button("Reset all progress", role: .destructive) {
                     Reminders.cancel()
                     store.resetAll()
+                    arena.reset()
                 }
             } message: {
-                Text("Your words, streak, XP and challenges will be deleted. This can't be undone.")
+                Text("Your words, streak, XP, challenges, coins and cosmetics will be deleted. This can't be undone.")
             }
         }
         .font(.rounded(.body))

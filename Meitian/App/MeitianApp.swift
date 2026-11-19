@@ -3,15 +3,17 @@ import SwiftUI
 @main
 struct MeitianApp: App {
     @State private var store = AppStore()
+    @State private var arena = ArenaStore()
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(store)
+                .environment(arena)
                 .onChange(of: phase) { _, p in
                     if p == .active { store.refreshDay() }
-                    if p == .background { store.save() }
+                    if p == .background { store.save(); arena.save() }
                 }
         }
     }
@@ -47,9 +49,12 @@ struct MainTabs: View {
             PracticeView()
                 .tabItem { Label("Practice", systemImage: "rectangle.stack.fill") }
                 .tag(2)
+            ArenaView()
+                .tabItem { Label("Arena", systemImage: "flag.2.crossed.fill") }
+                .tag(3)
             StatsView()
                 .tabItem { Label("Progress", systemImage: "chart.bar.fill") }
-                .tag(3)
+                .tag(4)
         }
         .sensoryFeedback(.selection, trigger: tab)
     }

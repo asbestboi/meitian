@@ -6,6 +6,7 @@ A playful iPhone app for learning a little Chinese every day.
 - **New words daily.** Pick 3, 5 or 8 words a day. Swipe through flip cards (right = got it, left = again), hear native pronunciation, then take a quick quiz.
 - **Friend challenge.** Every day you get a mission to use one of today's words in a real sentence, with a **Chinese friend** (ask, sneak it in, voice message…) or a **non‑Chinese friend** (teach them, charades, secret code…). Tick off the steps, rate how it went, add a note, and get +50 XP.
 - **Pinyin everywhere for beginners.** Pinyin sits right above each character (ruby style), colored by tone (1 red, 2 orange, 3 green, 4 blue). Switch it off in Progress when you want to test your reading; the placement quiz never shows it.
+- **Arena: battle friends offline.** Scan each other's QR code and the phones link directly over Bluetooth / peer‑to‑peer Wi‑Fi (MultipeerConnectivity), so no server or internet is needed. ⚔️ **Duel**: same question for both, first right answer hits (faster = harder), knock their HP to 0. ⚡️ **Blitz**: 45‑second race, most correct wins. 📱 **Same‑phone duel**: split screen on one phone. Wins earn 🪙 coins for the shop (avatars, card frames, titles, hit effects), and you get battle stats plus head‑to‑head records per rival.
 - **Spaced repetition** reviews, listening drills and a speed mix.
 - **Streaks, XP, levels** and an activity calendar. Daily reminder notifications.
 
