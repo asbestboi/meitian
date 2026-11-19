@@ -21,6 +21,10 @@ xcodebuild \
 grep -q "BUILD SUCCEEDED" build/xcodebuild.log
 
 APP=build/dd/Build/Products/Release-iphoneos/Meitian.app
+# the Rust core must be linked statically: any non-system dylib would crash the app at launch
+if otool -L "$APP/Meitian" | grep -v "^$APP" | grep -vE "/usr/lib/|/System/Library/|@rpath/libswift" | grep -q .; then
+    echo "error: app links a non-system library:"; otool -L "$APP/Meitian"; exit 1
+fi
 rm -rf build/Payload && mkdir -p build/Payload
 cp -R "$APP" build/Payload/
 # ad-hoc signature keeps the binary well-formed; sideloading tools re-sign it

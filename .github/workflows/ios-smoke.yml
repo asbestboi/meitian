@@ -21,7 +21,7 @@ jobs:
           xcodebuild -project Meitian.xcodeproj -scheme Meitian -configuration Release \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
-            LIBRARY_SEARCH_PATHS="$PWD/core/target/aarch64-apple-ios-sim/release" build \
+            build \
             | tee build/sim.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build/sim.log
       - name: Launch and look for crashes

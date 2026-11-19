@@ -23,12 +23,16 @@ HOSTLIB=""
 for f in core/target/release/libmeitian_core.dylib core/target/release/libmeitian_core.so; do
     [ -f "$f" ] && HOSTLIB=$f && break
 done
-rm -rf build/core-swift build/core-include
-mkdir -p build/core-swift build/core-include
+rm -rf build/core-swift build/core-include build/core-lib
+mkdir -p build/core-swift build/core-include build/core-lib
+# Only the static library goes where the app links from. Cargo also builds a .dylib (the cdylib
+# Android needs); if the linker saw it, the app would look for it at a build-machine path and die
+# at launch with "Library not loaded".
+cp "core/target/$TARGET/release/libmeitian_core.a" build/core-lib/
 # library mode reads cargo metadata, so run it from the crate
 ( cd core && target/release/uniffi-bindgen generate --library "../$HOSTLIB" --language swift --no-format --out-dir "../build/core-gen" )
 mv build/core-gen/meitian_core.swift build/core-swift/
 mv build/core-gen/meitian_coreFFI.h build/core-include/
 mv build/core-gen/meitian_coreFFI.modulemap build/core-include/module.modulemap
 rm -rf build/core-gen
-echo "core ready: $(du -h core/target/$TARGET/release/libmeitian_core.a | cut -f1) static lib ($TARGET)"
+echo "core ready: $(du -h build/core-lib/libmeitian_core.a | cut -f1) static lib ($TARGET)"

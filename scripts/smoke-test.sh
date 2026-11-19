@@ -16,6 +16,10 @@ for rt,devs in d.items():
             if x["name"].startswith("iPhone"): print(x["udid"]); sys.exit()')
 echo "device: $DEVICE"
 xcrun simctl boot "$DEVICE"; xcrun simctl bootstatus "$DEVICE" -b >/dev/null
+# a non-system dylib would work here (same machine) but crash on a phone, so fail on it
+if otool -L "$APP/Meitian" | grep -vE "^$APP|/usr/lib/|/System/Library/|@rpath/libswift" | grep -q .; then
+    echo "❌ app links a non-system library:"; otool -L "$APP/Meitian"; exit 1
+fi
 xcrun simctl install "$DEVICE" "$APP"
 
 failed=0
