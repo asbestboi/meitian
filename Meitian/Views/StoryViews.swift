@@ -29,26 +29,40 @@ enum StoryProgress {
     /// Forget everything read and the waiting surprises (reset all progress).
     static func reset() {
         let d = UserDefaults.standard
-        for key in [readKey, legacyKey, pickKey(true), pickKey(false)] { d.removeObject(forKey: key) }
+        for key in [readKey, legacyKey, pickKey(true), pickKey(false), pickKey(true) + "At", pickKey(false) + "At"] {
+            d.removeObject(forKey: key)
+        }
     }
 
-    /// The surprise waiting for this learner: stays the same until it's read (so reopening doesn't reroll),
-    /// then a new random unread one. nil when everything has been read.
-    static func next(chat: Bool, dayKey: String, level: Int) -> Story? {
+    /// The surprise waiting for this learner, picked to fit the lesson they're on (`recent` = the words of
+    /// the current unit). It stays the same until it's read or the learner finishes another lesson (so
+    /// reopening doesn't reroll), then a new unread one is picked. nil when everything has been read.
+    static func next(chat: Bool, dayKey: String, level: Int, learned: [String], recent: [String]) -> Story? {
         let d = UserDefaults.standard
         let readIds = read()
-        if let id = d.string(forKey: pickKey(chat)), !readIds.contains(id), let s = storyById(id: id),
+        let atKey = pickKey(chat) + "At"
+        if let id = d.string(forKey: pickKey(chat)), !readIds.contains(id), d.integer(forKey: atKey) == learned.count,
+           let s = storyById(id: id),
            (s.style == "chat") == chat, s.date.isEmpty || s.date <= dayKey,
            storyFitsLevel(story: s, maxLevel: UInt8(clamping: level)) {
             return s
         }
         guard let s = nextStory(chat: chat, dayKey: dayKey, maxLevel: UInt8(clamping: level), read: readIds,
+                                learned: learned, recent: recent,
                                 seed: UInt64.random(in: 0...UInt64.max)) else {
             d.removeObject(forKey: pickKey(chat))
             return nil
         }
         d.set(s.id, forKey: pickKey(chat))
+        d.set(learned.count, forKey: atKey)
         return s
+    }
+
+    /// Same, for the learner in `store` (current unit's words, everything learned).
+    @MainActor
+    static func next(chat: Bool, store: AppStore, unit: Int? = nil) -> Story? {
+        next(chat: chat, dayKey: store.todayKey, level: store.currentLevel,
+             learned: Array(store.cards.keys), recent: store.unitWordIds(unit))
     }
 }
 
@@ -274,7 +288,7 @@ struct StoryHub: View {
         above = Int(fits.aboveLevel)
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         history = StoryProgress.read().reversed().compactMap { byId[$0] }   // most recent first
-        next = StoryProgress.next(chat: chats, dayKey: store.todayKey, level: store.currentLevel)
+        next = StoryProgress.next(chat: chats, store: store)
     }
 }
 
@@ -340,7 +354,12 @@ struct StoryCard: View {
 /// Plays a story panel by panel: the picture, then the lines one at a time as chat bubbles
 /// (read aloud, tap a word to look it up), then a question.
 struct StoryPlayer: View {
-    let story: Story
+    /// Reply choices are reshuffled every time a story opens (kept in @State so redraws don't reshuffle).
+    @State private var story: Story
+
+    init(story: Story) {
+        _story = State(initialValue: shuffleStoryReplies(story: story, seed: UInt64.random(in: 0...UInt64.max)))
+    }
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL

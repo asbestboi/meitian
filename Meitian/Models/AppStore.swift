@@ -336,6 +336,19 @@ final class AppStore {
         addXP(20)
     }
 
+    /// Word ids of one unit on the current level's path (default: the unit of the last finished lesson),
+    /// so stories can be picked to fit what the learner just studied.
+    func unitWordIds(_ unit: Int? = nil) -> [String] {
+        let size = max(profile.dailyGoal, 1)
+        let perUnit = Int(pathUnitSize())
+        let all = WordBank.words(level: currentLevel)
+        let doneLessons = learnedCount(level: currentLevel) / size
+        let u = unit ?? max(1, (doneLessons + perUnit - 1) / perUnit)
+        let start = (u - 1) * perUnit * size
+        guard start >= 0, start < all.count else { return [] }
+        return all[start..<min(start + perUnit * size, all.count)].map(\.id)
+    }
+
     /// The words of one lesson on the current level's path (for replaying a finished lesson).
     func lessonWords(_ lesson: Int) -> [Word] {
         let size = max(profile.dailyGoal, 1)

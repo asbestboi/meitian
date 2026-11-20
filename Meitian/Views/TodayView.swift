@@ -100,8 +100,8 @@ struct TodayView: View {
     /// Odd units get a picture story, even units an SMS chat.
     private func openStory(unit: Int, done: Bool) {
         let chat = unit % 2 == 0
-        if let s = StoryProgress.next(chat: chat, dayKey: store.todayKey, level: store.currentLevel)
-            ?? StoryProgress.next(chat: !chat, dayKey: store.todayKey, level: store.currentLevel) {
+        if let s = StoryProgress.next(chat: chat, store: store, unit: unit)
+            ?? StoryProgress.next(chat: !chat, store: store, unit: unit) {
             ImagePrefetch.run(s)
             storyUnit = done ? 0 : unit
             storyId = s.id

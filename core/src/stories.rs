@@ -391,27 +391,93 @@ pub fn shelf_stories(day_key: String) -> Vec<Story> {
         .collect()
 }
 
-/// The next unread story (or chat) for a learner, picked at random so it's a surprise. Never repeats a
+/// The next unread story (or chat) for a learner, picked to fit the lesson they're on. Never repeats a
 /// story in `read` and never goes above the learner's HSK level; stories at the learner's own level
-/// come first, then easier ones. `None` when every story they can read has been read.
-/// Daily stories whose day hasn't come yet are skipped.
+/// come first, then easier ones. Within a level, stories are ranked by how many of the
+/// `recent` words (the current unit's lessons) they use and how few words the learner hasn't `learned`
+/// yet; a random one of the best three is picked so it's still a surprise. `None` when every story they
+/// can read has been read. Daily stories whose day hasn't come yet are skipped.
 #[uniffi::export]
 pub fn next_story(
     chat: bool,
     day_key: String,
     max_level: u8,
     read: Vec<String>,
+    learned: Vec<String>,
+    recent: Vec<String>,
     seed: u64,
 ) -> Option<Story> {
     let cap = cap(max_level);
+    let learned: std::collections::HashSet<&str> = learned.iter().map(String::as_str).collect();
+    let recent: std::collections::HashSet<&str> = recent.iter().map(String::as_str).collect();
     let unread: Vec<Story> = shelf_stories(day_key)
         .into_iter()
         .filter(|s| (s.style == "chat") == chat && !read.contains(&s.id) && s.level <= cap)
         .collect();
+    // the learner's own level first, easier ones once those are read
     let top = unread.iter().map(|s| s.level).max()?;
-    let pool: Vec<Story> = unread.into_iter().filter(|s| s.level == top).collect();
+    let mut scored: Vec<(i64, Story)> = unread
+        .into_iter()
+        .filter(|s| s.level == top)
+        .map(|s| (lesson_fit(&s, &learned, &recent), s))
+        .collect();
     let mut rng = fastrand::Rng::with_seed(seed);
+    // shuffle first so equal scores don't always favour the same (alphabetically first) story
+    rng.shuffle(&mut scored);
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    let best = scored[0].0;
+    // the top three, as long as they're close to the best fit
+    let pool: Vec<Story> = scored
+        .into_iter()
+        .take(3)
+        .filter(|(score, _)| best - score <= 4)
+        .map(|(_, s)| s)
+        .collect();
     Some(pool[rng.usize(..pool.len())].clone())
+}
+
+/// How well a story fits where the learner is: words from the current unit count most, words they
+/// know count a little, words they haven't met count against it.
+fn lesson_fit(
+    story: &Story,
+    learned: &std::collections::HashSet<&str>,
+    recent: &std::collections::HashSet<&str>,
+) -> i64 {
+    let ids = story_word_ids(story.clone());
+    let mut score = 0i64;
+    for id in &ids {
+        if recent.contains(id.as_str()) {
+            score += 4;
+        } else if learned.contains(id.as_str()) {
+            score += 1;
+        } else {
+            score -= 2;
+        }
+    }
+    score
+}
+
+/// Mix the order of every reply choice with a fresh seed (call it each time a story opens), so the
+/// fitting reply moves around between reads and is never in the same spot twice in a row.
+#[uniffi::export]
+pub fn shuffle_story_replies(mut story: Story, seed: u64) -> Story {
+    let mut rng = fastrand::Rng::with_seed(seed);
+    let mut last: Option<usize> = None;
+    for p in story.panels.iter_mut() {
+        let n = p.reply.len();
+        if n < 2 {
+            continue;
+        }
+        rng.shuffle(&mut p.reply);
+        if let Some(i) = p.reply.iter().position(|o| o.correct) {
+            if Some(i) == last {
+                let j = (i + 1 + rng.usize(..n - 1)) % n;
+                p.reply.swap(i, j);
+            }
+            last = p.reply.iter().position(|o| o.correct);
+        }
+    }
+    story
 }
 
 /// How many stories (or chats) are available right now, read or not.
@@ -543,21 +609,21 @@ mod daily_tests {
         );
         // next_story: chats only, never something already read, nothing from the future
         assert!(
-            next_story(true, "2026-11-20".into(), 1, vec![], 1).is_none(),
+            next_story(true, "2026-11-20".into(), 1, vec![], vec![], vec![], 1).is_none(),
             "the only chat is HSK 3"
         );
         assert!(
-            next_story(true, "2026-11-20".into(), 2, vec![], 1).is_none(),
+            next_story(true, "2026-11-20".into(), 2, vec![], vec![], vec![], 1).is_none(),
             "HSK 2 can't read HSK 3 either"
         );
         assert_eq!(
-            next_story(true, "2026-11-20".into(), 3, vec![], 1)
+            next_story(true, "2026-11-20".into(), 3, vec![], vec![], vec![], 1)
                 .unwrap()
                 .id,
             "d1"
         );
         assert!(
-            next_story(true, "2026-11-20".into(), 3, vec!["d1".into()], 1).is_none(),
+            next_story(true, "2026-11-20".into(), 3, vec!["d1".into()], vec![], vec![], 1).is_none(),
             "all chats read"
         );
         assert_eq!(
@@ -568,7 +634,7 @@ mod daily_tests {
             }
         );
         assert_eq!(
-            next_story(false, "2026-11-20".into(), 1, vec![], 9)
+            next_story(false, "2026-11-20".into(), 1, vec![], vec![], vec![], 9)
                 .unwrap()
                 .id,
             "a",
@@ -613,15 +679,15 @@ mod level_tests {
         load_stories(json).unwrap();
         let day = "2026-11-19".to_string();
         for seed in 0..50 {
-            let s = next_story(false, day.clone(), 1, vec![], seed).unwrap();
+            let s = next_story(false, day.clone(), 1, vec![], vec![], vec![], seed).unwrap();
             assert_eq!(s.level, 1, "HSK 1 learners only get HSK 1 stories");
             // an HSK 2 learner gets the HSK 2 story first, then HSK 1 ones
             assert_eq!(
-                next_story(false, day.clone(), 2, vec![], seed).unwrap().id,
+                next_story(false, day.clone(), 2, vec![], vec![], vec![], seed).unwrap().id,
                 "h2"
             );
             assert_eq!(
-                next_story(false, day.clone(), 2, vec!["h2".into()], seed)
+                next_story(false, day.clone(), 2, vec!["h2".into()], vec![], vec![], seed)
                     .unwrap()
                     .level,
                 1
@@ -634,11 +700,11 @@ mod level_tests {
             );
         }
         assert!(
-            next_story(false, day.clone(), 1, vec!["h1a".into(), "h1b".into()], 1).is_none(),
+            next_story(false, day.clone(), 1, vec!["h1a".into(), "h1b".into()], vec![], vec![], 1).is_none(),
             "no fallback to HSK 2"
         );
         assert_eq!(
-            next_story(false, day.clone(), 0, vec!["h1a".into()], 1)
+            next_story(false, day.clone(), 0, vec!["h1a".into()], vec![], vec![], 1)
                 .unwrap()
                 .id,
             "h1b",
@@ -689,5 +755,67 @@ mod reply_tests {
             3,
             "the right answer shows up in every slot"
         );
+    }
+}
+
+#[cfg(test)]
+mod lesson_tests {
+    use super::*;
+
+    #[test]
+    fn picks_the_story_with_this_units_words() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let json = r#"{"stories":[
+          {"id":"tea","title":"t","level":1,"panels":[{"lines":[{"zh":"喝茶","t":[["喝","hē"],["茶","chá"]]}]}]},
+          {"id":"cat","title":"c","level":1,"panels":[{"lines":[{"zh":"猫","t":[["猫","māo"]]}]}]},
+          {"id":"dog","title":"d","level":1,"panels":[{"lines":[{"zh":"狗","t":[["狗","gǒu"]]}]}]},
+          {"id":"sun","title":"s","level":1,"panels":[{"lines":[{"zh":"太阳","t":[["太阳","tàiyáng"]]}]}]},
+          {"id":"car","title":"r","level":1,"panels":[{"lines":[{"zh":"车","t":[["车","chē"]]}]}]}]}"#;
+        load_stories(json).unwrap();
+        let tea = story_by_id("tea".into()).unwrap();
+        let ids = story_word_ids(tea);
+        assert!(!ids.is_empty(), "bundled words resolve");
+        for seed in 0..40 {
+            let s = next_story(false, "2026-11-19".into(), 1, vec![], ids.clone(), ids.clone(), seed).unwrap();
+            assert_eq!(s.id, "tea", "the story using this unit's words wins");
+        }
+    }
+
+    #[test]
+    fn replies_move_around() {
+        let opt = |ok: bool| ReplyOption {
+            zh: if ok { "对".into() } else { "错".into() },
+            pinyin: String::new(),
+            en: String::new(),
+            tokens: vec![],
+            correct: ok,
+            reaction: None,
+        };
+        let panel = StoryPanel {
+            image: None,
+            lines: vec![],
+            question: None,
+            reply: vec![opt(true), opt(false), opt(false)],
+        };
+        let story = Story {
+            id: "r".into(),
+            title: String::new(),
+            title_en: String::new(),
+            level: 1,
+            emoji: String::new(),
+            cover: None,
+            panels: vec![panel.clone(), panel.clone(), panel],
+            date: String::new(),
+            style: "chat".into(),
+            me: String::new(),
+        };
+        let mut firsts = std::collections::HashSet::new();
+        for seed in 0..60 {
+            let s = shuffle_story_replies(story.clone(), seed);
+            let pos: Vec<usize> = s.panels.iter().map(|p| p.reply.iter().position(|o| o.correct).unwrap()).collect();
+            assert!(pos.windows(2).all(|w| w[0] != w[1]), "never the same spot twice in a row");
+            firsts.insert(pos[0]);
+        }
+        assert_eq!(firsts.len(), 3, "the first answer can be anywhere");
     }
 }

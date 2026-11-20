@@ -74,8 +74,8 @@ fun LearnScreen(goToPractice: () -> Unit) {
 
     fun openStory(unit: Int, done: Boolean) {
         val chat = unit % 2 == 0
-        val s = StoryProgress.next(ctx, chat, app.todayKey, app.currentLevel)
-            ?: StoryProgress.next(ctx, !chat, app.todayKey, app.currentLevel)
+        val s = StoryProgress.next(ctx, chat, app, unit)
+            ?: StoryProgress.next(ctx, !chat, app, unit)
         when {
             s != null -> {
                 prefetchStory(ctx, s)

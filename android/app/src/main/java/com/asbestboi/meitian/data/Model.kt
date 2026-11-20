@@ -360,6 +360,18 @@ class AppState(private val context: Context) {
     }
 
     /** The words of one lesson on the current level's path (for replaying a finished lesson). */
+    /** Word ids of one unit on the current path (default: the unit of the last finished lesson), to pick fitting stories. */
+    fun unitWordIds(unit: Int? = null): List<String> {
+        val size = profile.dailyGoal.coerceAtLeast(1)
+        val perUnit = uniffi.meitian_core.pathUnitSize().toInt()
+        val all = Words.level(currentLevel)
+        val doneLessons = learnedCount(currentLevel) / size
+        val u = unit ?: maxOf(1, (doneLessons + perUnit - 1) / perUnit)
+        val start = (u - 1) * perUnit * size
+        if (start < 0 || start >= all.size) return emptyList()
+        return all.subList(start, minOf(start + perUnit * size, all.size)).map { it.id }
+    }
+
     fun lessonWords(lesson: Int): List<CoreWord> {
         val size = profile.dailyGoal.coerceAtLeast(1)
         val all = Words.level(currentLevel)

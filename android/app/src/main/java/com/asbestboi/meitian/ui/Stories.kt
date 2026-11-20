@@ -70,6 +70,8 @@ import uniffi.meitian_core.StoryImage
 import uniffi.meitian_core.StoryLine
 import uniffi.meitian_core.StoryQuestion
 import uniffi.meitian_core.nextStory
+import uniffi.meitian_core.shuffleStoryReplies
+import com.asbestboi.meitian.data.AppState
 import uniffi.meitian_core.shelfStories
 import uniffi.meitian_core.storyAvailability
 import uniffi.meitian_core.storyById
@@ -104,19 +106,27 @@ object StoryProgress {
     /** Forget everything read and the waiting surprises (reset all progress). */
     fun reset(c: Context) = prefs(c).edit().clear().apply()
 
-    /** The surprise waiting for this learner: stays the same until read, then a new random unread one. */
-    fun next(c: Context, chat: Boolean, dayKey: String, level: Int): Story? {
+    /**
+     * The surprise waiting for this learner, picked to fit the lesson they're on (`recent` = the current unit's
+     * words). It stays the same until it's read or another lesson is finished, then a new unread one is picked.
+     */
+    fun next(c: Context, chat: Boolean, dayKey: String, level: Int, learned: List<String>, recent: List<String>): Story? {
         val key = if (chat) "nextChat" else "nextStory"
         val readIds = read(c)
-        prefs(c).getString(key, null)?.let { id ->
+        val p = prefs(c)
+        p.getString(key, null)?.let { id ->
             val s = storyById(id)
-            if (s != null && id !in readIds && (s.style == "chat") == chat && (s.date.isEmpty() || s.date <= dayKey) &&
-                storyFitsLevel(s, level.coerceIn(0, 255).toUByte())) return s
+            if (s != null && id !in readIds && p.getInt(key + "At", -1) == learned.size && (s.style == "chat") == chat &&
+                (s.date.isEmpty() || s.date <= dayKey) && storyFitsLevel(s, level.coerceIn(0, 255).toUByte())) return s
         }
-        val s = nextStory(chat, dayKey, level.coerceIn(0, 255).toUByte(), readIds, kotlin.random.Random.nextLong().toULong())
-        prefs(c).edit().apply { if (s == null) remove(key) else putString(key, s.id) }.apply()
+        val s = nextStory(chat, dayKey, level.coerceIn(0, 255).toUByte(), readIds, learned, recent, kotlin.random.Random.nextLong().toULong())
+        p.edit().apply { if (s == null) remove(key) else putString(key, s.id).putInt(key + "At", learned.size) }.apply()
         return s
     }
+
+    /** Same, for the learner in [app]. */
+    fun next(c: Context, chat: Boolean, app: AppState, unit: Int? = null): Story? =
+        next(c, chat, app.todayKey, app.currentLevel, app.cards.keys.toList(), app.unitWordIds(unit))
 }
 
 /** Story picture. Panels show the whole image (fit) over a blurred filled copy; cards fill and crop. */
@@ -210,7 +220,7 @@ fun StoryHub(chats: Boolean = false) {
     val cap = app.currentLevel.coerceAtLeast(1)
     val fits = remember(key, chats) { storyAvailability(chats, app.todayKey, app.currentLevel.coerceIn(0, 255).toUByte()) }
     val history = remember(key, chats) { val byId = all.associateBy { it.id }; StoryProgress.read(ctx).reversed().mapNotNull { byId[it] } }
-    val next = remember(key, chats) { StoryProgress.next(ctx, chats, app.todayKey, app.currentLevel) }
+    val next = remember(key, chats) { StoryProgress.next(ctx, chats, app) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (chats) "chats 💬" else "stories ✦", style = street(22.sp), color = Street.c.text, modifier = Modifier.weight(1f))
@@ -269,7 +279,9 @@ fun StoryOfTheDayCard() {
 
 /** Plays a story: picture, lines one at a time as bubbles (read aloud, tap words), then a question. */
 @Composable
-fun StoryPlayer(story: Story, close: () -> Unit) {
+fun StoryPlayer(original: Story, close: () -> Unit) {
+    // reply choices are reshuffled every time a story opens (remembered, so recomposition doesn't reshuffle)
+    val story = remember(original.id) { shuffleStoryReplies(original, kotlin.random.Random.nextLong().toULong()) }
     val app = LocalApp.current
     val ctx = LocalContext.current
     var panel by remember { mutableIntStateOf(0) }
