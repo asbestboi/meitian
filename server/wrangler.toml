@@ -1,0 +1,24 @@
+name = "meitian"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "meitian"
+# filled in by `wrangler d1 create meitian` on first deploy
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[durable_objects]
+bindings = [
+  { name = "MATCHMAKER", class_name = "Matchmaker" },
+  { name = "ROOMS", class_name = "Room" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Matchmaker", "Room"]
+
+[triggers]
+crons = ["0 0 * * MON"]
