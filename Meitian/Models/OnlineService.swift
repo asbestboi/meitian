@@ -10,7 +10,7 @@ import UIKit
 @Observable
 final class OnlineService {
     static let shared = OnlineService()
-    nonisolated static let defaultURL = "https://meitian.asbestboi.workers.dev"
+    nonisolated static let defaultURL = "https://meitian.meitian-server.workers.dev"
     nonisolated static let urlKey = "onlineURL"
 
     private(set) var profile: OnlineProfile?

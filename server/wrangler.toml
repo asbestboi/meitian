@@ -1,13 +1,14 @@
 name = "meitian"
 main = "src/index.ts"
+# the separate Měitiān Cloudflare account (never the Gonovu one)
+account_id = "a24553bac956ebe2fcfd66885bf83196"
 compatibility_date = "2026-11-01"
 compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "meitian"
-# filled in by `wrangler d1 create meitian` on first deploy
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "956b2759-fab4-4f20-ada6-7bb763331107"
 migrations_dir = "migrations"
 
 [durable_objects]

@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit
  * storage and doubles as the recovery code for moving to a new phone.
  */
 object Online {
-    const val DEFAULT_URL = "https://meitian.asbestboi.workers.dev"
+    const val DEFAULT_URL = "https://meitian.meitian-server.workers.dev"
 
     var profile by mutableStateOf<OnlineProfile?>(null); private set
     var inbox by mutableStateOf<OnlineInbox?>(null); private set
