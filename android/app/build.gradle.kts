@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "1.11.0"
+        versionName = "1.12.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
@@ -54,4 +54,5 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // story illustrations (cached on disk)
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

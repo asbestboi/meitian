@@ -60,7 +60,14 @@ final class DuelMatch {
         connection.onMessage = { [weak self] msg in self?.handle(msg) }
         connection.onDropped = { [weak self] in self?.dropped() }
         connection.onReconnected = { [weak self] in self?.reconnected() }
+        connection.onForfeit = { [weak self] in
+            guard let self, self.winner == nil, self.opponent != nil else { return }
+            self.finish(winner: self.me.id)   // they left mid-game and didn't come back
+        }
     }
+
+    /// Online games start by themselves in the mode picked before matching.
+    @ObservationIgnored var autoMode: DuelMode?
 
     // MARK: connection drops
 
@@ -148,6 +155,7 @@ final class DuelMatch {
     }
 
     private func begin(mode: DuelMode, wire: [WireQuestion]) {
+        connection.rating = nil
         self.mode = mode
         self.wire = wire
         questions = wire.compactMap(\.question)
@@ -329,6 +337,7 @@ final class DuelMatch {
         let bonus = mode.isRounds ? hp(of: me.id) / 5 : myScore
         coinsEarned = onFinish?(outcome, bonus, damageDealt, fastestMs) ?? 0
         if outcome == .loss { SFX.shared.play(.lose) }
+        if connection.onlineActive { connection.reportOnline(won: outcome == .draw ? nil : outcome == .win) }
     }
 
     func backToLobby(notify: Bool = true) {
@@ -352,6 +361,10 @@ final class DuelMatch {
             opponent = card
             connection.setPartner(card.id)
             if first { sayHello() } // make sure they have mine too
+            if let m = autoMode, isHost, phase == .lobby {
+                autoMode = nil
+                hostStart(mode: m)
+            }
         case .start(let mode, let wire):
             begin(mode: mode, wire: wire)
         case .round(let i):

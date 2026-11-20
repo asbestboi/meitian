@@ -391,7 +391,7 @@ private struct ReconnectOverlay: View {
 }
 
 /// Everything after the phones are connected.
-private struct MatchScreen: View {
+struct MatchScreen: View {
     @Environment(ArenaStore.self) private var arena
     let match: DuelMatch
     @Binding var confetti: Int

@@ -87,11 +87,20 @@ fun ArenaScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ScreenTitle("Arena")
         PlayerCardView(app.myCard(), coins = a.coins)
+        Row(Modifier.fillMaxWidth().block(Street.sky()).clickable { nav.show { OnlineHub { nav.close() } } }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("🌍", fontSize = 34.sp); HSpacer(14.dp)
+            Column(Modifier.weight(1f)) {
+                Text("play online", style = street(26.sp), color = Color.White)
+                Text("Quick match anyone, battle friends anywhere, climb the leaderboards. iPhone + Android.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+            }
+            val waiting = (com.asbestboi.meitian.data.Online.inbox?.challenges?.size ?: 0) + (com.asbestboi.meitian.data.Online.inbox?.requests?.toInt() ?: 0)
+            if (waiting > 0) Pill("$waiting new", Color.White)
+        }
         Row(Modifier.fillMaxWidth().block(Street.warm()).clickable { nav.show { OnlineBattle { nav.close() } } }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("📷", fontSize = 34.sp); HSpacer(14.dp)
             Column(Modifier.weight(1f)) {
-                Text("battle a friend", style = street(26.sp), color = Color.White)
-                Text("Scan each other's QR code. Works offline, no internet needed. (Android ↔ Android)", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                Text("battle nearby", style = street(26.sp), color = Color.White)
+                Text("Scan each other's QR code. No internet needed: Bluetooth, the same Wi‑Fi or a hotspot.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -425,7 +434,7 @@ private fun Scanner(onCancel: () -> Unit, onCode: (String) -> Unit) {
 }
 
 @Composable
-private fun MatchScreen(m: Match, close: () -> Unit, celebrate: () -> Unit) {
+internal fun MatchScreen(m: Match, close: () -> Unit, celebrate: () -> Unit) {
     val opp = m.opponent ?: return
     val app = LocalApp.current
     val shake = remember { Shake() }

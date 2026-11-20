@@ -61,6 +61,7 @@ struct ArenaView: View {
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
     @State private var online = false
+    @State private var internet = false
     @State private var local = false
     @State private var shop = false
 
@@ -74,13 +75,33 @@ struct ArenaView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     PlayerCardView(card: myCard, coins: arena.coins)
 
+                    Button { internet = true } label: {
+                        HStack(spacing: 16) {
+                            Image(systemName: "globe.asia.australia.fill")
+                                .font(.system(size: 34, weight: .semibold))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Play online").font(.rounded(.title3, weight: .heavy))
+                                Text("Quick match anyone, battle friends anywhere, climb the leaderboards. iPhone + Android.")
+                                    .font(.rounded(.subheadline)).opacity(0.9)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                            let waiting = (OnlineService.shared.inbox?.challenges.count ?? 0) + Int(OnlineService.shared.inbox?.requests ?? 0)
+                            if waiting > 0 { Pill(text: "\(waiting) new", color: .white) }
+                            Image(systemName: "chevron.right").font(.headline)
+                        }
+                        .foregroundStyle(.white)
+                        .streetBlock(Theme.skyGradient)
+                    }
+                    .buttonStyle(PressableStyle())
+
                     Button { online = true } label: {
                         HStack(spacing: 16) {
                             Image(systemName: "qrcode.viewfinder")
                                 .font(.system(size: 34, weight: .semibold))
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Battle a friend").font(.rounded(.title3, weight: .heavy))
-                                Text("Scan each other's QR code. Works offline, no internet needed.")
+                                Text("Battle nearby").font(.rounded(.title3, weight: .heavy))
+                                Text("Scan each other's QR code. No internet needed: Bluetooth, the same Wi‑Fi or a hotspot.")
                                     .font(.rounded(.subheadline)).opacity(0.9)
                                     .multilineTextAlignment(.leading)
                             }
@@ -110,6 +131,9 @@ struct ArenaView: View {
         }
         .fullScreenCover(isPresented: $online) {
             OnlineDuelView().environment(store).environment(arena)
+        }
+        .fullScreenCover(isPresented: $internet) {
+            OnlineHub().environment(store).environment(arena)
         }
         .fullScreenCover(isPresented: $local) {
             LocalDuelView().environment(store).environment(arena)

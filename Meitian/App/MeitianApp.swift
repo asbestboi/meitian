@@ -32,6 +32,10 @@ struct MeitianApp: App {
                     if p == .active {
                         store.refreshDay()
                         Task { await content.refreshIfStale(level: store.profile.confirmedLevel + 1) }
+                        Task {
+                            await OnlineService.shared.sync(store: store, arena: arena)
+                            await OnlineService.shared.refreshInbox()
+                        }
                     }
                     if p == .background { store.save(); arena.save() }
                 }

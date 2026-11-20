@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.data.AppState
 import com.asbestboi.meitian.data.ContentSync
+import com.asbestboi.meitian.data.Online
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import com.asbestboi.meitian.data.Sfx
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
             app.refreshDay()
             val level = app.profile.confirmedLevel + 1
             lifecycleScope.launch { ContentSync.refreshIfStale(applicationContext, level) }
+            lifecycleScope.launch { Online.init(applicationContext); Online.sync(app); Online.refreshInbox() }
         }
     }
 

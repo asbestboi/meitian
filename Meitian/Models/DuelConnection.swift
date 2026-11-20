@@ -52,6 +52,13 @@ struct MatchSnapshot: Codable {
     var winner: String?
 }
 
+/// The server's verdict on an online game.
+struct OnlineRating: Equatable {
+    var counted: Bool
+    var rating: Int
+    var delta: Int
+}
+
 /// QR payload (built and parsed by the Rust core so Android reads it too):
 /// "meitian-duel:<player id>?os=ios&lan=<addresses>&port=<port>"
 enum DuelQR {
@@ -228,6 +235,11 @@ final class DuelConnection: NSObject {
     }
 
     func stop() {
+        if onlineActive {
+            onlineStopped = true
+            socket?.cancel(with: .normalClosure, reason: nil)
+            socket = nil
+        }
         retryTimer?.invalidate(); retryTimer = nil
         pingTimer?.invalidate(); pingTimer = nil
         stopDiscovery()
@@ -265,7 +277,119 @@ final class DuelConnection: NSObject {
         lan.join(addrs: info.addrs, port: info.port, playerId: info.playerId)
     }
 
+    // MARK: online (over the internet, through a server room)
+
+    /// True once this connection plays through an online room instead of Multipeer / Wi‑Fi.
+    private(set) var onlineActive = false
+    /// In the room, waiting for the other player to arrive.
+    private(set) var peerWaiting = false
+    /// The room is gone (challenge declined or expired, or signed out).
+    private(set) var onlineGone = false
+    /// This game's rating result from the server.
+    var rating: OnlineRating?
+    @ObservationIgnored var onForfeit: (() -> Void)?
+    @ObservationIgnored private var room: String?
+    @ObservationIgnored private var socket: URLSessionWebSocketTask?
+    @ObservationIgnored private var attempt = 0
+    @ObservationIgnored private var onlineStopped = false
+
+    /// Join a server room (quick match or friend challenge). Reconnects by itself when the network drops.
+    func connectOnline(room: String) {
+        onlineActive = true
+        self.room = room
+        state = .connecting("online")
+        peerWaiting = true
+        openRoom()
+        pingTimer?.invalidate()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            self?.socket?.sendPing { _ in }
+        }
+    }
+
+    private func openRoom() {
+        guard let room, !onlineStopped else { return }
+        let task = OnlineService.socket(path: "/v1/rooms/\(room)")
+        socket = task
+        receive(task)
+        task.resume()
+    }
+
+    private func receive(_ task: URLSessionWebSocketTask) {
+        task.receive { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, task === self.socket else { return }
+                switch result {
+                case .success(.string(let text)):
+                    self.handleOnline(onlineEvent(json: text))
+                    self.receive(task)
+                case .success:
+                    self.receive(task)
+                case .failure:
+                    self.roomClosed(task)
+                }
+            }
+        }
+    }
+
+    private func handleOnline(_ e: OnlineEvent) {
+        switch e {
+        case .joined(_, let peer):
+            attempt = 0
+            if peer { peerConnected() } else { peerWaiting = true; peerDropped() }
+        case .peer(let up):
+            if up { peerConnected() } else { peerWaiting = true; peerDropped() }
+        case .battle(let json):
+            guard let msg = CanonicalWire.decode(json) else { return }
+            if case .ping = msg { return }
+            onMessage?(msg)
+        case .rating(let counted, let rating, let delta):
+            self.rating = OnlineRating(counted: counted, rating: Int(rating), delta: Int(delta))
+        case .forfeit:
+            onForfeit?()
+        default:
+            break
+        }
+    }
+
+    private func peerConnected() {
+        let wasReconnecting = state == .reconnecting
+        peerWaiting = false
+        reconnectingSince = nil
+        state = .connected
+        if wasReconnecting { onReconnected?() }
+    }
+
+    private func peerDropped() {
+        guard state == .connected else { return }
+        onDropped?()
+        state = .reconnecting
+        reconnectingSince = .now
+    }
+
+    private func roomClosed(_ task: URLSessionWebSocketTask) {
+        socket = nil
+        guard !onlineStopped, task.closeCode.rawValue != 4000 else { return } // left, or replaced by a newer connection
+        if let http = task.response as? HTTPURLResponse, (400..<500).contains(http.statusCode) {
+            onlineGone = true
+            state = .idle
+            return
+        }
+        peerDropped()
+        let wait = min(8.0, 0.5 * pow(2.0, Double(min(attempt, 4))))
+        attempt += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.openRoom() }
+    }
+
+    /// After a game: tell the server how it ended for this phone (both phones must agree for ratings).
+    func reportOnline(won: Bool?) {
+        socket?.send(.string(onlineReport(won: won))) { _ in }
+    }
+
     func send(_ message: DuelMessage) {
+        if onlineActive {
+            if let json = CanonicalWire.encode(message) { socket?.send(.string(json)) { _ in } }
+            return
+        }
         if lanActive {
             if let json = CanonicalWire.encode(message) { lan?.send(json: json) }
             return
@@ -283,7 +407,7 @@ final class DuelConnection: NSObject {
 
     /// Call when the app comes back to the foreground: the radio may have been suspended.
     func wake() {
-        guard !lanActive, partnerId != nil, state != .connected else { return } // the LAN link reconnects by itself
+        guard !lanActive, !onlineActive, partnerId != nil, state != .connected else { return } // the LAN link reconnects by itself
         dropped()
     }
 

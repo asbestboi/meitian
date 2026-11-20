@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.meitian_core.DuelQrInfo
+import uniffi.meitian_core.OnlineEvent
 import uniffi.meitian_core.LanLink
 import uniffi.meitian_core.LanListener
 import uniffi.meitian_core.LanState
@@ -226,13 +227,80 @@ class BattleLink(context: Context, private val myId: String) {
         }
     }
 
+    // ----- online (over the internet, through a server room) -----
+
+    /** True once this link plays through an online room instead of Nearby / Wi‑Fi. */
+    var onlineActive = false
+        private set
+    /** In the room, waiting for the other player to arrive. */
+    var peerWaiting by mutableStateOf(false)
+    /** This game's rating result from the server (null until it arrives). */
+    var rating by mutableStateOf<OnlineEvent.Rating?>(null)
+    var onForfeit: () -> Unit = {}
+    private var room: String? = null
+    private var socket: okhttp3.WebSocket? = null
+    private var attempt = 0
+    private var stopped = false
+
+    /** Join a server room (quick match or friend challenge). Reconnects by itself when the network drops. */
+    fun connectOnline(roomId: String) {
+        onlineActive = true
+        room = roomId
+        state = State.Connecting
+        peerWaiting = true
+        openRoom()
+    }
+
+    private fun openRoom() {
+        val r = room ?: return
+        if (stopped) return
+        socket = Online.socket("/v1/rooms/$r", { e -> scope.launch { onlineEvent(e) } }) { code -> scope.launch { roomClosed(code) } }
+    }
+
+    private fun onlineEvent(e: OnlineEvent) {
+        when (e) {
+            is OnlineEvent.Joined -> { attempt = 0; if (e.peer) peerConnected() else { peerWaiting = true; peerDropped() } }
+            is OnlineEvent.Peer -> if (e.up) peerConnected() else { peerWaiting = true; peerDropped() }
+            is OnlineEvent.Battle -> runCatching { JSONObject(e.json) }.getOrNull()?.let { if (it.optString("t") != "ping") onMessage(it) }
+            is OnlineEvent.Rating -> rating = e
+            is OnlineEvent.Forfeit -> onForfeit()
+            else -> {}
+        }
+    }
+
+    private fun peerConnected() {
+        val wasReconnecting = state == State.Reconnecting
+        peerWaiting = false
+        state = State.Connected
+        if (wasReconnecting) onReconnected()
+    }
+
+    private fun peerDropped() {
+        if (state == State.Connected) { onDropped(); state = State.Reconnecting }
+    }
+
+    private fun roomClosed(code: Int) {
+        socket = null
+        if (stopped || code == 4000) return          // left, or replaced by a newer connection
+        if (code in 4400..4499) { lanUnreachable = true; state = State.Idle; return } // room gone, declined or signed out
+        peerDropped()
+        val wait = minOf(8_000L, 500L shl minOf(attempt++, 4))
+        scope.launch { delay(wait); openRoom() }
+    }
+
+    /** After a game: tell the server how it ended for this phone (both phones must agree for ratings). */
+    fun reportOnline(won: Boolean?) { socket?.send(uniffi.meitian_core.onlineReport(won)) }
+
     fun send(o: JSONObject) {
+        if (onlineActive) { socket?.send(o.toString()); return }
         if (lanActive) { lan?.send(o.toString()); return }
         val ep = endpoint ?: return
         client.sendPayload(ep, Payload.fromBytes(o.toString().toByteArray()))
     }
 
     fun stop() {
+        stopped = true
+        socket?.close(1000, "bye"); socket = null
         lan?.stop(); lan = null; lanActive = false
         ping?.cancel()
         client.stopAllEndpoints(); client.stopAdvertising(); client.stopDiscovery()
@@ -320,7 +388,11 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         link.onMessage = { handle(it) }
         link.onDropped = { if (mode.isRounds && inGame) token++ }
         link.onReconnected = { reconnected() }
+        link.onForfeit = { if (!finished && opponent != null) finish(me.id) }
     }
+
+    /** Online games start by themselves in the mode that was picked before matching. */
+    var autoMode: Mode? = null
 
     private val inGame get() = phase == Phase.Countdown || phase == Phase.Playing || phase == Phase.RoundResult
 
@@ -339,6 +411,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
     }
 
     private fun begin(m: Mode, list: List<WireQ>) {
+        link.rating = null
         mode = m; wire = list; questions = list.mapNotNull { it.question() }; index = 0
         hp.clear(); hp[me.id] = 100; opponent?.let { hp[it.id] = 100 }
         lives = m.lives
@@ -461,6 +534,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
         val bonus = if (mode.isRounds) hpOf(me.id) / 5 else myScore
         coins = opponent?.let { onFinish(outcome, it, bonus, fastest) } ?: 0
         if (outcome == Outcome.LOSS) Sfx.play(Sfx.Sound.Lose)
+        if (link.onlineActive) link.reportOnline(when (outcome) { Outcome.WIN -> true; Outcome.LOSS -> false; else -> null })
     }
 
     fun backToLobby(notify: Boolean = true) {
@@ -494,6 +568,7 @@ class Match(val link: BattleLink, val me: PlayerCard, private val onFinish: (Out
                 opponent = card
                 if (!canMatch(me.swearsOn, card.swearsOn)) incompatible = true else link.setPartner(card.id)
                 if (first) hello()
+                autoMode?.let { m -> if (isHost && !incompatible && phase == Phase.Lobby) { autoMode = null; hostStart(m) } }
             }
             "start" -> begin(Mode.of(o.getString("mode")), o.getJSONArray("q").let { a -> (0 until a.length()).map { WireQ.from(a.getJSONObject(it)) } })
             "round" -> if (!isHost) showRound(o.getInt("i"))
