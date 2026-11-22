@@ -16,14 +16,13 @@ struct PlayerCardView<Picture: View>: View {
                         .frame(width: compact ? 120 : 170, height: compact ? 120 : 170)
                 }
             VStack(alignment: .leading, spacing: 3) {
-                Text(card.name)
-                    .font(.rounded(compact ? .headline : .title2, weight: .bold))
-                    .lineLimit(1)
-                if let t = card.titleItem {
-                    Text("\(t.symbol) · \(t.name)")
-                        .font(.rounded(compact ? .caption : .subheadline, weight: .semibold))
-                        .opacity(0.9)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(card.name).font(.rounded(compact ? .headline : .title2, weight: .heavy)).titled(card.title)
+                    if let t = card.titleItem {
+                        Text("\(t.symbol) · \(t.name)").font(.rounded(compact ? .caption : .subheadline, weight: .bold)).titled(card.title)
+                    }
                 }
+                .namePlate()
                 HStack(spacing: 10) {
                     Label("HSK \(card.level)", systemImage: "graduationcap.fill")
                     Label("\(card.wins)W \(card.losses)L", systemImage: "trophy.fill")
@@ -249,7 +248,9 @@ struct ShopView: View {
     @State private var boughtTick = 0
     @State private var deniedTick = 0
     @State private var confetti = 0
-    @State private var demoEffect = "fx.boom"
+    /// What's being looked at (tapping never buys) and what's about to be bought.
+    @State private var looking: Cosmetic?
+    @State private var buying: Cosmetic?
     @State private var demoTick = 0
     @State private var shakeT: CGFloat = 1
     @State private var shakeStrength: CGFloat = 0
@@ -257,9 +258,14 @@ struct ShopView: View {
 
     private var preview: PlayerCard {
         var c = card
-        c.frame = arena.frame; c.title = arena.title; c.effect = arena.effect
-        c.sticker = arena.sticker; c.aura = arena.aura
+        c.frame = shown(.frame); c.title = shown(.title); c.effect = shown(.effect)
+        c.sticker = shown(.sticker); c.aura = shown(.aura)
         return c
+    }
+
+    private func shown(_ kind: CosmeticKind) -> String {
+        if let looking, looking.kind == kind { return looking.id }
+        return arena.equipped(kind)
     }
 
     /// Hit preview stage: tap any hit to see it fly.
@@ -272,7 +278,7 @@ struct ShopView: View {
                 Text("🎯").font(.system(size: 40))
             }
             .padding(.horizontal, 24)
-            HitEffectView(effectId: demoEffect, trigger: demoTick, from: UnitPoint(x: 0.14, y: 0.55),
+            HitEffectView(effectId: shown(.effect), trigger: demoTick, from: UnitPoint(x: 0.14, y: 0.55),
                           to: UnitPoint(x: 0.86, y: 0.5), damage: 22) { strength in
                 shakeStrength = strength
                 shakeT = 0
@@ -281,13 +287,13 @@ struct ShopView: View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
             VStack {
                 Spacer()
-                Text("tap a hit to try it").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                Text("tap a hit to try it, it's free").font(.rounded(.caption, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
                     .padding(.bottom, 8)
             }
         }
         .frame(height: 150)
         .modifier(ImpactShake(amount: shakeT, strength: shakeStrength))
-        .onTapGesture { demoTick += 1 }
+        .onTapGesture { tryHit(shown(.effect)) }
     }
 
     var body: some View {
@@ -335,54 +341,96 @@ struct ShopView: View {
         }
         .haptic(.success, trigger: boughtTick)
         .haptic(.error, trigger: deniedTick)
+        .sheet(item: $buying) { item in
+            confirmation(item)
+                .presentationDetents([.height(330)])
+                .presentationCornerRadius(32)
+        }
+    }
+
+    private func tryHit(_ id: String) {
+        demoTick += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) { SFX.shared.playHit(id) }
+    }
+
+    /// "Buy it?" Nothing is bought without this.
+    private func confirmation(_ item: Cosmetic) -> some View {
+        let after = arena.coins - item.price
+        return VStack(spacing: 12) {
+            itemPreview(item).frame(height: 70)
+            Text("buy \(item.name)?").font(.rounded(.title2, weight: .heavy))
+            Text(after >= 0 ? "🪙 \(item.price) · you'll have \(after) left" : "🪙 \(item.price) · you need \(-after) more coins")
+                .font(.rounded(.subheadline, weight: .bold)).foregroundStyle(after >= 0 ? Color.secondary : Theme.red)
+            BigButton(title: "buy for 🪙 \(item.price)", gradient: Theme.goldGradient, enabled: after >= 0) {
+                buying = nil
+                if arena.buy(item) {
+                    looking = nil
+                    boughtTick += 1
+                    confetti += 1
+                    SFX.shared.play(.purchase)
+                } else {
+                    deniedTick += 1
+                    SFX.shared.play(.wrong)
+                }
+            }
+            Button("not now") { buying = nil }.font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
+        }
+        .padding(24)
     }
 
     private func itemTile(_ item: Cosmetic) -> some View {
         let owned = arena.owned.contains(item.id)
         let equipped = arena.equipped(item.kind) == item.id
         let affordable = arena.coins >= item.price
-        return Button {
-            if item.kind == .effect {
-                demoEffect = item.id
-                demoTick += 1
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) { SFX.shared.playHit(item.id) }
-            }
-            if owned {
-                withAnimation(Theme.bouncy) { arena.equip(item) }
-            } else if arena.buy(item) {
-                boughtTick += 1
-                confetti += 1
-                SFX.shared.play(.purchase)
-            } else {
-                deniedTick += 1
-                SFX.shared.play(.wrong)
-            }
-        } label: {
-            VStack(spacing: 10) {
-                itemPreview(item)
-                    .frame(height: 70)
-                Text(item.name).font(.rounded(.subheadline, weight: .bold)).lineLimit(1)
-                Group {
-                    if equipped {
-                        Label("Equipped", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.jade)
-                    } else if owned {
-                        Text("Equip").foregroundStyle(Theme.sky)
-                    } else {
-                        Text("🪙 \(item.price)").foregroundStyle(affordable ? Color.primary : Color.secondary)
+        return VStack(spacing: 8) {
+            // tapping the item only shows it
+            Button {
+                withAnimation(Theme.bouncy) { looking = item }
+                if item.kind == .effect { tryHit(item.id) } else { SFX.shared.play(.tap) }
+            } label: {
+                VStack(spacing: 8) {
+                    itemPreview(item).frame(height: 70)
+                    Group {
+                        if item.kind == .title { Text(item.name).titled(item.id) } else { Text(item.name).lineLimit(1) }
                     }
+                    .font(.rounded(.subheadline, weight: .bold))
                 }
-                .font(.rounded(.caption, weight: .heavy))
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity)
-            .padding(14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(equipped ? Theme.jade : .clear, lineWidth: 2.5))
-            .opacity(!owned && !affordable ? 0.6 : 1)
-            .foregroundStyle(.primary)
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel("Preview \(item.name)")
+            if equipped {
+                Label("equipped", systemImage: "checkmark.circle.fill").font(.rounded(.caption, weight: .heavy)).foregroundStyle(Theme.jade)
+                    .padding(.vertical, 8)
+            } else if owned {
+                priceButton("equip", fill: AnyShapeStyle(Theme.sky), ink: .white) {
+                    withAnimation(Theme.bouncy) { arena.equip(item); looking = nil }
+                    SFX.shared.play(.toggleOn)
+                }
+            } else {
+                priceButton("🪙 \(item.price)", fill: affordable ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(Color.secondary.opacity(0.15)),
+                            ink: affordable ? .black : .secondary) {
+                    looking = item
+                    buying = item
+                }
+                .accessibilityLabel("Buy \(item.name) for \(item.price) coins")
+            }
         }
-        .buttonStyle(PressableStyle())
-        .accessibilityLabel("\(item.name), \(equipped ? "equipped" : owned ? "owned" : "\(item.price) coins")")
+        .padding(12)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(equipped ? Theme.jade : looking?.id == item.id ? Theme.sky : .clear, lineWidth: 2.5))
+        .foregroundStyle(.primary)
+    }
+
+    private func priceButton(_ text: String, fill: AnyShapeStyle, ink: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text).font(.rounded(.caption, weight: .heavy)).foregroundStyle(ink)
+                .padding(.horizontal, 18).padding(.vertical, 8)
+                .background(fill, in: Capsule())
+        }
+        .buttonStyle(PressableStyle(scale: 0.94))
     }
 
     @ViewBuilder
@@ -410,7 +458,7 @@ struct ShopView: View {
                 .fill(Catalog.frameGradient(item.id))
                 .frame(width: 96, height: 60)
         case .title:
-            Text(item.symbol).font(.hanzi(26, weight: .bold)).minimumScaleFactor(0.5).lineLimit(1)
+            Text(item.symbol).font(.hanzi(26, weight: .bold)).titled(item.id).minimumScaleFactor(0.5)
         }
     }
 }

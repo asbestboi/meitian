@@ -12,6 +12,11 @@ struct TodayView: View {
     @State private var testLevel: LevelRef?
     @State private var story: StoryRef?
     @State private var storyUnit = 0
+    /// A unit that was just finished (its spin is announced once the story closes).
+    @State private var finishedUnit = 0
+    @State private var lockedStory: LockedStoryRef?
+    /// What to open once the locked-story sheet is gone.
+    @State private var afterSheet: (() -> Void)?
     @State private var sentenceNode: SentenceNodeRef?
     @State private var goals = false
     @State private var road = false
@@ -76,7 +81,16 @@ struct TodayView: View {
         .fullScreenCover(item: $testLevel) { ref in
             LevelTestView(level: ref.level, onPracticeWeak: goToPractice).environment(store)
         }
-        .fullScreenCover(item: $story) { ref in
+        .sheet(item: $lockedStory, onDismiss: { afterSheet?(); afterSheet = nil }) { ref in
+            LockedStorySheet(unit: ref.unit, sentences: openSentences(unit: ref.unit),
+                             learn: { words in afterSheet = { start(words) }; lockedStory = nil },
+                             build: { node in afterSheet = { sentenceNode = SentenceNodeRef(node: node) }; lockedStory = nil })
+                .environment(store)
+                .sheetSounds()
+                .presentationDetents([.height(340)])
+                .presentationCornerRadius(32)
+        }
+        .fullScreenCover(item: $story, onDismiss: announceSpin) { ref in
             StoryPlayer(story: ref.story, onFinished: storyFinished).environment(store)
         }
         .fullScreenCover(item: $sentenceNode) { ref in
@@ -111,7 +125,7 @@ struct TodayView: View {
             switch node.kind {
             case .lesson: show("finish the lessons before this one first")
             case .sentences: show("finish lesson \(node.number) to open these sentences")
-            case .story: show("finish unit \(node.unit)'s sentences to open its story")
+            case .story: lockedStory = LockedStoryRef(unit: Int(node.unit))
             case .test: show("learn every lesson to unlock the test")
             }
         case (.lesson, .done):
@@ -142,7 +156,7 @@ struct TodayView: View {
         } else if !done {
             // nothing new to read right now: the checkpoint becomes a treasure chest
             store.finishPathStory(unit: unit)
-            show("🎁 chest opened · +20 XP")
+            show("🎁 chest opened · +20 XP · +1 spin 🎰")
         } else {
             show("learn more words to unlock the next story")
         }
@@ -152,7 +166,20 @@ struct TodayView: View {
     private func storyFinished(translations: Int) {
         guard storyUnit > 0 else { return }
         store.finishPathStory(unit: storyUnit, translations: translations)
+        finishedUnit = storyUnit
         storyUnit = 0
+    }
+
+    private func announceSpin() {
+        guard finishedUnit > 0 else { return }
+        SFX.shared.play(.streak)
+        show("unit \(finishedUnit) finished · +1 spin 🎰")
+        finishedUnit = 0
+    }
+
+    /// The unit's last sentence node, when it can be done right now.
+    private func openSentences(unit: Int) -> PathNode? {
+        store.learnPath.first { Int($0.number) == unit }?.nodes.last { $0.kind == .sentences && $0.state == .open }
     }
 
     private func show(_ text: String) {
@@ -279,7 +306,7 @@ struct TodayView: View {
         switch n.kind {
         case .test: return "take the HSK \(store.currentLevel) test"
         case .sentences: return "build sentences"
-        case .story: return "read the unit \(n.unit) story"
+        case .story: return "read the unit \(n.unit) \(n.unit % 2 == 0 ? "chat" : "story")"
         case .lesson: return store.today.learnedDone ? "start lesson \(n.number)" : "learn today's words"
         }
     }
@@ -288,7 +315,7 @@ struct TodayView: View {
         switch n.kind {
         case .test: return "pass with 80% to unlock HSK \(store.currentLevel + 1)"
         case .sentences: return "+\(pathSentencesXp()) XP · only words you know"
-        case .story: return "+20 XP"
+        case .story: return "+20 XP · +1 spin"
         case .lesson: return "unit \(n.unit) · lesson \(n.number) · \(store.profile.dailyGoal) new words"
         }
     }
@@ -310,6 +337,8 @@ struct PathNodeButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var size: CGFloat { node.kind == .lesson ? 72 : 84 }
+    /// Even units end with an SMS chat.
+    private var chat: Bool { node.unit % 2 == 0 }
 
     private var color: Color {
         switch node.state {
@@ -328,10 +357,10 @@ struct PathNodeButton: View {
         switch (node.kind, node.state) {
         case (.lesson, .done): return "checkmark"
         case (.lesson, _): return node.state == .locked ? "lock.fill" : "star.fill"
-        case (.sentences, .done): return "checkmark.bubble.fill"
-        case (.sentences, _): return "text.bubble.fill"
-        case (.story, .done): return "book.closed.fill"
-        case (.story, _): return "book.fill"
+        case (.sentences, .done): return "checkmark.rectangle.fill"
+        case (.sentences, _): return "puzzlepiece.fill"
+        case (.story, .done): return chat ? "checkmark.message.fill" : "book.closed.fill"
+        case (.story, _): return chat ? "message.fill" : "book.fill"
         case (.test, _): return "trophy.fill"
         }
     }
@@ -399,7 +428,7 @@ struct PathNodeButton: View {
         switch node.kind {
         case .lesson: return ""
         case .sentences: return "sentences · +\(pathSentencesXp()) XP"
-        case .story: return "story"
+        case .story: return chat ? "SMS · +1 spin 🎰" : "story · +1 spin 🎰"
         case .test: return "level-up test"
         }
     }
@@ -408,7 +437,7 @@ struct PathNodeButton: View {
         let what = switch node.kind {
         case .lesson: "Lesson \(node.number)"
         case .sentences: "Sentences after lesson \(node.number)"
-        case .story: "Unit \(node.unit) story"
+        case .story: "Unit \(node.unit) \(chat ? "SMS chat" : "story")"
         case .test: "HSK \(level) test"
         }
         let state = switch node.state {
@@ -417,6 +446,45 @@ struct PathNodeButton: View {
         case .locked: "locked"
         }
         return "\(what), \(state)"
+    }
+}
+
+struct LockedStoryRef: Identifiable {
+    let unit: Int
+    var id: Int { unit }
+}
+
+/// A unit's story that can't be read yet: what it takes, and the lesson (or sentences) to get there.
+private struct LockedStorySheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let unit: Int
+    let sentences: PathNode?
+    let learn: ([Word]) -> Void
+    let build: (PathNode) -> Void
+
+    var body: some View {
+        let id = store.unitStoryId(unit)
+        let chat = unit % 2 == 0
+        let missing = storyById(id: id, knownWordIds: store.known).map { Int(storyMissingWords(story: $0, knownWordIds: store.known)) } ?? 0
+        VStack(spacing: 12) {
+            Text(chat ? "💬" : "📖").font(.system(size: 46))
+            Text("unit \(unit) \(chat ? "SMS" : "story") 🔒").font(.rounded(.title2, weight: .heavy))
+            Text(missing > 0 ? "\(wordsToGo(missing)) before you can read it."
+                 : sentences != nil ? "You know its words. Build the unit's sentences and it opens."
+                 : "You know its words. Finish the unit's lessons and sentences and it opens.")
+                .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            if missing == 0, let sentences {
+                BigButton(title: "build sentences", systemImage: "puzzlepiece.fill", gradient: Theme.skyGradient) { build(sentences) }
+            } else {
+                BigButton(title: "learn words", systemImage: "book.fill", gradient: Theme.jadeGradient) {
+                    let words = store.lessonForStory(id)
+                    learn(words.isEmpty ? store.nextUpWords() : words)
+                }
+            }
+            Button("not now") { dismiss() }.font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
+        }
+        .padding(24)
     }
 }
 

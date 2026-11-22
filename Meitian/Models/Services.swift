@@ -72,21 +72,9 @@ enum Reminders {
 
     static func cancel() { removeDaily() }
 
-    // MARK: the next slot machine spin
-
     /// Asks for permission if needed; returns whether notifications are allowed.
     static func allow() async -> Bool {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-    }
-
-    static func scheduleSpin(afterMs: Int64) {
-        guard afterMs > 1000 else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "🎰 转一转！"
-        content.body = "Your free daily spin is ready."
-        content.sound = .default
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Double(afterMs) / 1000, repeats: false)
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "spin", content: content, trigger: trigger))
     }
 
     static func cancelSpin() {

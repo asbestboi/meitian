@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Today: the daily spin and the sentence of the day, pinned above the path.
+/// Today: the spins earned by finishing units and the won sentence, pinned above the path.
 struct SlotCard: View {
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
@@ -12,9 +12,7 @@ struct SlotCard: View {
         // re-read once a pack arrives
         let sentence = content.generation >= 0 ? store.slotSentence : nil
         HStack(spacing: 8) {
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                spinCard(wait: store.spinWait)
-            }
+            spinCard(left: store.spinsLeft)
             if let sentence { sentenceCard(sentence) }
         }
         .padding(.horizontal, 16)
@@ -27,17 +25,18 @@ struct SlotCard: View {
         }
     }
 
-    private func spinCard(wait: Int64) -> some View {
-        let ready = wait <= 0
+    private func spinCard(left: Int) -> some View {
+        let ready = left > 0
+        let next = store.learnPath.first { $0.nodes.contains { $0.kind == .story && $0.state != .done } }?.number
         return Button { machine = true } label: {
             HStack(spacing: 10) {
                 Text("🎰").font(.title2)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(ready ? "your daily spin is ready!" : "next spin in")
+                    Text(left == 1 ? "you have a spin!" : ready ? "you have \(left) spins!" : "next spin")
                         .font(.rounded(ready ? .subheadline : .caption, weight: .heavy))
                         .opacity(ready ? 1 : 0.6)
-                    Text(ready ? "free, once a day" : spinCountdown(waitMs: wait))
-                        .font(.rounded(ready ? .caption : .subheadline, weight: .bold)).monospacedDigit()
+                    Text(ready ? "one for every finished unit" : next.map { "finish unit \($0)" } ?? "finish a unit")
+                        .font(.rounded(ready ? .caption : .subheadline, weight: .bold))
                         .opacity(ready ? 0.7 : 1)
                 }
                 .lineLimit(1).minimumScaleFactor(0.8)
@@ -57,7 +56,7 @@ struct SlotCard: View {
             HStack(spacing: 10) {
                 Text(done ? "✅" : "📝").font(.title2)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("sentence of the day").font(.rounded(.caption, weight: .heavy)).foregroundStyle(.secondary)
+                    Text("bonus sentence").font(.rounded(.caption, weight: .heavy)).foregroundStyle(.secondary)
                     Text(done ? sentence.zh : "+\(spinSentenceXp()) XP").font(.rounded(.subheadline, weight: .bold))
                 }
                 .lineLimit(1).minimumScaleFactor(0.8)
@@ -76,7 +75,7 @@ struct SlotSentenceRef: Identifiable {
     var id: UInt64 { sentence.id }
 }
 
-/// The daily slot machine: one free spin every 24 hours.
+/// The slot machine: a free spin for every finished unit, and spins stack up.
 struct SlotMachineView: View {
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
@@ -89,7 +88,6 @@ struct SlotMachineView: View {
     @State private var glow = false
     @State private var busy = false
     @State private var won: SpinResult?
-    @State private var note: String?
     @State private var confetti = 0
     @State private var stopTick = 0
     @State private var winTick = 0
@@ -111,7 +109,7 @@ struct SlotMachineView: View {
                     .foregroundStyle(.primary)
                     .accessibilityLabel("Close")
                     Spacer()
-                    Text("daily spin").font(.rounded(.title3, weight: .heavy))
+                    Text("lucky spin").font(.rounded(.title3, weight: .heavy))
                     Spacer()
                     Color.clear.frame(width: 40, height: 40)
                 }
@@ -121,12 +119,9 @@ struct SlotMachineView: View {
                     lever
                 }
                 if let won { prizeView(won.prize) }
-                if let note { Text(note).font(.rounded(.subheadline, weight: .bold)).foregroundStyle(Theme.red) }
                 Spacer()
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    bottom(wait: store.spinWait)
-                }
-                Text("Free once every 24 hours. Coins, cosmetics and sentences only.")
+                bottom(left: store.spinsLeft)
+                Text("A free spin for every finished unit; they stack up. Coins, cosmetics and sentences only.")
                     .font(.rounded(.caption)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding(20)
@@ -167,20 +162,22 @@ struct SlotMachineView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(busy || store.spinWait > 0)
+        .disabled(busy || store.spinsLeft == 0)
         .accessibilityLabel("Pull the lever")
     }
 
     @ViewBuilder
-    private func bottom(wait: Int64) -> some View {
+    private func bottom(left: Int) -> some View {
         if busy {
             BigButton(title: "…", enabled: false) {}
-        } else if wait <= 0 {
-            BigButton(title: "spin! 🎰", gradient: Theme.goldGradient) { spin() }
+        } else if left > 0 {
+            VStack(spacing: 6) {
+                if left > 1 { Text("\(left) spins left").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary) }
+                BigButton(title: won == nil ? "spin! 🎰" : "spin again 🎰", gradient: Theme.goldGradient) { spin() }
+            }
         } else {
             VStack(spacing: 6) {
-                Text("next spin in").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
-                Text(spinCountdown(waitMs: wait)).font(.system(size: 34, weight: .heavy, design: .rounded)).monospacedDigit()
+                Text("finish a unit to earn another spin").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
                 BigButton(title: "Done", systemImage: "checkmark") { dismiss() }
             }
         }
@@ -204,7 +201,7 @@ struct SlotMachineView: View {
                     .disabled(on)
                 }
             case .sentence(let sentence):
-                Text("sentence of the day 📝").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
+                Text("a bonus sentence 📝").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
                 TokenSentence(tokens: sentence.tokens, size: 26, alignment: .center)
                 BigButton(title: "learn it · +\(spinSentenceXp()) XP", gradient: Theme.jadeGradient) {
                     lesson = SlotSentenceRef(sentence: sentence)
@@ -219,7 +216,7 @@ struct SlotMachineView: View {
     private func spin() {
         guard !busy else { return }
         busy = true
-        note = nil
+        won = nil
         stopTick += 1
         withAnimation(.easeIn(duration: 0.16)) { leverDown = true }
         Task { @MainActor in
@@ -232,8 +229,7 @@ struct SlotMachineView: View {
     @MainActor
     private func run() async {
         // the prize is decided and saved before the reels move
-        guard let result = await store.spin(arena: arena) else {
-            note = "Not yet: one spin every 24 hours."
+        guard let result = store.spin(arena: arena) else {
             busy = false
             return
         }
@@ -321,7 +317,7 @@ struct SentenceOfTheDayView: View {
                         .foregroundStyle(.primary)
                         .accessibilityLabel("Close")
                         Spacer()
-                        Text("sentence of the day").font(.rounded(.headline, weight: .heavy))
+                        Text("bonus sentence").font(.rounded(.headline, weight: .heavy))
                         Spacer()
                         Color.clear.frame(width: 40, height: 40)
                     }

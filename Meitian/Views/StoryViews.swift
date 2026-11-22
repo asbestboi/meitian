@@ -40,7 +40,8 @@ enum StoryProgress {
     @MainActor
     static func next(chat: Bool, store: AppStore, unit: Int? = nil) -> Story? {
         let d = UserDefaults.standard
-        let readIds = read()
+        // the unfinished units' stories are kept for the path
+        let readIds = read() + store.reservedStoryIds
         let known = store.known
         let dayKey = store.todayKey
         let atKey = pickKey(chat) + "At"
@@ -63,13 +64,11 @@ enum StoryProgress {
 }
 
 extension StoryProgress {
-    /// What the story stop of a unit plays: something unread that fits the unit (odd units a picture story, even units
-    /// a chat, the other kind if there's none), else the story read longest ago. Nil when nothing is unlocked.
+    /// The story at the end of a unit: a picture story in odd units, an SMS chat in even ones. Nil when there are none
+    /// (the stories aren't downloaded yet).
     @MainActor
     static func forPath(unit: Int, store: AppStore) -> Story? {
-        let chat = unit % 2 == 0
-        return next(chat: chat, store: store, unit: unit) ?? next(chat: !chat, store: store, unit: unit)
-            ?? rereadStory(dayKey: store.todayKey, read: read(), knownWordIds: store.known)
+        storyById(id: store.unitStoryId(unit), knownWordIds: store.known)
     }
 }
 
@@ -222,8 +221,9 @@ struct StoryHub: View {
     /// Unlocked stories, and how many of them were read.
     @State private var total = 0
     @State private var readCount = 0
-    /// How many more words the next locked story needs (nil: none is locked).
-    @State private var soonest: Int?
+    /// The next locked story (nothing about it is shown but the words it still needs).
+    @State private var soonest: ShelfStory?
+    @State private var lesson: LessonRef?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -236,6 +236,7 @@ struct StoryHub: View {
                 }
             }
             mysteryCard
+            lockedCard
             if !history.isEmpty {
                 Text("history").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
@@ -255,6 +256,9 @@ struct StoryHub: View {
         .task(id: "\(content.generation)-\(store.todayKey)-\(store.currentLevel)-\(store.cards.count)") { refresh() }
         .fullScreenCover(item: $open, onDismiss: refresh) { ref in
             StoryPlayer(story: ref.story).environment(store)
+        }
+        .fullScreenCover(item: $lesson, onDismiss: refresh) { ref in
+            LearnSession(words: ref.words).environment(store)
         }
     }
 
@@ -280,7 +284,7 @@ struct StoryHub: View {
                 .streetBlock(Theme.nightGradient, padding: 18)
             }
             .buttonStyle(PressableStyle(scale: 0.98))
-        } else if total > 0 || soonest != nil {
+        } else if total > 0 && soonest == nil {
             Text(nothingNew)
                 .font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,10 +293,32 @@ struct StoryHub: View {
     }
 
     private var nothingNew: String {
+        chats ? "You've read every chat ✦ new ones arrive soon." : "You've read every story ✦ new ones arrive soon."
+    }
+
+    @ViewBuilder
+    private var lockedCard: some View {
         if let soonest {
-            return "\(learnMoreWords(soonest)) the next \(chats ? "chat" : "story") ✦"
+            HStack(spacing: 12) {
+                Image(systemName: "lock.fill").font(.title2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(chats ? "next locked chat" : "next locked story").font(.rounded(.subheadline, weight: .bold))
+                    Text(wordsToGo(Int(soonest.missingWords))).font(.rounded(.caption)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    let words = store.lessonForStory(soonest.story.id)
+                    let pick = words.isEmpty ? store.nextUpWords() : words
+                    if !pick.isEmpty { lesson = LessonRef(words: pick) }
+                } label: {
+                    Text("learn words").font(.rounded(.subheadline, weight: .heavy)).foregroundStyle(.black)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(Theme.limeGradient, in: Capsule())
+                }
+                .buttonStyle(PressableStyle(scale: 0.95))
+            }
+            .cardSurface(padding: 14)
         }
-        return chats ? "You've read every chat ✦ new ones arrive soon." : "You've read every story ✦ new ones arrive soon."
     }
 
     private func refresh() {
@@ -302,15 +328,21 @@ struct StoryHub: View {
         let readIds = Set(read)
         total = Int(storyAvailability(chat: chats, dayKey: store.todayKey, knownWordIds: known).unlocked)
         readCount = shelf.filter { $0.unlocked && readIds.contains($0.story.id) }.count
-        soonest = shelf.first { !$0.unlocked && !readIds.contains($0.story.id) }.map { Int($0.missingWords) }
+        soonest = shelf.first { !$0.unlocked && !readIds.contains($0.story.id) }
         let byId = Dictionary(shelf.map { ($0.story.id, $0.story) }, uniquingKeysWith: { a, _ in a })
         history = read.reversed().compactMap { byId[$0] }   // most recent first
         next = StoryProgress.next(chat: chats, store: store)
     }
 }
 
-/// "learn 4 more words to unlock"
-func learnMoreWords(_ missing: Int) -> String { "learn \(missing) more word\(missing == 1 ? "" : "s") to unlock" }
+/// "4 more words to go"
+func wordsToGo(_ missing: Int) -> String { "\(missing) more word\(missing == 1 ? "" : "s") to go" }
+
+/// A lesson to open.
+struct LessonRef: Identifiable {
+    let words: [Word]
+    var id: String { words.map(\.id).joined(separator: ",") }
+}
 
 struct StoryRef: Identifiable {
     let story: Story

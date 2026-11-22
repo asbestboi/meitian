@@ -36,7 +36,7 @@ struct StatsView: View {
                     }
                     HStack(spacing: 12) {
                         tile("\(store.cards.count)", "Words learned", "book.fill", Theme.jade)
-                        tile("\(store.slots.spins)", "Daily spins", "dice.fill", Theme.plum)
+                        tile("\(store.slots.spins)", "Spins", "dice.fill", Theme.plum)
                     }
                     calendar
                     levels
@@ -396,20 +396,6 @@ struct StatsView: View {
         }
     }
 
-    private func updateSpinReminder(_ on: Bool) {
-        store.profile.spinReminder = on
-        store.save()
-        guard on else { Reminders.cancelSpin(); return }
-        Task { @MainActor in
-            if await Reminders.allow() {
-                Reminders.scheduleSpin(afterMs: store.spinWait)
-            } else {
-                store.profile.spinReminder = false
-                store.save()
-            }
-        }
-    }
-
     private var settings: some View {
         @Bindable var store = store
         return VStack(spacing: 0) {
@@ -439,11 +425,6 @@ struct StatsView: View {
                     .padding(16)
                     .onChange(of: reminderTime) { _, _ in updateReminder(true) }
             }
-            Divider().padding(.leading, 16)
-            Toggle(isOn: Binding(get: { store.profile.spinReminder ?? false }, set: { updateSpinReminder($0) })) {
-                Label("Spin reminder", systemImage: "bell.badge.fill")
-            }
-            .padding(16)
             Divider().padding(.leading, 16)
             Toggle(isOn: $inviteNotifications) {
                 Label("Battle invitations", systemImage: "envelope.badge.fill")

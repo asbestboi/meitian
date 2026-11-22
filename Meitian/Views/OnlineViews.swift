@@ -224,7 +224,10 @@ private struct ProfileRow: View {
                     if profile.online { Circle().fill(Theme.jade).frame(width: 12, height: 12) }
                 }
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(profile.nickname) #\(profile.tag)").font(.rounded(.headline, weight: .bold)).lineLimit(1)
+                Text("\(profile.nickname) #\(profile.tag)").font(.rounded(.headline, weight: .bold)).titled(profile.cosmeticTitle)
+                if let t = Catalog.item(profile.cosmeticTitle) {
+                    Text("\(t.symbol) · \(t.name)").font(.rounded(.caption2, weight: .bold)).titled(t.id)
+                }
                 Text("HSK \(profile.level) · 🔥 \(profile.streak) · \(profile.wins)–\(profile.losses)")
                     .font(.rounded(.caption)).foregroundStyle(.secondary)
             }

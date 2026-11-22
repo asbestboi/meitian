@@ -194,6 +194,35 @@ private struct BattlePicture: View {
     var body: some View { PictureView(id: player.id, name: player.name, path: player.picture, size: size) }
 }
 
+/// A player's picture with their aura around it.
+private struct DressedPicture: View {
+    let player: BattlePlayer
+    var size: CGFloat = 46
+    var body: some View {
+        BattlePicture(player: player, size: size)
+            .background { AuraView(auraId: player.playerCard?.aura ?? "au.none", radius: size / 2 + 2).frame(width: size * 2.1, height: size * 2.1) }
+    }
+}
+
+private extension BattlePlayer {
+    /// The title whose colours their name wears.
+    var titleId: String { playerCard?.title ?? profile?.cosmeticTitle ?? "" }
+}
+
+private extension View {
+    /// A player's equipped frame around their bar, and their sticker slapped on its corner.
+    func dressed(_ player: BattlePlayer, radius: CGFloat = 22, width: CGFloat = 5, sticker: CGFloat = 28) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return background(Theme.card, in: shape)
+            .overlay(shape.strokeBorder(Catalog.frameGradient(player.playerCard?.frame ?? "fr.lantern"), lineWidth: width).allowsHitTesting(false))
+            .overlay(alignment: .topTrailing) {
+                if let s = player.playerCard?.stickerSymbol {
+                    Text(s).font(.system(size: sticker)).rotationEffect(.degrees(14)).offset(x: 6, y: -12).accessibilityHidden(true)
+                }
+            }
+    }
+}
+
 // MARK: - lobby
 
 private struct DuoLobby: View {
@@ -225,6 +254,14 @@ private struct DuoLobby: View {
                     .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
+    }
+}
+
+private struct SeatSurface: ViewModifier {
+    let player: BattlePlayer?
+    func body(content: Content) -> some View {
+        if let player { content.dressed(player, width: 3, sticker: 22) }
+        else { content.background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous)) }
     }
 }
 
@@ -260,8 +297,8 @@ private struct GroupLobby: View {
     private func seat(_ p: BattlePlayer?, host: String) -> some View {
         VStack(spacing: 4) {
             if let p {
-                BattlePicture(player: p, size: 52)
-                Text(p.name).font(.rounded(.caption, weight: .bold)).lineLimit(1)
+                DressedPicture(player: p, size: 52)
+                Text(p.name).font(.rounded(.caption, weight: .bold)).titled(p.titleId)
                 Text(p.id == host ? "host 👑" : "\(arenaFor(level: p.level, unit: 1).emoji) HSK \(p.level)")
                     .font(.rounded(.caption2)).foregroundStyle(.secondary).lineLimit(1)
             } else {
@@ -272,7 +309,8 @@ private struct GroupLobby: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .cardSurface(padding: 8)
+        .padding(8)
+        .modifier(SeatSurface(player: p))
         .opacity(p?.here ?? true ? 1 : 0.4)
     }
 }
@@ -541,11 +579,15 @@ private struct PlayerBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            BattlePicture(player: player, size: 44)
-                .background { AuraView(auraId: player.playerCard?.aura ?? "au.none", radius: 24).frame(width: 96, height: 96) }
+            DressedPicture(player: player, size: 44)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(mine ? "you" : player.name).font(.rounded(.subheadline, weight: .bold)).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(mine ? "\(player.name) (you)" : player.name).font(.rounded(.subheadline, weight: .heavy)).titled(player.titleId)
+                        if let t = player.playerCard?.titleItem {
+                            Text("\(t.symbol) · \(t.name)").font(.rounded(.caption2, weight: .bold)).titled(t.id)
+                        }
+                    }
                     Spacer()
                     if mode == .team2v2 { Pill(text: "team \(player.team == 0 ? "🔴" : "🔵")", color: .secondary) }
                     Text(scoreText(player, mode, view)).font(.rounded(.subheadline, weight: .heavy))
@@ -555,7 +597,8 @@ private struct PlayerBar: View {
                 if mode.hasHP { HPBar(hp: player.hp, tint: mine ? Theme.jade : Theme.sky) }
             }
         }
-        .cardSurface(padding: 12)
+        .padding(12)
+        .dressed(player)
         .opacity(player.out ? 0.5 : 1)
         .spot(player.id)
         .accessibilityElement(children: .ignore)
@@ -571,20 +614,21 @@ private struct PlayerChip: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            BattlePicture(player: player, size: 40)
+            DressedPicture(player: player, size: 40)
                 .overlay(alignment: .bottomTrailing) {
                     if mode == .team2v2 { Text(player.team == 0 ? "🔴" : "🔵").font(.caption2) }
                 }
                 .overlay(alignment: .topTrailing) {
                     if player.answered && view.phase == .playing { Text("💬").font(.caption2) }
                 }
-            Text(player.name).font(.rounded(.caption, weight: .bold)).lineLimit(1)
+            Text(player.name).font(.rounded(.caption, weight: .bold)).titled(player.titleId)
             Text(player.out ? "out" : scoreText(player, mode, view))
                 .font(.rounded(.caption, weight: .heavy)).foregroundStyle(player.out ? Theme.red : .primary)
             if mode.hasHP { HPBar(hp: player.hp, tint: Theme.sky, height: 8) }
         }
         .frame(maxWidth: .infinity)
-        .cardSurface(padding: 8)
+        .padding(8)
+        .dressed(player, width: 4, sticker: 22)
         .opacity(player.out || !player.here ? 0.45 : 1)
         .spot(player.id)
         .accessibilityElement(children: .ignore)
@@ -620,6 +664,11 @@ struct BattleQuestionPanel: View {
             if !question.say.isEmpty && view.phase == .playing { Speaker.shared.say(question.say) }
             if question.ask == .pinyin { typing = true }
         }
+        // the finished sentence, once the round is over
+        .onChange(of: view.phase) { _, phase in
+            let say = sayAfterRound(question: question)
+            if phase == .roundResult, !say.isEmpty { Speaker.shared.say(say) }
+        }
     }
 
     @ViewBuilder
@@ -635,7 +684,10 @@ struct BattleQuestionPanel: View {
             RubyText(hanzi: question.prompt, pinyin: question.promptPinyin, size: question.prompt.count > 3 ? 44 : 56,
                      weight: .semibold, alignment: .center)
         case .pinyin:
-            Text(question.prompt).font(.hanzi(question.prompt.count > 3 ? 44 : 60, weight: .semibold))
+            HStack(spacing: 14) {
+                Text(question.prompt).font(.hanzi(question.prompt.count > 3 ? 44 : 60, weight: .semibold))
+                SpeakButton(text: question.prompt, size: 48, tint: Theme.jade)
+            }
         case .hanzi, .sentence:
             Text("“\(question.prompt)”").font(.rounded(.title2, weight: .bold))
                 .multilineTextAlignment(.center).minimumScaleFactor(0.5)
@@ -686,7 +738,10 @@ struct BattleQuestionPanel: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Color.secondary.opacity(0.4)).frame(height: 1) }
             FlowLayout(spacing: 6, lineSpacing: 8, alignment: .center) {
                 ForEach(Array(question.tiles.enumerated()), id: \.offset) { i, t in
-                    tile(t, used: built.contains(i)) { withAnimation(Theme.bouncy) { built.append(i) } }
+                    tile(t, used: built.contains(i)) {
+                        Speaker.shared.say(t)
+                        withAnimation(Theme.bouncy) { built.append(i) }
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -750,8 +805,9 @@ private struct BattleResults: View {
                 ForEach(v.players.sorted { $0.place < $1.place }) { p in
                     HStack(spacing: 10) {
                         Text("\(p.place)").font(.rounded(.headline, weight: .heavy)).foregroundStyle(.secondary)
-                        BattlePicture(player: p, size: 36)
-                        Text(p.id == v.me ? "you" : p.name).font(.rounded(.subheadline, weight: .bold)).lineLimit(1)
+                        DressedPicture(player: p, size: 36)
+                        Text(p.id == v.me ? "\(p.name) (you)" : p.name).font(.rounded(.subheadline, weight: .heavy)).titled(p.titleId)
+                        if let s = p.playerCard?.stickerSymbol { Text(s) }
                         Spacer()
                         if let mode = v.mode {
                             Text(scoreText(p, mode, v)).font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)

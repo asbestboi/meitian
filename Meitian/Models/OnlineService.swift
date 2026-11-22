@@ -178,12 +178,6 @@ final class OnlineService {
 
     func decline(_ room: String) async throws { _ = try await request("POST", "/v1/challenge/\(room)/decline") }
 
-    /// Records a slot machine spin; nil when offline or signed out.
-    func spin(count: Int) async -> ServerSpin? {
-        guard signedIn, let text = try? await request("POST", "/v1/spin", .json(["count": count])) else { return nil }
-        return onlineParseSpin(json: text)
-    }
-
     // MARK: parties
 
     /// Opens a private party and returns its code.

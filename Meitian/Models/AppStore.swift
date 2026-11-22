@@ -30,14 +30,13 @@ struct ChallengeLog: Codable, Hashable {
     var completedAt: Date
 }
 
-/// The daily slot machine.
+/// The slot machine.
 struct Slots: Codable, Hashable {
+    /// Spins ever made (seeds the next prize).
     var spins = 0
-    /// Milliseconds since 1970; 0 = never.
-    var lastSpin: Int64 = 0
-    /// When the server allows the next spin (0 = it hasn't said).
-    var serverNext: Int64 = 0
-    /// The sentence of the day, until the next spin.
+    /// How many of the finished units' spins were used (nil: a save from when spins were daily).
+    var used: Int?
+    /// The won sentence, until another one is won.
     var sentenceId: UInt64?
     var sentenceDone = false
 }
@@ -85,8 +84,6 @@ struct Profile: Codable, Hashable {
     var pathSentences: [String]?
     /// Highest arena tier already revealed (nil: a save from before arenas).
     var arenaSeen: Int? = 1
-    /// Notification when the next spin is ready.
-    var spinReminder: Bool?
 }
 
 private struct SaveFile: Codable {
@@ -127,13 +124,14 @@ final class AppStore {
         load()
         applyFreezes()
         checkArena()
+        Reminders.cancelSpin()   // left over from when spins were daily
     }
 
     // MARK: arenas
 
     /// The scenery for where the learner is.
     var arenaTheme: ArenaTheme {
-        let unit = learnedCount(level: currentLevel) / max(Int(pathUnitSize()) * max(profile.dailyGoal, 1), 1) + 1
+        let unit = learnedCount(level: currentLevel) / max(Int(pathUnitSize(lessonSize: lessonSize)) * max(profile.dailyGoal, 1), 1) + 1
         return arenaFor(level: UInt8(clamping: currentLevel), unit: UInt32(clamping: unit))
     }
 
@@ -195,9 +193,9 @@ final class AppStore {
         days = [:]
         xp = 0
         seen = []
+        slots.used = 0
         slots.sentenceId = nil
         slots.sentenceDone = false
-        Reminders.cancelSpin()
         milestoneQueue.removeAll()
         freezeNotice = nil
         // progress kept outside the save file
@@ -292,47 +290,35 @@ final class AppStore {
         set { days[todayKey] = newValue }
     }
 
-    // MARK: daily slot machine
+    // MARK: slot machine (a spin for every finished unit)
 
-    private static var nowMs: Int64 { Int64(Date.now.timeIntervalSince1970 * 1000) }
+    /// Spins waiting (they stack up).
+    var spinsLeft: Int { Int(Meitian.spinsLeft(finishedUnits: profile.pathStories ?? [], used: UInt32(clamping: slots.used ?? 0))) }
 
-    /// Milliseconds until the next spin (0 = ready).
-    var spinWait: Int64 { spinWaitMs(lastSpinMs: slots.lastSpin, serverNextMs: slots.serverNext, nowMs: Self.nowMs) }
-
-    /// The pinned sentence, if its pack is loaded.
+    /// The won sentence, if its pack is loaded.
     var slotSentence: Sentence? { slots.sentenceId.flatMap { sentenceById(id: $0, knownWordIds: known) } }
 
-    /// Spins: the prize is decided, paid and saved at once. Nil when it isn't time yet (the server has the last word).
-    @MainActor
-    func spin(arena: ArenaStore) async -> SpinResult? {
-        refreshDay()
-        guard spinWait <= 0 else { return nil }
-        let server = await OnlineService.shared.spin(count: slots.spins)
-        let now = Self.nowMs
-        if let server, !server.allowed {
-            slots.serverNext = now + server.waitMs
-            slots.spins = max(slots.spins, Int(server.spins))
-            save()
-            return nil
-        }
-        let count = server.map { Int($0.spins) } ?? slots.spins + 1
+    /// Spins: the prize is decided, paid and saved at once. Nil when there's no spin left.
+    func spin(arena: ArenaStore) -> SpinResult? {
+        guard spinsLeft > 0 else { return nil }
         let free = Catalog.all.filter { $0.price > 0 && !arena.owned.contains($0.id) && (Prefs.swearsOn || !$0.swear) }.map(\.id)
-        let result = spinSlots(dayKey: todayKey, playerId: arena.playerId, spinCount: UInt32(clamping: count),
-                               cosmeticIds: free, knownWordIds: known)
-        var sentence: UInt64?
+        let result = spinSlots(playerId: arena.playerId, spinCount: UInt32(clamping: slots.spins + 1), cosmeticIds: free, knownWordIds: known,
+                               sentenceWaiting: slots.sentenceId != nil && !slots.sentenceDone)
         switch result.prize {
         case .coins(let amount, _): arena.coins += Int(amount)
         case .cosmetic(let id): arena.owned.insert(id)
-        case .sentence(let s): sentence = s.id
+        case .sentence(let s):
+            slots.sentenceId = s.id
+            slots.sentenceDone = false
         }
         arena.save()
-        slots = Slots(spins: count, lastSpin: now, serverNext: server.map { now + $0.waitMs } ?? 0, sentenceId: sentence)
+        slots.spins += 1
+        slots.used = (slots.used ?? 0) + 1
         save()
-        if profile.spinReminder == true { Reminders.scheduleSpin(afterMs: spinWait) }
         return result
     }
 
-    /// The sentence of the day is done: XP once. Returns what it paid.
+    /// The won sentence is done: XP once. Returns what it paid.
     func finishSlotSentence() -> Int {
         guard !slots.sentenceDone else { return 0 }
         slots.sentenceDone = true
@@ -442,11 +428,33 @@ final class AppStore {
                 return UInt32(p[1])
             }
         }
-        return Meitian.learnPath(learned: UInt32(learnedCount(level: level)),
-                                 total: UInt32(WordBank.words(level: level).count),
-                                 lessonSize: UInt32(max(profile.dailyGoal, 1)),
-                                 storiesDone: done(profile.pathStories),
-                                 sentencesDone: done(profile.pathSentences))
+        return levelPath(level: UInt8(clamping: level), lessonSize: lessonSize, cardIds: Array(cards.keys),
+                         confirmedLevel: UInt8(clamping: profile.confirmedLevel),
+                         storiesDone: done(profile.pathStories), sentencesDone: done(profile.pathSentences))
+    }
+
+    private var lessonSize: UInt32 { UInt32(clamping: max(profile.dailyGoal, 1)) }
+
+    /// The id of the story at the end of a unit ("" when there are none).
+    func unitStoryId(_ unit: Int) -> String {
+        unitStory(level: UInt8(clamping: currentLevel), lessonSize: lessonSize, unit: UInt32(clamping: unit))
+    }
+
+    /// Stories kept for the units that aren't finished yet.
+    var reservedStoryIds: [String] {
+        let done = Set((profile.pathStories ?? []).compactMap { key -> Int? in
+            let p = key.split(separator: "-")
+            guard p.count == 2, Int(p[0]) == currentLevel else { return nil }
+            return Int(p[1])
+        })
+        return reservedStories(level: UInt8(clamping: currentLevel), lessonSize: lessonSize, fromUnit: 1)
+            .enumerated().filter { !done.contains($0.offset + 1) }.map(\.element)
+    }
+
+    /// The lesson that brings a locked story closer (empty: its words are learned).
+    func lessonForStory(_ id: String) -> [Word] {
+        storyLesson(storyId: id, level: UInt8(clamping: currentLevel), lessonSize: lessonSize, cardIds: Array(cards.keys),
+                    confirmedLevel: UInt8(clamping: profile.confirmedLevel)).compactMap { WordBank.word($0) }
     }
 
     /// The node the big start button points at.
@@ -484,7 +492,7 @@ final class AppStore {
     /// so stories can be picked to fit what the learner just studied.
     func unitWordIds(_ unit: Int? = nil) -> [String] {
         let size = max(profile.dailyGoal, 1)
-        let perUnit = Int(pathUnitSize())
+        let perUnit = Int(pathUnitSize(lessonSize: lessonSize))
         let all = pathWords
         let doneLessons = learnedCount(level: currentLevel) / size
         let u = unit ?? max(1, (doneLessons + perUnit - 1) / perUnit)
