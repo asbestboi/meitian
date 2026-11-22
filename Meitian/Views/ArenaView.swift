@@ -1,17 +1,15 @@
 import SwiftUI
 
 /// Player card shown on the arena, pairing and versus screens.
-struct PlayerCardView: View {
+struct PlayerCardView<Picture: View>: View {
     let card: PlayerCard
     var compact = false
     var coins: Int? = nil
+    @ViewBuilder var picture: Picture
 
     var body: some View {
         HStack(spacing: compact ? 10 : 14) {
-            Text(card.avatarSymbol)
-                .font(.system(size: compact ? 34 : 52))
-                .frame(width: compact ? 54 : 78, height: compact ? 54 : 78)
-                .background(.white.opacity(0.22), in: Circle())
+            picture
                 .overlay(Circle().stroke(.white.opacity(0.6), lineWidth: 2))
                 .background {
                     AuraView(auraId: card.aura ?? "au.none", radius: compact ? 28 : 40)
@@ -60,10 +58,11 @@ struct PlayerCardView: View {
 struct ArenaView: View {
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
-    @State private var online = false
-    @State private var internet = false
-    @State private var local = false
+    @State private var hub: HubStart?
     @State private var shop = false
+    /// Battles need internet; ask the server whether it can be reached (nil = still checking).
+    @State private var reachable: Bool?
+    @State private var retry = 0
 
     private var myCard: PlayerCard {
         arena.card(name: store.profile.name, level: store.currentLevel, wordsLearned: store.cards.count)
@@ -73,50 +72,19 @@ struct ArenaView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    PlayerCardView(card: myCard, coins: arena.coins)
+                    PlayerCardView(card: myCard, coins: arena.coins) { MyPicture(size: 78) }
+                    ArenaBadge(theme: store.arenaTheme)
 
-                    Button { internet = true } label: {
-                        HStack(spacing: 16) {
-                            Image(systemName: "globe.asia.australia.fill")
-                                .font(.system(size: 34, weight: .semibold))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Play online").font(.rounded(.title3, weight: .heavy))
-                                Text("Quick match anyone, battle friends anywhere, climb the leaderboards. iPhone + Android.")
-                                    .font(.rounded(.subheadline)).opacity(0.9)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 0)
-                            let waiting = (OnlineService.shared.inbox?.challenges.count ?? 0) + Int(OnlineService.shared.inbox?.requests ?? 0)
-                            if waiting > 0 { Pill(text: "\(waiting) new", color: .white) }
-                            Image(systemName: "chevron.right").font(.headline)
-                        }
-                        .foregroundStyle(.white)
-                        .streetBlock(Theme.skyGradient)
+                    if reachable == false {
+                        offline
+                    } else {
+                        entry("Battle", "Quick match anyone, battle friends, climb the leaderboards. iPhone + Android.",
+                              "globe.asia.australia.fill", Theme.skyGradient, badge: waiting) { hub = .play }
+                        entry("Party", "Up to 4 friends in one game. Share a code, pick a mode, play.",
+                              "party.popper.fill", Theme.pinkGradient, badge: 0) { hub = .party }
                     }
-                    .buttonStyle(PressableStyle())
 
-                    Button { online = true } label: {
-                        HStack(spacing: 16) {
-                            Image(systemName: "qrcode.viewfinder")
-                                .font(.system(size: 34, weight: .semibold))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Battle nearby").font(.rounded(.title3, weight: .heavy))
-                                Text("Scan each other's QR code. No internet needed: Bluetooth, the same Wi‑Fi or a hotspot.")
-                                    .font(.rounded(.subheadline)).opacity(0.9)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.headline)
-                        }
-                        .foregroundStyle(.white)
-                        .streetBlock(Theme.warmGradient)
-                    }
-                    .buttonStyle(PressableStyle())
-
-                    HStack(spacing: 12) {
-                        tile("Same phone", "Split screen duel on one phone", "iphone.gen3", Theme.skyGradient) { local = true }
-                        tile("Shop", "Avatars, frames, titles, effects", "bag.fill", Theme.goldGradient) { shop = true }
-                    }
+                    tile("Shop", "Frames, titles, hits, auras, stickers", "bag.fill", Theme.goldGradient) { shop = true }
 
                     howItWorks
                     stats
@@ -129,20 +97,53 @@ struct ArenaView: View {
             .scrollIndicators(.hidden)
             .navigationTitle("Arena")
         }
-        .fullScreenCover(isPresented: $online) {
-            OnlineDuelView().environment(store).environment(arena)
+        .fullScreenCover(item: $hub) { start in
+            OnlineHub(startAt: start).environment(store).environment(arena).sheetSounds()
         }
-        .fullScreenCover(isPresented: $internet) {
-            OnlineHub().environment(store).environment(arena)
-        }
-        .fullScreenCover(isPresented: $local) {
-            LocalDuelView().environment(store).environment(arena)
+        .task(id: retry) {
+            reachable = nil
+            reachable = await OnlineService.shared.reachable()
         }
         .sheet(isPresented: $shop) {
-            ShopView(card: myCard).environment(arena)
+            ShopView(card: myCard).environment(store).environment(arena).sheetSounds()
                 .presentationDetents([.large])
                 .presentationCornerRadius(32)
         }
+    }
+
+    private var waiting: Int {
+        (OnlineService.shared.inbox?.challenges.count ?? 0) + Int(OnlineService.shared.inbox?.requests ?? 0)
+    }
+
+    private var offline: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.slash").font(.system(size: 40, weight: .semibold)).foregroundStyle(.secondary)
+            Text("battles need internet").font(.rounded(.title3, weight: .heavy))
+            Text("Lessons, stories and reviews work offline. Come back here when you're connected.")
+                .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            BigButton(title: "try again", systemImage: "arrow.clockwise") { retry += 1 }
+        }
+        .frame(maxWidth: .infinity)
+        .cardSurface()
+    }
+
+    private func entry(_ title: String, _ text: String, _ icon: String, _ gradient: LinearGradient, badge: Int,
+                       action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon).font(.system(size: 34, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.rounded(.title3, weight: .heavy))
+                    Text(text).font(.rounded(.subheadline)).opacity(0.9).multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                if badge > 0 { Pill(text: "\(badge) new", color: .white) }
+                Image(systemName: "chevron.right").font(.headline)
+            }
+            .foregroundStyle(.white)
+            .streetBlock(gradient)
+        }
+        .buttonStyle(PressableStyle())
     }
 
     private func tile(_ title: String, _ sub: String, _ icon: String, _ g: LinearGradient, action: @escaping () -> Void) -> some View {
@@ -167,7 +168,7 @@ struct ArenaView: View {
     private var howItWorks: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Games").font(.rounded(.headline, weight: .bold))
-            ForEach(DuelMode.allCases) { m in
+            ForEach(battleModes()) { m in
                 HStack(alignment: .top, spacing: 12) {
                     Text(m.emoji).font(.title2)
                     VStack(alignment: .leading, spacing: 2) {
@@ -216,7 +217,7 @@ struct ArenaView: View {
                 Text("Rivals").font(.rounded(.headline, weight: .bold))
                 ForEach(arena.sortedRivals) { r in
                     HStack(spacing: 12) {
-                        Text(Catalog.item(r.avatar)?.symbol ?? "🐣").font(.title)
+                        PictureView(id: r.id, name: r.name, path: r.picture ?? "", size: 38)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(r.name).font(.rounded(.headline, weight: .bold))
                             Text(r.lastPlayed.formatted(.relative(presentation: .named)))
@@ -239,7 +240,7 @@ struct ShopView: View {
     @Environment(ArenaStore.self) private var arena
     @Environment(\.dismiss) private var dismiss
     let card: PlayerCard
-    @State private var kind: CosmeticKind = .avatar
+    @State private var kind: CosmeticKind = .frame
     @State private var boughtTick = 0
     @State private var deniedTick = 0
     @State private var confetti = 0
@@ -251,7 +252,7 @@ struct ShopView: View {
 
     private var preview: PlayerCard {
         var c = card
-        c.avatar = arena.avatar; c.frame = arena.frame; c.title = arena.title; c.effect = arena.effect
+        c.frame = arena.frame; c.title = arena.title; c.effect = arena.effect
         c.sticker = arena.sticker; c.aura = arena.aura
         return c
     }
@@ -261,7 +262,7 @@ struct ShopView: View {
         ZStack {
             RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).fill(Theme.nightGradient)
             HStack {
-                Text(preview.avatarSymbol).font(.system(size: 40))
+                MyPicture(size: 48)
                 Spacer()
                 Text("🎯").font(.system(size: 40))
             }
@@ -308,7 +309,7 @@ struct ShopView: View {
                 if kind == .effect {
                     demoStage.transition(.opacity.combined(with: .scale(scale: 0.96)))
                 } else {
-                    PlayerCardView(card: preview, compact: true)
+                    PlayerCardView(card: preview, compact: true) { MyPicture(size: 54) }
                         .animation(Theme.bouncy, value: preview)
                 }
                 Picker("Kind", selection: $kind) {
@@ -327,8 +328,8 @@ struct ShopView: View {
             .padding(20)
             ConfettiView(trigger: confetti, sound: nil)
         }
-        .sensoryFeedback(.success, trigger: boughtTick)
-        .sensoryFeedback(.error, trigger: deniedTick)
+        .haptic(.success, trigger: boughtTick)
+        .haptic(.error, trigger: deniedTick)
     }
 
     private func itemTile(_ item: Cosmetic) -> some View {
@@ -339,13 +340,14 @@ struct ShopView: View {
             if item.kind == .effect {
                 demoEffect = item.id
                 demoTick += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) { SFX.shared.playHit(item.id) }
             }
             if owned {
                 withAnimation(Theme.bouncy) { arena.equip(item) }
             } else if arena.buy(item) {
                 boughtTick += 1
                 confetti += 1
-                SFX.shared.play(.coin)
+                SFX.shared.play(.purchase)
             } else {
                 deniedTick += 1
                 SFX.shared.play(.wrong)
@@ -381,12 +383,12 @@ struct ShopView: View {
     @ViewBuilder
     private func itemPreview(_ item: Cosmetic) -> some View {
         switch item.kind {
-        case .avatar, .effect:
+        case .effect:
             Text(item.symbol).font(.system(size: 48))
         case .aura:
             ZStack {
                 AuraView(auraId: item.id, radius: 22).frame(width: 110, height: 90)
-                Text(item.symbol.isEmpty ? "🚫" : "🐣").font(.system(size: 36))
+                if item.symbol.isEmpty { Text("🚫").font(.system(size: 36)) } else { MyPicture(size: 38) }
             }
         case .sticker:
             if item.symbol.isEmpty {

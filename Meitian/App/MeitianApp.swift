@@ -60,6 +60,8 @@ struct RootView: View {
 }
 
 struct MainTabs: View {
+    @Environment(AppStore.self) private var store
+    @Environment(ArenaStore.self) private var arena
     @State private var tab = 0
 
     var body: some View {
@@ -77,7 +79,29 @@ struct MainTabs: View {
                 .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
                 .tag(3)
         }
-        .sensoryFeedback(.selection, trigger: tab)
+        .haptic(.selection, trigger: tab)
+        .onChange(of: tab) { _, _ in SFX.shared.play(.tabSwitch) }
         .overlay { MilestoneCelebration() }
+        .overlay {
+            if let theme = store.arenaReveal {
+                ArenaReveal(theme: theme) { withAnimation(Theme.spring) { store.arenaReveal = nil } }
+                    .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .top) {
+            if let coins = arena.refunded {
+                Text("Avatars were retired, +\(coins) 🪙 refunded")
+                    .font(.rounded(.subheadline, weight: .bold)).foregroundStyle(Theme.background)
+                    .padding(.horizontal, 18).padding(.vertical, 10)
+                    .background(Theme.ink, in: Capsule())
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .task {
+                        SFX.shared.play(.coin)
+                        try? await Task.sleep(for: .seconds(4.5))
+                        withAnimation(Theme.spring) { arena.refunded = nil }
+                    }
+            }
+        }
     }
 }

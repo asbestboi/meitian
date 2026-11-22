@@ -40,11 +40,17 @@ extension Word {
 enum Prefs {
     static let swears = "swearWords"
     static let sounds = "soundEffects"
+    static let volume = "soundVolume"
+    static let haptics = "haptics"
     static let listening = "listeningExercises"
     static let speaking = "speakingExercises"
     /// "Can't listen / speak right now": timestamps until which those exercises are paused.
     static let noListenUntil = "noListenUntil"
     static let noSpeakUntil = "noSpeakUntil"
+
+    /// Sound effects, 0–1.
+    static var soundVolume: Double { UserDefaults.standard.object(forKey: volume) as? Double ?? 0.8 }
+    static var hapticsOn: Bool { UserDefaults.standard.object(forKey: haptics) as? Bool ?? true }
 
     static var swearsOn: Bool { UserDefaults.standard.bool(forKey: swears) }
 

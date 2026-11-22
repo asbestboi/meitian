@@ -176,7 +176,7 @@ pub fn arena_look(theme: ArenaTheme) -> ArenaLook {
                     }
                 }),
             ],
-            particles: EffectSpec { rate: 0.8, lifetime: 12.0, size: 46.0, speed: 14.0, gravity: 0.0, spread: 30.0, ..drift(Dot, &[], &["#FFFFFF", "#E4EAF4"]) },
+            particles: EffectSpec { rate: 0.7, lifetime: 14.0, size: 15.0, speed: 12.0, gravity: 0.0, spin: 0.0, ..drift(Glyph, &["☁️"], &["#FFFFFF"]) },
             rising: false,
         },
         4 => ArenaLook {

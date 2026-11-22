@@ -816,7 +816,7 @@ private struct StoryAttempt: View {
         }
         .padding(16)
         .background(Theme.hot.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-        .sensoryFeedback(.selection, trigger: picked)
+        .haptic(.selection, trigger: picked)
     }
 
     private func optionColor(_ i: Int, _ q: StoryQuestion) -> Color {

@@ -4,40 +4,54 @@ import Observation
 
 // MARK: - Sound effects
 
-/// Little synthesized sound effects (no audio files). Lo-fi on purpose, to fit the street look.
+/// Sound effects, synthesized by the Rust core (the same on Android).
 final class SFX {
-    enum Sound: CaseIterable { case correct, wrong, hit, coin, win, lose, tick, go, swoosh, micOn, micOff, newWord, heartLost, outOfHearts }
-
     static let shared = SFX()
 
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
     private var next = 0
-    private var buffers: [Sound: AVAudioPCMBuffer] = [:]
-    private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+    private var buffers: [SoundId: AVAudioPCMBuffer] = [:]
+    private var hits: [String: AVAudioPCMBuffer] = [:]
+    private let format = AVAudioFormat(standardFormatWithSampleRate: Double(soundSampleRate()), channels: 1)!
 
     private init() {
-        for _ in 0..<4 {
+        for _ in 0..<6 {
             let p = AVAudioPlayerNode()
             engine.attach(p)
             engine.connect(p, to: engine.mainMixerNode, format: format)
             players.append(p)
         }
-        engine.mainMixerNode.outputVolume = 0.55
-        for s in Sound.allCases { buffers[s] = render(s) }
     }
 
     var enabled: Bool { UserDefaults.standard.object(forKey: Prefs.sounds) as? Bool ?? true }
 
-    func play(_ sound: Sound) {
+    func play(_ sound: SoundId) {
+        guard enabled else { return }
+        if buffers[sound] == nil { buffers[sound] = buffer(soundPcm(id: sound)) }
+        play(buffers[sound])
+    }
+
+    /// The impact of a hit effect cosmetic.
+    func playHit(_ effectId: String) {
+        guard enabled else { return }
+        let key = effectSpec(id: effectId).sound
+        if hits[key] == nil { hits[key] = buffer(hitSoundPcm(key: key)) }
+        play(hits[key])
+    }
+
+    private func play(_ buffer: AVAudioPCMBuffer?) {
         // Never touch the audio session while the microphone is recording: switching it to playback
         // silences the mic and speech recognition hears nothing.
-        guard enabled, !SpeechListener.isRecording, let buffer = buffers[sound] else { return }
-        if !engine.isRunning {
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try? engine.start()
+        guard !SpeechListener.isRecording, let buffer else { return }
+        // ambient: effects respect the silent switch and mix with music (speech keeps its own session)
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .ambient && !Speaker.shared.isSpeaking {
+            try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
         }
+        if !engine.isRunning { try? engine.start() }
         guard engine.isRunning else { return }
+        engine.mainMixerNode.outputVolume = Float(Prefs.soundVolume)
         let p = players[next]
         next = (next + 1) % players.count
         p.stop()
@@ -45,90 +59,19 @@ final class SFX {
         p.play()
     }
 
-    // MARK: synthesis
-
-    private struct Note { var freq: Double; var dur: Double; var wave: Int = 0; var bend: Double = 0; var vol: Double = 1 }
-
-    private func render(_ s: Sound) -> AVAudioPCMBuffer {
-        switch s {
-        case .correct: return tones([Note(freq: 880, dur: 0.08, wave: 1), Note(freq: 1320, dur: 0.14, wave: 1)])
-        case .wrong: return tones([Note(freq: 200, dur: 0.24, wave: 2, bend: -80, vol: 0.6)])
-        case .hit: return mix(noise(0.14, vol: 0.9), tones([Note(freq: 95, dur: 0.18, wave: 0, bend: -40)]))
-        case .coin: return tones([Note(freq: 1568, dur: 0.06, wave: 2, vol: 0.5), Note(freq: 2093, dur: 0.16, wave: 2, vol: 0.5)])
-        case .win: return tones([523.0, 659.0, 784.0, 1047.0].map { Note(freq: $0, dur: 0.11, wave: 1) } + [Note(freq: 1047, dur: 0.25, wave: 1)])
-        case .lose: return tones([392.0, 330.0, 262.0].map { Note(freq: $0, dur: 0.16, wave: 2, vol: 0.55) })
-        case .tick: return tones([Note(freq: 660, dur: 0.07, wave: 1, vol: 0.7)])
-        case .go: return tones([Note(freq: 990, dur: 0.2, wave: 1)])
-        case .swoosh: return noise(0.16, vol: 0.35, sweep: true)
-        case .micOn: return tones([Note(freq: 740, dur: 0.06, wave: 0), Note(freq: 1110, dur: 0.08, wave: 0)])
-        case .micOff: return tones([Note(freq: 1110, dur: 0.06, wave: 0), Note(freq: 740, dur: 0.08, wave: 0)])
-        case .newWord: return tones([Note(freq: 1319, dur: 0.07, vol: 0.45), Note(freq: 1760, dur: 0.22, vol: 0.45)])
-        case .heartLost:
-            return mix(noise(0.08, vol: 0.4), tones([Note(freq: 440, dur: 0.1, wave: 1, bend: -120, vol: 0.7),
-                                                     Note(freq: 262, dur: 0.2, wave: 1, bend: -90, vol: 0.7)]))
-        case .outOfHearts:
-            return tones([Note(freq: 392, dur: 0.16, wave: 1, vol: 0.7), Note(freq: 311, dur: 0.16, wave: 1, vol: 0.7),
-                          Note(freq: 233, dur: 0.36, wave: 1, bend: -50, vol: 0.7)])
-        }
-    }
-
-    private func buffer(_ samples: [Float]) -> AVAudioPCMBuffer {
-        let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))!
-        b.frameLength = AVAudioFrameCount(samples.count)
-        let ch = b.floatChannelData![0]
-        for (i, v) in samples.enumerated() { ch[i] = v }
-        return b
-    }
-
-    private func tones(_ notes: [Note]) -> AVAudioPCMBuffer {
-        let sr = 44100.0
-        var out: [Float] = []
-        for n in notes {
-            let count = Int(n.dur * sr)
-            var phase = 0.0
+    /// 16-bit samples from the core, as the engine's floats.
+    private func buffer(_ pcm: Data) -> AVAudioPCMBuffer? {
+        let count = pcm.count / 2
+        guard count > 0, let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
+              let out = b.floatChannelData?[0] else { return nil }
+        b.frameLength = AVAudioFrameCount(count)
+        pcm.withUnsafeBytes { raw in
             for i in 0..<count {
-                let t = Double(i) / sr
-                let f = n.freq + n.bend * (t / n.dur)
-                phase += f / sr
-                let x = phase.truncatingRemainder(dividingBy: 1)
-                var v: Double
-                switch n.wave {
-                case 1: v = 1 - 4 * abs(x - 0.5)                 // triangle
-                case 2: v = x < 0.5 ? 0.6 : -0.6                  // square
-                default: v = sin(2 * .pi * x)                     // sine
-                }
-                v = (v * 8).rounded() / 8                          // light bitcrush for grit
-                let attack = min(1, t / 0.005)
-                let decay = exp(-3.5 * t / n.dur)
-                out.append(Float(v * attack * decay * n.vol * 0.5))
+                let sample = Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self))
+                out[i] = Float(sample) / 32768
             }
         }
-        return buffer(out)
-    }
-
-    private func noise(_ dur: Double, vol: Double, sweep: Bool = false) -> AVAudioPCMBuffer {
-        let sr = 44100.0
-        let count = Int(dur * sr)
-        var out: [Float] = []
-        var last = 0.0
-        for i in 0..<count {
-            let t = Double(i) / sr
-            let raw = Double.random(in: -1...1)
-            // one-pole low-pass; a sweep opens the filter for a "whoosh"
-            let a = sweep ? 0.05 + 0.6 * (t / dur) : 0.35
-            last += a * (raw - last)
-            let env = sweep ? sin(.pi * t / dur) : exp(-6 * t / dur)
-            out.append(Float(last * env * vol))
-        }
-        return buffer(out)
-    }
-
-    private func mix(_ a: AVAudioPCMBuffer, _ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
-        let n = Int(max(a.frameLength, b.frameLength))
-        var out = [Float](repeating: 0, count: n)
-        for i in 0..<Int(a.frameLength) { out[i] += a.floatChannelData![0][i] }
-        for i in 0..<Int(b.frameLength) { out[i] += b.floatChannelData![0][i] }
-        return buffer(out.map { max(-1, min(1, $0)) })
+        return b
     }
 }
 

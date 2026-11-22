@@ -84,8 +84,8 @@ struct QuizRunner: View {
                                         removal: .move(edge: .leading).combined(with: .opacity)))
             }
         }
-        .sensoryFeedback(.success, trigger: rightTick)
-        .sensoryFeedback(.error, trigger: wrongTick)
+        .haptic(.success, trigger: rightTick)
+        .haptic(.error, trigger: wrongTick)
         .onAppear {
             if items.isEmpty {
                 if tagNew { newIds = store.newIds(questions.map(\.word)) }

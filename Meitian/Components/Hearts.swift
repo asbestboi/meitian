@@ -25,7 +25,7 @@ struct HeartsBar: View {
         .onChange(of: hearts) { old, new in
             if new < old { lose(new) }
         }
-        .sensoryFeedback(.error, trigger: lostTick)
+        .haptic(.error, trigger: lostTick)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(hearts) of \(total) hearts left")
     }
@@ -75,7 +75,7 @@ struct OutOfHeartsView: View {
             BigButton(title: "Retry lesson", systemImage: "arrow.counterclockwise", gradient: Theme.warmGradient) { onRetry() }
             BigButton(title: "Not now") { onQuit() }
         }
-        .sensoryFeedback(.error, trigger: shown)
+        .haptic(.error, trigger: shown)
         .onAppear {
             SFX.shared.play(.outOfHearts)
             withAnimation(Theme.bouncy) { shown = true }

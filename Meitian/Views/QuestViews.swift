@@ -37,7 +37,7 @@ struct QuestCard: View {
             freezeRow
         }
         .cardSurface(padding: 16)
-        .sensoryFeedback(.success, trigger: paid)
+        .haptic(.success, trigger: paid)
     }
 
     private func row(_ q: QuestStatus) -> some View {
@@ -64,7 +64,7 @@ struct QuestCard: View {
                     withAnimation(Theme.bouncy) { arena.coins += coins }
                     arena.save()
                     paid += 1
-                    SFX.shared.play(.coin)
+                    SFX.shared.play(.purchase)
                 } label: {
                     Text("+\(q.quest.reward)").font(.rounded(.subheadline, weight: .heavy))
                         .padding(.horizontal, 12).padding(.vertical, 8)

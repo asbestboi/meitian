@@ -86,6 +86,8 @@ struct Profile: Codable, Hashable {
     var pathStories: [String]?
     /// Sentence nodes finished on the learning path, as "level-number".
     var pathSentences: [String]?
+    /// Highest arena tier already revealed (nil: a save from before arenas).
+    var arenaSeen: Int? = 1
 }
 
 private struct SaveFile: Codable {
@@ -109,6 +111,8 @@ final class AppStore {
     var milestoneQueue: [Milestone] = []
     /// Set when freezes just saved the streak (shown once on Today).
     var freezeNotice: Int?
+    /// An arena the learner just reached, waiting for its reveal.
+    var arenaReveal: ArenaTheme?
 
     /// Bumped whenever the day rolls over so views refresh.
     var todayKey = AppStore.key(for: .now)
@@ -121,6 +125,34 @@ final class AppStore {
     init() {
         load()
         applyFreezes()
+        checkArena()
+    }
+
+    // MARK: arenas
+
+    /// The scenery for where the learner is.
+    var arenaTheme: ArenaTheme {
+        let unit = learnedCount(level: currentLevel) / max(Int(pathUnitSize()) * max(profile.dailyGoal, 1), 1) + 1
+        return arenaFor(level: UInt8(clamping: currentLevel), unit: UInt32(clamping: unit))
+    }
+
+    /// Reaching a new arena gets a reveal; a save from before arenas just starts in its own.
+    func checkArena() {
+        let tier = Int(arenaTheme.tier)
+        let seen = profile.arenaSeen ?? 0
+        guard tier != seen else { return }
+        if let new = newArena(level: UInt8(clamping: currentLevel), seenTier: UInt32(clamping: seen)) { arenaReveal = new }
+        profile.arenaSeen = max(tier, seen)
+        save()
+    }
+
+    /// Runs something that earns XP and plays what it leads to: a new player level, the day's streak.
+    private func celebrating(_ work: () -> Void) {
+        let level = playerLevel
+        let active = today.active
+        work()
+        if playerLevel > level { SFX.shared.play(.levelUp) }
+        else if !active && today.active { SFX.shared.play(.streak) }
     }
 
     // MARK: persistence
@@ -305,6 +337,7 @@ final class AppStore {
     func passLevelTest(_ level: Int) {
         profile.confirmedLevel = max(profile.confirmedLevel, level)
         addXP(100)
+        checkArena()
     }
 
     /// Today's new words, picked once per day and then fixed.
@@ -431,21 +464,23 @@ final class AppStore {
     }
 
     func finishLearning(_ words: [Word], quizCorrect: Int) {
-        let extraLesson = today.learnedDone && words.contains { cards[$0.id] == nil }
-        for w in words where cards[w.id] == nil {
-            var s = CardState(learnedOn: todayKey)
-            s.due = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now)) ?? .now
-            cards[w.id] = s
+        celebrating {
+            let extraLesson = today.learnedDone && words.contains { cards[$0.id] == nil }
+            for w in words where cards[w.id] == nil {
+                var s = CardState(learnedOn: todayKey)
+                s.due = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now)) ?? .now
+                cards[w.id] = s
+            }
+            var t = today
+            let gained = words.count * 10 + quizCorrect * 5
+            if !t.learnedDone { t.learnedDone = true }
+            if extraLesson { t.lessons = (t.lessons ?? 0) + 1 }
+            t.xp += gained
+            today = t
+            xp += gained
+            checkMilestones()
+            save()
         }
-        var t = today
-        let gained = words.count * 10 + quizCorrect * 5
-        if !t.learnedDone { t.learnedDone = true }
-        if extraLesson { t.lessons = (t.lessons ?? 0) + 1 }
-        t.xp += gained
-        today = t
-        xp += gained
-        checkMilestones()
-        save()
     }
 
     // MARK: review
@@ -480,27 +515,31 @@ final class AppStore {
     }
 
     func addXP(_ amount: Int) {
-        var t = today
-        t.xp += amount
-        t.reviewed += 1 // counts as activity for the streak
-        today = t
-        xp += amount
-        checkMilestones()
-        save()
+        celebrating {
+            var t = today
+            t.xp += amount
+            t.reviewed += 1 // counts as activity for the streak
+            today = t
+            xp += amount
+            checkMilestones()
+            save()
+        }
     }
 
     func grade(_ word: Word, right: Bool) {
-        guard var s = cards[word.id] else { return }
-        s.grade(right)
-        cards[word.id] = s
-        var t = today
-        t.reviewed += 1
-        let gained = right ? 5 : 1
-        t.xp += gained
-        today = t
-        xp += gained
-        checkMilestones()
-        save()
+        celebrating {
+            guard var s = cards[word.id] else { return }
+            s.grade(right)
+            cards[word.id] = s
+            var t = today
+            t.reviewed += 1
+            let gained = right ? 5 : 1
+            t.xp += gained
+            today = t
+            xp += gained
+            checkMilestones()
+            save()
+        }
     }
 
     // MARK: challenge

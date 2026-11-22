@@ -206,13 +206,13 @@ struct SwearSprintView: View {
             }
             Spacer(minLength: 0)
             if let q = question {
-                DuelQuestionPanel(question: q, picked: picked, locked: picked != nil, reveal: reveal) { pick($0) }
+                QuizPanel(question: q, picked: picked, locked: picked != nil, reveal: reveal) { pick($0) }
                     .modifier(ShakeEffect(amount: shake))
             }
             Spacer(minLength: 0)
         }
-        .sensoryFeedback(.success, trigger: correct)
-        .sensoryFeedback(.error, trigger: shake)
+        .haptic(.success, trigger: correct)
+        .haptic(.error, trigger: shake)
     }
 
     private func finish() {

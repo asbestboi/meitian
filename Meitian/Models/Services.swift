@@ -10,6 +10,8 @@ final class Speaker {
         return zh.max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: "zh-CN")
     }()
 
+    var isSpeaking: Bool { synth.isSpeaking }
+
     func stop() {
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
     }

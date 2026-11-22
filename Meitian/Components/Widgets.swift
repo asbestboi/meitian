@@ -6,7 +6,7 @@ import SwiftUI
 struct ConfettiView: View {
     var trigger: Int
     /// Celebration sound played with the burst (nil for silent).
-    var sound: SFX.Sound? = .win
+    var sound: SoundId? = .win
 
     private struct Piece {
         var x, y, vx, vy, spin, angle, size: Double
@@ -138,7 +138,7 @@ struct SpeakButton: View {
                 .background(tint.opacity(0.13), in: Circle())
         }
         .buttonStyle(PressableStyle(scale: 0.88))
-        .sensoryFeedback(.impact(weight: .light), trigger: tick)
+        .haptic(.impact(weight: .light), trigger: tick)
         .accessibilityLabel("Play pronunciation")
     }
 }

@@ -15,6 +15,10 @@ struct StatsView: View {
     @AppStorage(PinyinPrefs.toneColors) private var toneColors = true
     @AppStorage(Prefs.swears) private var swears = false
     @AppStorage(Prefs.sounds) private var sounds = true
+    @AppStorage(Prefs.volume) private var volume = 0.8
+    @AppStorage(Prefs.haptics) private var haptics = true
+    @State private var pictureNote: String?
+    @State private var pictureBusy = false
     @AppStorage(Prefs.listening) private var listening = true
     @AppStorage(Prefs.speaking) private var speaking = true
     @AppStorage(Prefs.noListenUntil) private var noListenUntil = 0.0
@@ -77,26 +81,33 @@ struct StatsView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .scrollIndicators(.hidden)
+        .toggleStyle(SoundToggleStyle())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private var levelCard: some View {
         HStack(spacing: 18) {
-            ProgressRing(progress: store.levelProgress, lineWidth: 12, gradient: [Theme.gold, Theme.red]) {
-                VStack(spacing: 0) {
-                    Text("Lv").font(.rounded(.caption, weight: .bold)).foregroundStyle(.secondary)
-                    Text("\(store.playerLevel)").font(.rounded(.title, weight: .heavy)).contentTransition(.numericText())
+            PictureUpload(name: store.profile.name, note: $pictureNote, busy: $pictureBusy) {
+                VStack(spacing: 6) {
+                    ProgressRing(progress: store.levelProgress, lineWidth: 8, gradient: [Theme.gold, Theme.red]) {
+                        MyPicture(size: 72)
+                    }
+                    .frame(width: 92, height: 92)
+                    let has = !(OnlineService.shared.profile?.avatar ?? "").isEmpty
+                    Text(pictureBusy ? "…" : has ? "change picture" : "+ add picture")
+                        .font(.rounded(.caption, weight: .bold)).foregroundStyle(Theme.red)
                 }
             }
-            .frame(width: 92, height: 92)
             VStack(alignment: .leading, spacing: 6) {
                 Text(store.profile.name.isEmpty ? "Learner" : store.profile.name)
                     .font(.rounded(.title2, weight: .bold))
-                Text("\(store.xp) XP · \(store.xpToNextLevel) to level \(store.playerLevel + 1)")
+                Text("Lv \(store.playerLevel) · \(store.xp) XP · \(store.xpToNextLevel) to level \(store.playerLevel + 1)")
                     .font(.rounded(.subheadline)).foregroundStyle(.secondary)
                 Pill(text: "Learning HSK \(store.currentLevel) · \(WordBank.levelTitle(store.currentLevel))",
                      color: Theme.levelColor(store.currentLevel), systemImage: "graduationcap.fill")
+                ArenaBadge(theme: store.arenaTheme, fill: Theme.background)
+                if let pictureNote { Text(pictureNote).font(.rounded(.caption)).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 0)
         }
@@ -216,7 +227,7 @@ struct StatsView: View {
         .font(.rounded(.body))
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .animation(Theme.spring, value: toneColors)
-        .sensoryFeedback(.selection, trigger: showPinyin)
+        .haptic(.selection, trigger: showPinyin)
     }
 
     private func settingsBlock<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
@@ -234,6 +245,26 @@ struct StatsView: View {
         return settingsBlock("Sound & exercises") {
             Toggle(isOn: $sounds) { Label("Sound effects", systemImage: "speaker.wave.3.fill") }
                 .padding(16)
+            if sounds {
+                Slider(value: $volume, in: 0...1) {
+                    Text("Sound volume")
+                } minimumValueLabel: {
+                    Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                } maximumValueLabel: {
+                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                } onEditingChanged: { editing in
+                    if !editing { SFX.shared.play(.coin) }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 16)
+            }
+            Divider().padding(.leading, 16)
+            Toggle(isOn: $haptics) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Haptics", systemImage: "iphone.radiowaves.left.and.right")
+                    Text("Little vibrations when you tap and answer.").font(.rounded(.caption)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(16)
             Divider().padding(.leading, 16)
             Toggle(isOn: $listening) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -298,7 +329,7 @@ struct StatsView: View {
             Divider().padding(.leading, 16)
             downloads
         }
-        .sensoryFeedback(.selection, trigger: swears)
+        .haptic(.selection, trigger: swears)
     }
 
     private var statusText: String {

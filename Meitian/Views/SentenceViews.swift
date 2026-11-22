@@ -25,6 +25,7 @@ struct TokenSentence: View {
         .sheet(item: $peek) { p in
             WordPeekSheet(word: p.word)
                 .environment(store)
+                .sheetSounds()
                 .presentationDetents([.height(300)])
                 .presentationCornerRadius(28)
         }
@@ -202,8 +203,8 @@ struct SentenceSession: View {
             .padding(20)
             ConfettiView(trigger: confetti)
         }
-        .sensoryFeedback(.success, trigger: rightTick)
-        .sensoryFeedback(.error, trigger: wrongTick)
+        .haptic(.success, trigger: rightTick)
+        .haptic(.error, trigger: wrongTick)
         .onAppear {
             if exercises.isEmpty { start() }
         }

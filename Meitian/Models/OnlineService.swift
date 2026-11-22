@@ -113,7 +113,7 @@ final class OnlineService {
             "level": store.currentLevel,
             "streak": store.streak,
             "xpTotal": store.xp,
-            "cosmetics": ["avatar": card.avatar, "aura": card.aura ?? "au.none", "fx": card.effect, "title": card.title],
+            "cosmetics": ["aura": card.aura ?? "au.none", "fx": card.effect, "title": card.title],
         ]
         if let text = try? await request("PUT", "/v1/me", .json(body)), let p = try? onlineParseProfile(json: text) {
             profile = p
@@ -169,14 +169,33 @@ final class OnlineService {
     func accept(_ id: String) async throws { _ = try await request("POST", "/v1/friends/\(id)/accept") }
     func unfriend(_ id: String) async throws { _ = try await request("DELETE", "/v1/friends/\(id)") }
 
-    func challenge(_ friendId: String, mode: DuelMode) async throws -> String {
-        let text = try await request("POST", "/v1/challenge", .json(["friendId": friendId, "mode": mode.wireName]))
+    func challenge(_ friendId: String, mode: BattleMode) async throws -> String {
+        let text = try await request("POST", "/v1/challenge", .json(["friendId": friendId, "mode": mode.info.wire]))
         let o = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
         guard let room = o?["room"] as? String else { throw OnlineError.Garbled }
         return room
     }
 
     func decline(_ room: String) async throws { _ = try await request("POST", "/v1/challenge/\(room)/decline") }
+
+    // MARK: parties
+
+    /// Opens a private party and returns its code.
+    func createParty(swears: Bool) async throws -> String {
+        try onlineParseParty(json: try await request("POST", "/v1/party", .json(["swears": swears])))
+    }
+
+    func inviteToParty(_ code: String, friendId: String) async throws {
+        _ = try await request("POST", "/v1/party/\(code)/invite", .json(["friendId": friendId]))
+    }
+
+    /// Is the server reachable? (Battles need internet; lessons don't.)
+    func reachable() async -> Bool { (try? await request("GET", "/", auth: false)) != nil }
+
+    /// Creates the online profile from the learner's name, if there isn't one yet.
+    func ensureAccount(name: String) async throws {
+        if !signedIn { try await register(nickname: nicknameFrom(name: name)) }
+    }
 
     func refreshInbox() async {
         guard signedIn, let text = try? await request("GET", "/v1/inbox") else { return }

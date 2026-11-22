@@ -1,8 +1,14 @@
 import PhotosUI
 import SwiftUI
 
-/// Online play: quick match against anyone, friends by code, leaderboards, your public profile.
+enum HubStart: String, Identifiable {
+    case play, party
+    var id: String { rawValue }
+}
+
+/// Online play: quick matches and groups, parties with friends, leaderboards, your public profile.
 struct OnlineHub: View {
+    var startAt: HubStart = .play
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
     @Environment(\.dismiss) private var dismiss
@@ -11,8 +17,8 @@ struct OnlineHub: View {
 
     enum Stage: Equatable {
         case hub
-        case searching(DuelMode)
-        case playing(room: String, mode: DuelMode, opponent: OnlineProfile?)
+        case searching(BattleMode, group: Bool)
+        case playing(path: String, mode: BattleMode?, people: [OnlineProfile], party: String?)
     }
 
     var body: some View {
@@ -21,18 +27,20 @@ struct OnlineHub: View {
             switch stage {
             case .hub:
                 if online.signedIn {
-                    OnlineTabs(close: { dismiss() },
-                               play: { stage = .searching($0) },
-                               join: { stage = .playing(room: $0, mode: $1, opponent: $2) })
+                    OnlineTabs(startAt: startAt, close: { dismiss() },
+                               play: { stage = .searching($0, group: $1) },
+                               join: join,
+                               challenge: { stage = .playing(path: "/v1/rooms/\($0)", mode: $1, people: [$2], party: nil) },
+                               party: { openParty($0, people: []) })
                 } else {
                     OnlineSetup(close: { dismiss() })
                 }
-            case .searching(let mode):
-                QuickMatchSearch(mode: mode, cancel: { stage = .hub }) { room, opponent in
-                    stage = .playing(room: room, mode: mode, opponent: opponent)
+            case .searching(let mode, let group):
+                QuickMatchSearch(mode: mode, group: group, cancel: { stage = .hub }) { room, people in
+                    stage = .playing(path: "/v1/rooms/\(room)", mode: mode, people: people, party: nil)
                 }
-            case .playing(let room, let mode, let opponent):
-                OnlineMatchView(room: room, mode: mode, opponentProfile: opponent) { stage = .hub }
+            case .playing(let path, let mode, let people, let party):
+                BattleScreen(path: path, auto: mode, partyCode: party, waitingFor: people) { stage = .hub }
             }
         }
         .animation(Theme.spring, value: stage)
@@ -40,6 +48,18 @@ struct OnlineHub: View {
             try? await online.refreshMe()
             await online.sync(store: store, arena: arena, force: true)
         }
+    }
+
+    private func join(_ c: OnlineChallenge) {
+        if c.party.isEmpty {
+            stage = .playing(path: "/v1/rooms/\(c.room)", mode: battleMode(wire: c.mode) ?? .duel, people: [c.from], party: nil)
+        } else {
+            openParty(c.party, people: [c.from])
+        }
+    }
+
+    private func openParty(_ code: String, people: [OnlineProfile]) {
+        stage = .playing(path: "/v1/party/\(code)?swears=\(Prefs.swearsOn ? 1 : 0)", mode: nil, people: people, party: code)
     }
 }
 
@@ -134,9 +154,12 @@ private func header(_ title: String, close: @escaping () -> Void) -> some View {
 // MARK: - tabs
 
 private struct OnlineTabs: View {
+    let startAt: HubStart
     let close: () -> Void
-    let play: (DuelMode) -> Void
-    let join: (String, DuelMode, OnlineProfile?) -> Void
+    let play: (BattleMode, Bool) -> Void
+    let join: (OnlineChallenge) -> Void
+    let challenge: (String, BattleMode, OnlineProfile) -> Void
+    let party: (String) -> Void
     @State private var tab = 0
     private var online: OnlineService { .shared }
 
@@ -147,7 +170,7 @@ private struct OnlineTabs: View {
                 if let me = online.profile { ProfileRow(profile: me, trailing: "\(me.rating)") }
                 HStack(spacing: 8) {
                     let requests = Int(online.inbox?.requests ?? 0)
-                    ForEach(Array(["play", requests > 0 ? "friends (\(requests))" : "friends", "ranks", "me"].enumerated()), id: \.offset) { i, t in
+                    ForEach(Array(["play", "party", requests > 0 ? "friends (\(requests))" : "friends", "ranks", "me"].enumerated()), id: \.offset) { i, t in
                         Button { withAnimation(Theme.spring) { tab = i } } label: {
                             Text(t).font(.rounded(.footnote, weight: .bold)).lineLimit(1)
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
@@ -163,13 +186,15 @@ private struct OnlineTabs: View {
             Group {
                 switch tab {
                 case 0: PlayTab(play: play, join: join)
-                case 1: FriendsTab(join: join)
-                case 2: RanksTab()
+                case 1: PartyTab(enter: party)
+                case 2: FriendsTab(challenge: challenge)
+                case 3: RanksTab()
                 default: MeTab()
                 }
             }
             .frame(maxHeight: .infinity)
         }
+        .onAppear { if startAt == .party { tab = 1 } }
         .task {
             // incoming challenges and friend requests while this screen is open
             while !Task.isCancelled {
@@ -177,24 +202,6 @@ private struct OnlineTabs: View {
                 try? await Task.sleep(for: .seconds(8))
             }
         }
-    }
-}
-
-struct OnlineAvatar: View {
-    let profile: OnlineProfile?
-    var size: CGFloat = 46
-
-    var body: some View {
-        ZStack {
-            Circle().fill(Theme.chrome)
-            if let url = OnlineService.shared.avatarURL(profile) {
-                AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { ProgressView() }
-            } else {
-                Text(Catalog.item(profile?.cosmeticAvatar ?? "")?.symbol ?? "🐣").font(.system(size: size * 0.5))
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
     }
 }
 
@@ -225,19 +232,22 @@ private struct ProfileRow: View {
     }
 }
 
+/// The modes `players` people can play, as a grid.
 private struct ModePicker: View {
-    @Binding var mode: DuelMode
+    let players: Int
+    @Binding var mode: BattleMode
+
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(DuelMode.allCases) { m in
-                Button { withAnimation(Theme.spring) { mode = m } } label: {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
+            ForEach(modesFor(players: UInt32(players))) { m in
+                Button { withAnimation(Theme.spring) { mode = m.mode } } label: {
                     VStack(spacing: 2) {
                         Text(m.emoji).font(.title3)
-                        Text(m.wireName.lowercased()).font(.rounded(.caption2, weight: .bold)).lineLimit(1)
+                        Text(m.title.lowercased()).font(.rounded(.caption2, weight: .bold)).lineLimit(1).minimumScaleFactor(0.6)
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    .foregroundStyle(mode == m ? Theme.background : .primary)
-                    .background(mode == m ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(Theme.card),
+                    .frame(maxWidth: .infinity).padding(.vertical, 8).padding(.horizontal, 2)
+                    .foregroundStyle(mode == m.mode ? Theme.background : .primary)
+                    .background(mode == m.mode ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(Theme.card),
                                 in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(PressableStyle(scale: 0.95))
@@ -247,27 +257,37 @@ private struct ModePicker: View {
 }
 
 private struct PlayTab: View {
-    let play: (DuelMode) -> Void
-    let join: (String, DuelMode, OnlineProfile?) -> Void
-    @State private var mode: DuelMode = .duel
+    let play: (BattleMode, Bool) -> Void
+    let join: (OnlineChallenge) -> Void
+    @State private var mode: BattleMode = .duel
+    @State private var group = false
 
     var body: some View {
+        let info = mode.info
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(OnlineService.shared.inbox?.challenges ?? [], id: \.room) { c in
                     ChallengeCard(challenge: c, join: join)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("quick match").font(.rounded(.title2, weight: .heavy))
-                    Text("Battle a random player near your rating, on iPhone or Android.").font(.rounded(.subheadline)).opacity(0.9)
+                    Text("\(info.emoji) \(info.title.lowercased())").font(.rounded(.title2, weight: .heavy))
+                    Text(info.blurb).font(.rounded(.subheadline)).opacity(0.9)
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .streetBlock(Theme.warmGradient)
-                ModePicker(mode: $mode)
-                Text(mode.blurb).font(.rounded(.footnote)).foregroundStyle(.secondary)
-                BigButton(title: "find an opponent", gradient: Theme.warmGradient) { play(mode) }
-                Text("Wins and losses move your rating. Both phones have to agree on the result for it to count.")
+                .streetBlock(info.gradient)
+                Picker("Players", selection: $group) {
+                    Text("1 vs 1").tag(false)
+                    Text("group of 4").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: group) { _, g in
+                    if !modesFor(players: g ? 4 : 2).contains(where: { $0.mode == mode }) { mode = .duel }
+                }
+                ModePicker(players: group ? 4 : 2, mode: $mode)
+                BigButton(title: group ? "find a group" : "find an opponent", gradient: info.gradient) { play(mode, group) }
+                Text(group ? "Groups are for coins: the better your place, the more you get. Ratings don't change."
+                     : "Wins and losses move your rating. Both phones have to agree on the result for it to count.")
                     .font(.rounded(.caption)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 18)
@@ -276,20 +296,75 @@ private struct PlayTab: View {
     }
 }
 
-private struct ChallengeCard: View {
-    let challenge: OnlineChallenge
-    let join: (String, DuelMode, OnlineProfile?) -> Void
+/// Private parties of up to four: open one, or join with a code.
+private struct PartyTab: View {
+    let enter: (String) -> Void
+    @State private var code = ""
+    @State private var busy = false
+    @State private var error: String?
 
     var body: some View {
-        let mode = DuelMode(wireName: challenge.mode)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("🎉 party").font(.rounded(.title2, weight: .heavy))
+                    Text("Up to four friends, every mode. You get a code to share; the host picks the games.")
+                        .font(.rounded(.subheadline)).opacity(0.9)
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .streetBlock(Theme.pinkGradient)
+                BigButton(title: busy ? "…" : "start a party", gradient: Theme.pinkGradient, enabled: !busy) { start() }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("join a party").font(.rounded(.headline, weight: .bold))
+                    TextField("party code", text: $code)
+                        .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                        .font(.rounded(.headline, weight: .semibold))
+                        .padding(12)
+                        .background(Theme.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .onChange(of: code) { _, c in
+                            let clean = String(c.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
+                            if clean != c { code = clean }
+                        }
+                    BigButton(title: "join", gradient: Theme.jadeGradient, enabled: code.count == 6) { enter(code) }
+                }
+                .cardSurface(padding: 14)
+                if let error { Text(error).font(.rounded(.subheadline, weight: .bold)).foregroundStyle(Theme.red) }
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 30)
+        }
+    }
+
+    private func start() {
+        busy = true
+        error = nil
+        Task {
+            do { enter(try await OnlineService.shared.createParty(swears: Prefs.swearsOn)) }
+            catch { self.error = OnlineService.describe(error) }
+            busy = false
+        }
+    }
+}
+
+private struct ChallengeCard: View {
+    let challenge: OnlineChallenge
+    let join: (OnlineChallenge) -> Void
+
+    private var text: String {
+        if !challenge.party.isEmpty { return "\(challenge.from.nickname) invites you to a party 🎉" }
+        let mode = battleMode(wire: challenge.mode)?.info
+        return "\(challenge.from.nickname) challenges you to \(mode?.title.lowercased() ?? "a battle") \(mode?.emoji ?? "⚔️")"
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 OnlineAvatar(profile: challenge.from)
-                Text("\(challenge.from.nickname) challenges you to \(mode.title.lowercased()) \(mode.emoji)")
-                    .font(.rounded(.headline, weight: .bold))
+                Text(text).font(.rounded(.headline, weight: .bold))
             }
             HStack(spacing: 10) {
-                BigButton(title: "accept", gradient: Theme.jadeGradient) { join(challenge.room, mode, challenge.from) }
+                BigButton(title: challenge.party.isEmpty ? "accept" : "join", gradient: Theme.jadeGradient) { join(challenge) }
                 BigButton(title: "no thanks") {
                     Task {
                         try? await OnlineService.shared.decline(challenge.room)
@@ -304,11 +379,11 @@ private struct ChallengeCard: View {
 }
 
 private struct FriendsTab: View {
-    let join: (String, DuelMode, OnlineProfile?) -> Void
+    let challenge: (String, BattleMode, OnlineProfile) -> Void
     @State private var data: OnlineFriends?
     @State private var code = ""
     @State private var note: String?
-    @State private var mode: DuelMode = .duel
+    @State private var mode: BattleMode = .duel
     @State private var viewing: OnlineProfile?
     private var online: OnlineService { .shared }
 
@@ -354,14 +429,14 @@ private struct FriendsTab: View {
                 let friends = data?.friends ?? []
                 if !friends.isEmpty {
                     Text("challenge mode").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary).padding(.top, 6)
-                    ModePicker(mode: $mode)
+                    ModePicker(players: 2, mode: $mode)
                 }
                 ForEach(friends, id: \.id) { p in
                     HStack {
                         Button { viewing = p } label: { ProfileRow(profile: p) }.buttonStyle(.plain)
                         Button {
                             Task {
-                                do { join(try await online.challenge(p.id, mode: mode), mode, p) }
+                                do { challenge(try await online.challenge(p.id, mode: mode), mode, p) }
                                 catch { note = OnlineService.describe(error) }
                             }
                         } label: { Pill(text: "battle", color: Theme.red, systemImage: "bolt.fill") }
@@ -576,26 +651,30 @@ private struct MeTab: View {
 // MARK: - quick match
 
 private struct QuickMatchSearch: View {
-    let mode: DuelMode
+    let mode: BattleMode
+    let group: Bool
     let cancel: () -> Void
-    let found: (String, OnlineProfile) -> Void
+    let found: (String, [OnlineProfile]) -> Void
     @State private var problem: String?
     @State private var started = Date.now
+    @State private var waiting = 1
     @State private var attempt = 0
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let info = mode.info
         VStack(spacing: 18) {
             Spacer()
-            Text(mode.emoji).font(.system(size: 64))
+            Text(info.emoji).font(.system(size: 64))
                 .frame(width: 150, height: 150)
-                .background(mode.gradient, in: Circle())
-                .scaleEffect(pulse ? 1.12 : 0.88)
+                .background(info.gradient, in: Circle())
+                .scaleEffect(reduceMotion ? 1 : pulse ? 1.12 : 0.88)
                 .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: pulse)
-            Text(problem ?? "looking for an opponent…").font(.rounded(.title2, weight: .heavy)).multilineTextAlignment(.center)
+            Text(problem ?? (group ? "looking for a group… \(waiting)/4" : "looking for an opponent…"))
+                .font(.rounded(.title2, weight: .heavy)).multilineTextAlignment(.center)
             TimelineView(.periodic(from: .now, by: 1)) { tl in
-                Text(problem != nil ? "Check your internet and try again."
-                     : "\(mode.title) · \(Int(tl.date.timeIntervalSince(started)))s. The search widens the longer you wait.")
+                Text(hint(info, seconds: Int(tl.date.timeIntervalSince(started))))
                     .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             Spacer()
@@ -607,115 +686,36 @@ private struct QuickMatchSearch: View {
         .task(id: attempt) { await search() }
     }
 
+    private func hint(_ info: ModeInfo, seconds: Int) -> String {
+        if problem != nil { return "Check your internet and try again." }
+        let base = "\(info.title) · \(seconds)s. "
+        if !group { return base + "The search widens the longer you wait." }
+        return base + (info.minPlayers < 4 ? "Starts with three if nobody else shows up." : "This one needs four players.")
+    }
+
     private func search() async {
         started = .now
-        let task = OnlineService.socket(path: "/v1/queue?mode=\(mode.wireName)&swears=\(Prefs.swearsOn ? 1 : 0)")
+        waiting = 1
+        let task = OnlineService.socket(path: queuePath(mode: mode, group: group, swears: Prefs.swearsOn))
         task.resume()
         defer { task.cancel(with: .normalClosure, reason: nil) }
         while !Task.isCancelled {
             do {
                 guard case .string(let text) = try await task.receive() else { continue }
-                if case .matched(let room, _, let opponent) = onlineEvent(json: text) {
-                    found(room, opponent)
+                switch queueEvent(json: text) {
+                case .waiting(let count):
+                    waiting = Int(count)
+                case .matched(let room, _, let opponents):
+                    SFX.shared.play(.go)
+                    found(room, opponents)
                     return
+                default:
+                    break
                 }
             } catch {
                 if !Task.isCancelled { problem = "Lost the connection to the server." }
                 return
             }
         }
-    }
-}
-
-// MARK: - an online battle
-
-private struct OnlineMatchView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(ArenaStore.self) private var arena
-    let room: String
-    let mode: DuelMode
-    let opponentProfile: OnlineProfile?
-    let close: () -> Void
-    @State private var connection: DuelConnection?
-    @State private var match: DuelMatch?
-    @State private var confetti = 0
-
-    var body: some View {
-        ZStack {
-            if let match, let connection, match.opponent != nil {
-                MatchScreen(match: match, confetti: $confetti, close: leave)
-                    .disabled(connection.state != .connected && match.winner == nil)
-                    .blur(radius: connection.state == .connected || match.winner != nil ? 0 : 6)
-                if let r = connection.rating {
-                    Text(r.counted ? "rating \(r.rating) (\(r.delta >= 0 ? "+" : "")\(r.delta))" : "the phones disagreed: no rating change")
-                        .font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.white)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                        .background(Theme.ink, in: Capsule())
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .padding(.top, 56)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                if connection.state != .connected && match.winner == nil {
-                    VStack(spacing: 12) {
-                        ProgressView().controlSize(.large)
-                        Text("Waiting for \(match.opponent?.name ?? "them") to reconnect…").font(.rounded(.headline, weight: .bold))
-                            .multilineTextAlignment(.center)
-                        Text("If they're gone for 30 seconds, you win.").font(.rounded(.subheadline)).foregroundStyle(.secondary)
-                        Button("Leave match", role: .destructive, action: leave).font(.rounded(.headline, weight: .bold))
-                    }
-                    .padding(24)
-                    .frame(maxWidth: 340)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                }
-            } else {
-                VStack(spacing: 14) {
-                    Spacer()
-                    OnlineAvatar(profile: opponentProfile, size: 110)
-                    Text(opponentProfile.map { "\($0.nickname) #\($0.tag)" } ?? "opponent").font(.rounded(.title2, weight: .heavy))
-                    Text(connection?.onlineGone == true ? "This battle isn't available any more (declined or expired)."
-                         : connection?.peerWaiting == true ? "Waiting for them to join… \(mode.emoji) \(mode.title)" : "Connecting…")
-                        .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    if connection?.onlineGone != true { ProgressView() }
-                    Spacer()
-                    BigButton(title: "leave", action: leave)
-                }
-                .padding(24)
-            }
-            ConfettiView(trigger: confetti)
-        }
-        .animation(Theme.spring, value: match?.opponent)
-        .animation(Theme.spring, value: connection?.rating)
-        .onAppear {
-            setUp()
-            UIApplication.shared.isIdleTimerDisabled = true
-        }
-        .onDisappear {
-            connection?.stop()
-            UIApplication.shared.isIdleTimerDisabled = false
-            Task { await OnlineService.shared.sync(store: store, arena: arena, force: true) }
-        }
-        .onChange(of: connection?.state) { _, s in
-            if s == .connected { match?.sayHello() }
-        }
-    }
-
-    private func setUp() {
-        guard connection == nil else { return }
-        let card = arena.card(name: store.profile.name, level: store.currentLevel, wordsLearned: store.cards.count)
-        let c = DuelConnection(myId: arena.playerId, name: store.profile.name)
-        let m = DuelMatch(connection: c, me: card)
-        m.autoMode = mode
-        m.onFinish = { [arena, weak m] outcome, bonus, damage, fastest in
-            guard let m, let opp = m.opponent else { return 0 }
-            return arena.record(outcome, mode: m.mode, against: opp, bonus: bonus, damage: damage, fastest: fastest)
-        }
-        c.connectOnline(room: room)
-        connection = c
-        match = m
-    }
-
-    private func leave() {
-        connection?.stop()
-        close()
     }
 }

@@ -88,10 +88,10 @@ struct MilestoneCelebration: View {
                 .id(m.index)
                 .onAppear { confetti += 1 }
             }
-            ConfettiView(trigger: confetti).allowsHitTesting(false)
+            ConfettiView(trigger: confetti, sound: .milestone).allowsHitTesting(false)
         }
         .animation(Theme.bouncy, value: store.milestoneQueue.first?.index)
-        .sensoryFeedback(.success, trigger: confetti)
+        .haptic(.success, trigger: confetti)
     }
 
     private func dismiss() {

@@ -126,6 +126,8 @@ struct HitEffectView: View {
     var from: UnitPoint = .bottom
     var to: UnitPoint = .top
     var damage: Int? = nil
+    /// Also fire for the trigger it's created with (views that appear because of a hit).
+    var fireOnAppear = false
     /// Called at impact with the shake strength, so the screen can shake.
     var onImpact: (CGFloat) -> Void = { _ in }
 
@@ -188,6 +190,7 @@ struct HitEffectView: View {
         }
         .allowsHitTesting(false)
         .onChange(of: trigger) { _, _ in fire() }
+        .onAppear { if fireOnAppear { fire() } }
     }
 
     private func fire() {

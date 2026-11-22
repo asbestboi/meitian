@@ -4,11 +4,10 @@ import Observation
 // MARK: - Cosmetics
 
 enum CosmeticKind: String, Codable, CaseIterable, Identifiable {
-    case avatar, frame, title, effect, aura, sticker
+    case frame, title, effect, aura, sticker
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .avatar: return "Avatars"
         case .frame: return "Frames"
         case .title: return "Titles"
         case .effect: return "Hits"
@@ -22,7 +21,7 @@ struct Cosmetic: Identifiable, Hashable {
     let id: String
     let kind: CosmeticKind
     let name: String
-    /// Emoji for avatars/effects, Chinese text for titles.
+    /// Emoji for effects, Chinese text for titles.
     let symbol: String
     let price: Int
     /// Only shown (and usable) with swear words turned on.
@@ -31,19 +30,6 @@ struct Cosmetic: Identifiable, Hashable {
 
 enum Catalog {
     static let all: [Cosmetic] = [
-        // avatars
-        Cosmetic(id: "av.chick", kind: .avatar, name: "Chick", symbol: "🐣", price: 0),
-        Cosmetic(id: "av.panda", kind: .avatar, name: "Panda", symbol: "🐼", price: 60),
-        Cosmetic(id: "av.cat", kind: .avatar, name: "Lucky Cat", symbol: "🐱", price: 60),
-        Cosmetic(id: "av.frog", kind: .avatar, name: "Frog", symbol: "🐸", price: 80),
-        Cosmetic(id: "av.monkey", kind: .avatar, name: "Monkey King", symbol: "🐵", price: 100),
-        Cosmetic(id: "av.tiger", kind: .avatar, name: "Tiger", symbol: "🐯", price: 120),
-        Cosmetic(id: "av.fox", kind: .avatar, name: "Fox", symbol: "🦊", price: 120),
-        Cosmetic(id: "av.dumpling", kind: .avatar, name: "Dumpling", symbol: "🥟", price: 150),
-        Cosmetic(id: "av.boba", kind: .avatar, name: "Bubble Tea", symbol: "🧋", price: 150),
-        Cosmetic(id: "av.lantern", kind: .avatar, name: "Lantern", symbol: "🏮", price: 200),
-        Cosmetic(id: "av.unicorn", kind: .avatar, name: "Qilin", symbol: "🦄", price: 250),
-        Cosmetic(id: "av.dragon", kind: .avatar, name: "Dragon", symbol: "🐲", price: 300),
         // frames
         Cosmetic(id: "fr.lantern", kind: .frame, name: "Lantern", symbol: "", price: 0),
         Cosmetic(id: "fr.jade", kind: .frame, name: "Jade", symbol: "", price: 80),
@@ -70,14 +56,6 @@ enum Catalog {
         Cosmetic(id: "fx.blossom", kind: .effect, name: "Blossom", symbol: "🌸", price: 150),
         Cosmetic(id: "fx.dragon", kind: .effect, name: "Dragon Strike", symbol: "🐉", price: 400),
         // street drop
-        Cosmetic(id: "av.skull", kind: .avatar, name: "Skull", symbol: "💀", price: 140),
-        Cosmetic(id: "av.gorilla", kind: .avatar, name: "Gorilla", symbol: "🦍", price: 160),
-        Cosmetic(id: "av.rat", kind: .avatar, name: "Street Rat", symbol: "🐀", price: 90),
-        Cosmetic(id: "av.oni", kind: .avatar, name: "Oni Mask", symbol: "👹", price: 220),
-        Cosmetic(id: "av.alien", kind: .avatar, name: "Alien", symbol: "👽", price: 180),
-        Cosmetic(id: "av.robot", kind: .avatar, name: "Robot", symbol: "🤖", price: 180),
-        Cosmetic(id: "av.cool", kind: .avatar, name: "Too Cool", symbol: "😎", price: 110),
-        Cosmetic(id: "av.angry", kind: .avatar, name: "Rage", symbol: "🤬", price: 120, swear: true),
         Cosmetic(id: "fr.concrete", kind: .frame, name: "Concrete", symbol: "", price: 90),
         Cosmetic(id: "fr.acid", kind: .frame, name: "Acid", symbol: "", price: 160),
         Cosmetic(id: "fr.graffiti", kind: .frame, name: "Graffiti", symbol: "", price: 220),
@@ -104,7 +82,7 @@ enum Catalog {
         Cosmetic(id: "fx.money", kind: .effect, name: "Money Rain", symbol: "💸", price: 320),
         Cosmetic(id: "fx.snow", kind: .effect, name: "Blizzard", symbol: "❄️", price: 180),
         Cosmetic(id: "fx.hearts", kind: .effect, name: "Heartbreaker", symbol: "💘", price: 160),
-        // auras (particles around your avatar)
+        // auras (particles around your picture)
         Cosmetic(id: "au.none", kind: .aura, name: "No aura", symbol: "", price: 0),
         Cosmetic(id: "au.sparkle", kind: .aura, name: "Sparkle", symbol: "✦", price: 120),
         Cosmetic(id: "au.flame", kind: .aura, name: "On Fire", symbol: "🔥", price: 260),
@@ -163,8 +141,9 @@ enum Catalog {
     }
 }
 
-// MARK: - Player card (what the opponent sees)
+// MARK: - Player card (what the other players see)
 
+/// Cards from apps up to 1.12 also carry an `avatar`, which is ignored: profile pictures replaced them.
 struct PlayerCard: Codable, Hashable {
     var id: String
     var name: String
@@ -172,7 +151,6 @@ struct PlayerCard: Codable, Hashable {
     var wordsLearned: Int
     var wins: Int
     var losses: Int
-    var avatar: String
     var frame: String
     var title: String
     var effect: String
@@ -187,85 +165,50 @@ struct PlayerCard: Codable, Hashable {
         guard let s = sticker, let item = Catalog.item(s), !item.symbol.isEmpty else { return nil }
         return item.symbol
     }
-    var avatarSymbol: String { Catalog.item(avatar)?.symbol ?? "🐣" }
     var titleItem: Cosmetic? { Catalog.item(title) }
     var effectSymbol: String { Catalog.item(effect)?.symbol ?? "💥" }
+
+    var json: String {
+        (try? JSONEncoder().encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    }
+
+    init?(json: String) {
+        guard let card = try? JSONDecoder().decode(PlayerCard.self, from: Data(json.utf8)) else { return nil }
+        self = card
+    }
+
+    init(id: String, name: String, level: Int, wordsLearned: Int, wins: Int, losses: Int, frame: String, title: String,
+         effect: String, sticker: String?, swears: Bool?, aura: String?) {
+        self.id = id; self.name = name; self.level = level; self.wordsLearned = wordsLearned
+        self.wins = wins; self.losses = losses; self.frame = frame; self.title = title
+        self.effect = effect; self.sticker = sticker; self.swears = swears; self.aura = aura
+    }
 }
 
 struct Rival: Codable, Hashable, Identifiable {
     var id: String
     var name: String
-    var avatar: String
+    /// Path of their profile picture on the server (nil: initials).
+    var picture: String?
     var wins = 0
     var losses = 0
     var draws = 0
     var lastPlayed = Date.now
 }
 
-enum DuelMode: String, Codable, CaseIterable, Identifiable {
-    case duel, blitz, listen, sudden, survival
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .duel: return "Duel"
-        case .blitz: return "Blitz"
-        case .listen: return "Listen duel"
-        case .sudden: return "Sudden death"
-        case .survival: return "Survival"
-        }
-    }
-    var emoji: String {
-        switch self {
-        case .duel: return "⚔️"
-        case .blitz: return "⚡️"
-        case .listen: return "🎧"
-        case .sudden: return "☠️"
-        case .survival: return "❤️"
-        }
-    }
-    var blurb: String {
-        switch self {
-        case .duel: return "Same question for both. First right answer hits. Knock their HP to 0!"
-        case .blitz: return "45 seconds. Answer as many as you can. Most correct wins."
-        case .listen: return "No characters on screen: you only hear the word. First to tap it hits."
-        case .sudden: return "Three hits and you're out. Only 6 seconds per round."
-        case .survival: return "3 lives each. A wrong answer costs a life. Most correct before you run out wins."
-        }
-    }
-    /// Round-based modes share a question and deal damage; race modes run on each phone separately.
-    var isRounds: Bool { self == .duel || self == .listen || self == .sudden }
-    var isRace: Bool { !isRounds }
-    var roundSeconds: Double { self == .sudden ? 6 : 10 }
-    var raceSeconds: Int { self == .survival ? 120 : 45 }
-    var lives: Int { self == .survival ? 3 : 0 }
-    func damage(reactionMs: Int) -> Int {
-        self == .sudden ? 34 : Int(duelDamage(reactionMs: UInt32(clamping: reactionMs)))
-    }
+extension ModeInfo: Identifiable {
+    public var id: BattleMode { mode }
+
     var gradient: LinearGradient {
-        switch self {
-        case .duel: return Theme.warmGradient
-        case .blitz: return Theme.skyGradient
-        case .listen: return Theme.jadeGradient
-        case .sudden: return Theme.nightGradient
-        case .survival: return Theme.pinkGradient
-        }
-    }
-    /// Name on the iPhone ↔ Android wire (same as the Android enum).
-    var wireName: String {
-        switch self {
-        case .duel: return "Duel"
-        case .blitz: return "Blitz"
-        case .listen: return "Listen"
-        case .sudden: return "Sudden"
-        case .survival: return "Survival"
-        }
-    }
-    init(wireName: String) {
-        self = DuelMode.allCases.first { $0.wireName == wireName } ?? .duel
+        LinearGradient(colors: colors.map { Color(hex: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
 
-enum MatchOutcome { case win, loss, draw }
+extension BattleMode {
+    var info: ModeInfo { modeInfo(mode: self) }
+    var isRace: Bool { self == .blitz || self == .survival }
+    var hasHP: Bool { [.duel, .listen, .sudden, .toneClash, .team2v2].contains(self) }
+}
 
 // MARK: - Store
 
@@ -273,7 +216,6 @@ private struct ArenaSave: Codable {
     var playerId: String
     var coins: Int
     var owned: Set<String>
-    var avatar: String
     var frame: String
     var title: String
     var effect: String
@@ -293,8 +235,7 @@ private struct ArenaSave: Codable {
 final class ArenaStore {
     var playerId = UUID().uuidString
     var coins = 0
-    var owned: Set<String> = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"]
-    var avatar = "av.chick"
+    var owned: Set<String> = ArenaStore.free
     var frame = "fr.lantern"
     var title = "ti.newbie"
     var effect = "fx.boom"
@@ -308,6 +249,10 @@ final class ArenaStore {
     var fastestMs: Int?
     var totalDamage = 0
     var rivals: [String: Rival] = [:]
+    /// Coins just refunded for retired avatars (shown once).
+    var refunded: Int?
+
+    private static let free: Set<String> = ["fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"]
 
     private let url: URL = {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("arena.json")
@@ -316,20 +261,31 @@ final class ArenaStore {
     init() {
         if let data = try? Data(contentsOf: url), let s = try? JSONDecoder().decode(ArenaSave.self, from: data) {
             playerId = s.playerId; coins = s.coins; owned = s.owned
-            avatar = s.avatar; frame = s.frame; title = s.title; effect = s.effect
+            frame = s.frame; title = s.title; effect = s.effect
             wins = s.wins; losses = s.losses; draws = s.draws; streak = s.streak; bestStreak = s.bestStreak
             fastestMs = s.fastestMs; totalDamage = s.totalDamage; rivals = s.rivals
             sticker = s.sticker ?? "st.none"
             aura = s.aura ?? "au.none"
-            owned.insert("st.none")
-            owned.insert("au.none")
+            owned.formUnion(Self.free)
+            retireAvatars()
         } else {
             save()
         }
     }
 
+    /// Emoji avatars left the shop in 1.13: their price comes back once (they leave the collection with it).
+    private func retireAvatars() {
+        let ids = Array(owned)
+        guard ids.contains(where: { $0.hasPrefix("av.") }) else { return }
+        let refund = Int(retiredAvatarRefund(ownedIds: ids))
+        owned = Set(withoutRetiredAvatars(ownedIds: ids))
+        coins += refund
+        if refund > 0 { refunded = refund }
+        save()
+    }
+
     func save() {
-        let s = ArenaSave(playerId: playerId, coins: coins, owned: owned, avatar: avatar, frame: frame, title: title,
+        let s = ArenaSave(playerId: playerId, coins: coins, owned: owned, frame: frame, title: title,
                           effect: effect, wins: wins, losses: losses, draws: draws, streak: streak, bestStreak: bestStreak,
                           fastestMs: fastestMs, totalDamage: totalDamage, rivals: rivals, sticker: sticker, aura: aura)
         if let data = try? JSONEncoder().encode(s) { try? data.write(to: url, options: .atomic) }
@@ -337,8 +293,8 @@ final class ArenaStore {
 
     func reset() {
         let id = playerId
-        coins = 0; owned = ["av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"]
-        avatar = "av.chick"; frame = "fr.lantern"; title = "ti.newbie"; effect = "fx.boom"; sticker = "st.none"; aura = "au.none"
+        coins = 0; owned = Self.free
+        frame = "fr.lantern"; title = "ti.newbie"; effect = "fx.boom"; sticker = "st.none"; aura = "au.none"
         wins = 0; losses = 0; draws = 0; streak = 0; bestStreak = 0; fastestMs = nil; totalDamage = 0; rivals = [:]
         playerId = id
         save()
@@ -351,7 +307,7 @@ final class ArenaStore {
             (Catalog.item(id)?.swear ?? false) && !swears ? fallback : id
         }
         return PlayerCard(id: playerId, name: name.isEmpty ? "Player" : name, level: level, wordsLearned: wordsLearned,
-                          wins: wins, losses: losses, avatar: clean(avatar, "av.chick"), frame: frame,
+                          wins: wins, losses: losses, frame: frame,
                           title: clean(title, "ti.newbie"), effect: clean(effect, "fx.boom"),
                           sticker: clean(sticker, "st.none"), swears: swears, aura: aura)
     }
@@ -360,7 +316,6 @@ final class ArenaStore {
 
     func equipped(_ kind: CosmeticKind) -> String {
         switch kind {
-        case .avatar: return avatar
         case .frame: return frame
         case .title: return title
         case .effect: return effect
@@ -372,7 +327,6 @@ final class ArenaStore {
     func equip(_ item: Cosmetic) {
         guard owned.contains(item.id) else { return }
         switch item.kind {
-        case .avatar: avatar = item.id
         case .frame: frame = item.id
         case .title: title = item.id
         case .effect: effect = item.id
@@ -393,32 +347,33 @@ final class ArenaStore {
 
     // MARK: results
 
-    /// Records a networked match. Returns coins earned.
+    /// Records a finished battle and returns the coins it paid. Group games pay by place and don't count as wins.
     @discardableResult
-    func record(_ outcome: MatchOutcome, mode: DuelMode, against rival: PlayerCard, bonus: Int, damage: Int, fastest: Int?) -> Int {
-        var r = rivals[rival.id] ?? Rival(id: rival.id, name: rival.name, avatar: rival.avatar)
+    func record(_ result: BattleResult, rival: PlayerCard?, picture: String?) -> Int {
+        totalDamage += Int(result.damage)
+        if let fastest = result.fastestMs { fastestMs = min(fastestMs ?? .max, Int(fastest)) }
+        guard result.ranked, let rival else {
+            coins += Int(result.groupCoins)
+            save()
+            return Int(result.groupCoins)
+        }
+        var r = rivals[rival.id] ?? Rival(id: rival.id, name: rival.name)
         r.name = rival.name
-        r.avatar = rival.avatar
+        r.picture = picture
         r.lastPlayed = .now
-        let core: Outcome
-        switch outcome {
+        switch result.outcome {
         case .win:
             wins += 1; r.wins += 1; streak += 1
             bestStreak = max(bestStreak, streak)
-            core = .win
         case .loss:
             losses += 1; r.losses += 1; streak = 0
-            core = .loss
         case .draw:
             draws += 1; r.draws += 1
-            core = .draw
         }
         // payout rules live in the shared Rust core
-        let earned = Int(matchCoins(outcome: core, bonus: UInt32(clamping: bonus), streak: UInt32(clamping: streak)))
+        let earned = Int(matchCoins(outcome: result.outcome, bonus: result.bonus, streak: UInt32(clamping: streak)))
         rivals[rival.id] = r
         coins += earned
-        totalDamage += damage
-        if let fastest { fastestMs = min(fastestMs ?? .max, fastest) }
         save()
         return earned
     }

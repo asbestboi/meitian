@@ -132,7 +132,7 @@ fun ArenaReveal(theme: ArenaTheme, close: () -> Unit) {
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) {
         ArenaBackground(theme, strength = 1f)
         // light skies get dark text, hellish ones white
-        val ink = if (dark || theme.tier >= 4u) Color.White else Color(0xFF16181D)
+        val ink = if (dark || theme.tier >= 5u) Color.White else Color(0xFF16181D)
         Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Spacer(Modifier.weight(0.6f))
             Column(Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -144,7 +144,7 @@ fun ArenaReveal(theme: ArenaTheme, close: () -> Unit) {
                 Text("arena ${theme.tier} of 6", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = 0.75f))
             }
             Spacer(Modifier.weight(1f))
-            BigButton("enter →", brush = Street.lime(), onClick = close)
+            BigButton("enter →", onClick = close)
         }
     }
 }

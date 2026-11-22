@@ -4,7 +4,7 @@ struct OnboardingFlow: View {
     @Environment(AppStore.self) private var store
 
     enum Step: Int, Comparable {
-        case welcome, name, claim, quiz, result, goal
+        case welcome, name, picture, claim, quiz, result, goal
         static func < (a: Step, b: Step) -> Bool { a.rawValue < b.rawValue }
     }
 
@@ -31,6 +31,7 @@ struct OnboardingFlow: View {
                 switch step {
                 case .welcome: welcome
                 case .name: nameStep
+                case .picture: pictureStep
                 case .claim: claimStep
                 case .quiz: quizStep
                 case .result: resultStep
@@ -115,6 +116,34 @@ struct OnboardingFlow: View {
         .frame(maxWidth: .infinity)
     }
 
+    @State private var pictureNote: String?
+    @State private var pictureBusy = false
+
+    private var pictureStep: some View {
+        let me = OnlineService.shared.profile
+        let has = !(me?.avatar ?? "").isEmpty
+        return VStack(spacing: 18) {
+            HStack { backButton(to: .name); Spacer() }
+            Spacer()
+            PictureUpload(name: name, note: $pictureNote, busy: $pictureBusy) {
+                PictureView(id: me?.id ?? name, name: name, path: me?.avatar ?? "", size: 140)
+            }
+            Text("add a picture").font(.street(32))
+            Text("Friends see it when you battle. It creates your online profile with your name as the nickname. You can do this later, too.")
+                .font(.rounded(.body)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            if let pictureNote { Text(pictureNote).font(.rounded(.subheadline, weight: .bold)).multilineTextAlignment(.center) }
+            Spacer()
+            if !has {
+                PictureUpload(name: name, note: $pictureNote, busy: $pictureBusy) {
+                    Text(pictureBusy ? "…" : "choose a picture").font(.system(.title3, weight: .bold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 18)
+                        .background(Theme.skyGradient, in: Capsule())
+                }
+            }
+            BigButton(title: has ? "Next" : "Maybe later", systemImage: "arrow.right") { go(.claim) }
+        }
+    }
+
     @FocusState private var nameFocused: Bool
 
     private var nameStep: some View {
@@ -129,7 +158,7 @@ struct OnboardingFlow: View {
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .focused($nameFocused)
                 .submitLabel(.next)
-                .onSubmit { go(.claim) }
+                .onSubmit { go(.picture) }
             if !name.trimmingCharacters(in: .whitespaces).isEmpty {
                 HStack(spacing: 10) {
                     Text("我叫\(name)。")
@@ -163,7 +192,7 @@ struct OnboardingFlow: View {
             if retakeOnly {
                 Button("Cancel") { onRetakeDone?() }.font(.rounded(.headline))
             } else {
-                backButton(to: .name)
+                backButton(to: .picture)
             }
             Text("How's your Chinese?")
                 .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -194,7 +223,7 @@ struct OnboardingFlow: View {
                             .foregroundStyle(.primary)
                         }
                         .buttonStyle(PressableStyle(scale: 0.98))
-                        .sensoryFeedback(.selection, trigger: claimed)
+                        .haptic(.selection, trigger: claimed)
                     }
                 }
                 .padding(.vertical, 4)
@@ -335,7 +364,7 @@ struct OnboardingFlow: View {
                     .buttonStyle(PressableStyle())
                 }
             }
-            .sensoryFeedback(.selection, trigger: goal)
+            .haptic(.selection, trigger: goal)
 
             VStack(spacing: 0) {
                 Toggle(isOn: $reminder) {

@@ -116,7 +116,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
     }
     val listState = rememberLazyListState()
     // finishing a node opens the next one
-    var lastNext by remember { mutableStateOf<Pair<PathNodeKind, UInt>?>(null) }
+    var lastNext by remember(com.asbestboi.meitian.data.ContentSync.generation) { mutableStateOf<Pair<PathNodeKind, UInt>?>(null) }
     LaunchedEffect(next?.kind, next?.number, nav.content == null) {
         if (nav.content != null || next == null) return@LaunchedEffect
         val now = next.kind to next.number

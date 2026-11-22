@@ -16,6 +16,8 @@ struct TodayView: View {
     @State private var goals = false
     @State private var hint: String?
     @State private var hintTick = 0
+    @State private var scroll = ScrollOffset()
+    @State private var lastNext: String?
 
     var body: some View {
         let units = store.learnPath
@@ -38,13 +40,18 @@ struct TodayView: View {
                             .padding(.vertical, 32)
                     }
                     .padding(.horizontal, 16)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: ScrollOffsetKey.self, value: -geo.frame(in: .named("path")).minY)
+                    })
                 }
+                .coordinateSpace(name: "path")
+                .onPreferenceChange(ScrollOffsetKey.self) { [scroll] y in scroll.y = y }
                 .scrollIndicators(.hidden)
                 .onAppear {
                     if let next { proxy.scrollTo(nodeId(next), anchor: .center) }
                 }
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(ArenaBackground(theme: store.arenaTheme, strength: 0.42, scroll: scroll).ignoresSafeArea())
             .safeAreaInset(edge: .top, spacing: 0) { topBar }
             .safeAreaInset(edge: .bottom, spacing: 0) { startBar(next) }
             .toolbar(.hidden, for: .navigationBar)
@@ -64,10 +71,19 @@ struct TodayView: View {
         .sheet(isPresented: $goals) {
             GoalsSheet()
                 .environment(store).environment(arena)
+                .sheetSounds()
                 .presentationDetents([.large])
                 .presentationCornerRadius(32)
         }
-        .sensoryFeedback(.warning, trigger: hintTick)
+        .haptic(.warning, trigger: hintTick)
+        .onAppear { store.checkArena(); lastNext = next.map(nodeId) }
+        .onChange(of: store.currentLevel) { _, _ in store.checkArena() }
+        // finishing a node opens the next one
+        .onChange(of: "\(store.cards.count)-\(store.profile.pathSentences?.count ?? 0)") { _, _ in
+            let now = store.nextPathNode.map(nodeId)
+            if let lastNext, let now, lastNext != now { SFX.shared.play(.nodeUnlock) }
+            lastNext = now
+        }
     }
 
     private func nodeId(_ n: PathNode) -> String { "\(n.unit)-\(n.kind)-\(n.number)" }
@@ -467,7 +483,7 @@ struct LearnSession: View {
             .padding(20)
             ConfettiView(trigger: confetti)
         }
-        .sensoryFeedback(.success, trigger: confetti)
+        .haptic(.success, trigger: confetti)
     }
 
     private func makeQuiz() -> [QuizQuestion] {

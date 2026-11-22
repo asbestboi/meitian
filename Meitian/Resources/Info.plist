@@ -20,19 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Scan your friend's QR code to start a battle.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Say words out loud in speaking exercises.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Check your pronunciation when you say a word out loud.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect directly to your friend's phone for battles. No internet needed.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_meitian-duel._tcp</string>
-		<string>_meitian-duel._udp</string>
-	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>

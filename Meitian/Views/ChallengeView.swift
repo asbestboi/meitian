@@ -41,7 +41,7 @@ struct ChallengeView: View {
             .navigationTitle("Challenge")
         }
         .overlay { ConfettiView(trigger: confetti) }
-        .sensoryFeedback(.success, trigger: confetti)
+        .haptic(.success, trigger: confetti)
     }
 
     // MARK: pieces
@@ -74,7 +74,7 @@ struct ChallengeView: View {
         }
         .padding(5)
         .background(Theme.card, in: Capsule())
-        .sensoryFeedback(.selection, trigger: friend)
+        .haptic(.selection, trigger: friend)
     }
 
     private func wordHeader(_ c: Challenge) -> some View {
@@ -166,7 +166,7 @@ struct ChallengeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.98))
-        .sensoryFeedback(.impact(weight: .light), trigger: on)
+        .haptic(.impact(weight: .light), trigger: on)
     }
 
     private func reflection(_ c: Challenge) -> some View {
@@ -189,7 +189,7 @@ struct ChallengeView: View {
                     .buttonStyle(PressableStyle())
                 }
             }
-            .sensoryFeedback(.selection, trigger: mood)
+            .haptic(.selection, trigger: mood)
             TextField("What did they say? Anything new you learned?", text: $note, axis: .vertical)
                 .lineLimit(2...5)
                 .font(.rounded(.body))

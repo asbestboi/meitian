@@ -86,6 +86,28 @@ extension Font {
     }
 }
 
+extension View {
+    /// Haptic feedback that can be switched off in settings.
+    func haptic<T: Equatable>(_ feedback: SensoryFeedback, trigger: T) -> some View {
+        sensoryFeedback(trigger: trigger) { _, _ in Prefs.hapticsOn ? feedback : nil }
+    }
+
+    /// The little whoosh of a sheet or full-screen page opening and closing.
+    func sheetSounds() -> some View {
+        onAppear { SFX.shared.play(.sheetOpen) }
+            .onDisappear { SFX.shared.play(.sheetClose) }
+    }
+}
+
+/// A switch that clicks.
+struct SoundToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.switch)
+            .onChange(of: configuration.isOn) { _, on in SFX.shared.play(on ? .toggleOn : .toggleOff) }
+    }
+}
+
 /// Instant press feedback (on touch-down), springing back on release.
 struct PressableStyle: ButtonStyle {
     var scale: CGFloat = 0.96
@@ -116,7 +138,10 @@ struct BigButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            SFX.shared.play(.tap)
+            action()
+        } label: {
             HStack(spacing: 10) {
                 Text(title.lowercased())
                     .font(.system(.title3, weight: .bold))

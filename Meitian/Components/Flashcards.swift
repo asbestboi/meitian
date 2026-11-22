@@ -120,9 +120,9 @@ struct SwipeDeck: View {
         .onChange(of: queue.first?.id) { _, id in
             if let id, newIds.contains(id) { store.markSeen([id]) }
         }
-        .sensoryFeedback(.success, trigger: feedbackKnown)
-        .sensoryFeedback(.impact(weight: .medium), trigger: feedbackAgain)
-        .sensoryFeedback(.selection, trigger: flipTick)
+        .haptic(.success, trigger: feedbackKnown)
+        .haptic(.impact(weight: .medium), trigger: feedbackAgain)
+        .haptic(.selection, trigger: flipTick)
     }
 
     private var progressDots: some View {
