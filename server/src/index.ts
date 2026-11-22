@@ -1,5 +1,5 @@
 import { authenticate, getPlayer, PlayerRow, publicProfile } from "./players";
-import { clampInt, Env, HttpError, json, MODES, nicknameOk, now, randomCode, randomId, randomSecret, sha256 } from "./util";
+import { clampInt, Env, HttpError, json, MAX_PLAYERS, minPlayers, MODES, nicknameOk, now, randomCode, randomId, randomSecret, sha256 } from "./util";
 
 export { Matchmaker } from "./matchmaker";
 export { Room } from "./room";
@@ -9,6 +9,7 @@ const MAX_AVATAR = 200 * 1024;
 const MAX_XP_PER_SYNC = 1500;
 const XP_SYNC_GAP_MS = 30_000;
 const CHALLENGE_TTL_MS = 10 * 60_000;
+const PARTY_TTL_MS = 12 * 3_600_000;
 
 type Handler = (req: Request, env: Env, params: string[], url: URL) => Promise<Response>;
 const routes: [string, RegExp, Handler][] = [];
@@ -41,6 +42,7 @@ export async function weeklyReset(env: Env) {
   await env.DB.prepare("UPDATE players SET xp_week = 0 WHERE xp_week != 0").run();
   await env.DB.prepare("DELETE FROM register_log WHERE at < ?").bind(now() - 86_400_000).run();
   await env.DB.prepare("DELETE FROM rooms WHERE created < ?").bind(now() - 7 * 86_400_000).run();
+  await env.DB.prepare("DELETE FROM parties WHERE created < ?").bind(now() - PARTY_TTL_MS).run();
 }
 
 async function body<T>(req: Request): Promise<T> {
@@ -151,6 +153,7 @@ route("DELETE", "/v1/me", async (req, env) => {
     env.DB.prepare("DELETE FROM friends WHERE a = ? OR b = ?").bind(me.id, me.id),
     env.DB.prepare("DELETE FROM reports WHERE target = ? OR reporter = ?").bind(me.id, me.id),
     env.DB.prepare("DELETE FROM rooms WHERE a = ? OR b = ?").bind(me.id, me.id),
+    env.DB.prepare("DELETE FROM parties WHERE host = ?").bind(me.id),
     env.DB.prepare("DELETE FROM players WHERE id = ?").bind(me.id),
   ]);
   return json({ deleted: true });
@@ -279,12 +282,12 @@ route("GET", "/v1/friends", async (req, env) => {
 
 async function challenges(env: Env, id: string) {
   const { results } = await env.DB.prepare(
-    `SELECT r.id AS room, r.mode, p.* FROM rooms r JOIN players p ON p.id = r.a
+    `SELECT r.id AS room, r.mode, r.party, p.* FROM rooms r JOIN players p ON p.id = r.a
      WHERE r.b = ? AND r.challenge = 1 AND r.status = 'open' AND r.created > ? ORDER BY r.created DESC`,
   )
     .bind(id, now() - CHALLENGE_TTL_MS)
-    .all<PlayerRow & { room: string; mode: string }>();
-  return results.map((r) => ({ room: r.room, mode: r.mode, from: publicProfile(r) }));
+    .all<PlayerRow & { room: string; mode: string; party: string | null }>();
+  return results.map((r) => ({ room: r.room, mode: r.mode, party: r.party, from: publicProfile(r) }));
 }
 
 /** Cheap poll for the Battle tab: incoming friend requests and challenges. */
@@ -337,6 +340,7 @@ route("POST", "/v1/challenge", async (req, env) => {
   const me = await authenticate(env, req);
   const { friendId, mode } = await body<{ friendId?: string; mode?: string }>(req);
   if (!MODES.includes(mode as never)) throw new HttpError(400, "unknown mode");
+  if (minPlayers(String(mode)) > 2) throw new HttpError(400, "that mode needs more players: start a party");
   if (!(await friendIds(env, me.id)).includes(String(friendId))) throw new HttpError(403, "you can only challenge friends");
   const room = randomId();
   await env.DB.prepare("INSERT INTO rooms (id, a, b, mode, challenge, created) VALUES (?, ?, ?, ?, 1, ?)")
@@ -351,6 +355,73 @@ route("POST", "/v1/challenge/:room/decline", async (req, env, [room]) => {
     .bind(room, me.id)
     .run();
   return json({ status: "declined" });
+});
+
+// MARK: parties
+
+/** A private party of up to four: the host shares the code, friends join, the host starts the games. */
+route("POST", "/v1/party", async (req, env) => {
+  const me = await authenticate(env, req);
+  const b = await body<{ swears?: boolean }>(req);
+  const t = now();
+  await env.DB.prepare("DELETE FROM parties WHERE host = ? OR created < ?").bind(me.id, t - PARTY_TTL_MS).run();
+  for (let attempt = 0; ; attempt++) {
+    const code = randomCode(6);
+    try {
+      await env.DB.prepare("INSERT INTO parties (code, room, host, swears, created) VALUES (?, ?, ?, ?, ?)")
+        .bind(code, randomId(), me.id, b.swears ? 1 : 0, t)
+        .run();
+      return json({ code }, 201);
+    } catch (e) {
+      if (attempt >= 3) throw e; // code collision: try another
+    }
+  }
+});
+
+interface PartyRow {
+  code: string;
+  room: string;
+  host: string;
+  swears: number;
+}
+
+async function party(env: Env, code: string): Promise<PartyRow> {
+  const clean = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const row = await env.DB.prepare("SELECT * FROM parties WHERE code = ? AND created > ?")
+    .bind(clean, now() - PARTY_TTL_MS)
+    .first<PartyRow>();
+  if (!row) throw new HttpError(404, "no party with that code");
+  return row;
+}
+
+/** Puts an invitation to the party into a friend's inbox. */
+route("POST", "/v1/party/:code/invite", async (req, env, [code]) => {
+  const me = await authenticate(env, req);
+  const { friendId } = await body<{ friendId?: string }>(req);
+  const p = await party(env, code);
+  if (!(await friendIds(env, me.id)).includes(String(friendId))) throw new HttpError(403, "you can only invite friends");
+  // one open invitation per friend and party
+  await env.DB.prepare("DELETE FROM rooms WHERE a = ? AND b = ? AND party = ?").bind(me.id, friendId, p.code).run();
+  await env.DB.prepare("INSERT INTO rooms (id, a, b, mode, challenge, created, party) VALUES (?, ?, ?, 'Party', 1, ?, ?)")
+    .bind(randomId(), me.id, friendId, now(), p.code)
+    .run();
+  return json({ status: "invited" }, 201);
+});
+
+route("GET", "/v1/party/:code", async (req, env, [code], url) => {
+  const me = await authenticate(env, req);
+  const p = await party(env, code);
+  if ((url.searchParams.get("swears") === "1") !== (p.swears === 1)) {
+    throw new HttpError(412, "this party has a different swear-word setting");
+  }
+  await env.DB.prepare("UPDATE rooms SET status = 'done' WHERE b = ? AND party = ?").bind(me.id, p.code).run();
+  return forwardSocket(req, env.ROOMS.get(env.ROOMS.idFromName(p.room)), {
+    "x-player": me.id,
+    "x-room": p.room,
+    "x-kind": "party",
+    "x-players": encodeURIComponent(JSON.stringify([])),
+    "x-profiles": encodeURIComponent(JSON.stringify({ [me.id]: publicProfile(me) })),
+  });
 });
 
 // MARK: leaderboards
@@ -397,30 +468,34 @@ route("GET", "/v1/queue", async (req, env, _p, url) => {
   const me = await authenticate(env, req);
   const mode = url.searchParams.get("mode") ?? "Duel";
   if (!MODES.includes(mode as never)) throw new HttpError(400, "unknown mode");
+  const size = url.searchParams.get("size") === "4" ? MAX_PLAYERS : 2;
+  if (size < minPlayers(mode)) throw new HttpError(400, "that mode is for groups");
   const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName("global"));
   return forwardSocket(req, stub, {
     "x-player": me.id,
     "x-rating": String(me.rating),
     "x-mode": mode,
     "x-swears": url.searchParams.get("swears") === "1" ? "1" : "0",
+    "x-size": String(size),
+    "x-v": String(clampInt(Number(url.searchParams.get("v") ?? 1), 1, 99) ?? 1),
     "x-profile": encodeURIComponent(JSON.stringify(publicProfile(me))),
   });
 });
 
 route("GET", "/v1/rooms/:id", async (req, env, [id]) => {
   const me = await authenticate(env, req);
-  const room = await env.DB.prepare("SELECT * FROM rooms WHERE id = ?")
+  const room = await env.DB.prepare("SELECT * FROM rooms WHERE id = ? AND party IS NULL")
     .bind(id)
-    .first<{ a: string; b: string; status: string; mode: string }>();
-  if (!room || (room.a !== me.id && room.b !== me.id)) throw new HttpError(404, "no such room");
+    .first<{ a: string; b: string; status: string; mode: string; players: string | null }>();
+  const players: string[] = !room ? [] : room.players ? JSON.parse(room.players) : [room.a, room.b];
+  if (!room || !players.includes(me.id)) throw new HttpError(404, "no such room");
   if (room.status === "declined") throw new HttpError(410, "challenge declined");
-  const other = room.a === me.id ? room.b : room.a;
-  const opponent = await getPlayer(env, other);
+  const rows = await profiles(env, players);
   return forwardSocket(req, env.ROOMS.get(env.ROOMS.idFromName(id)), {
     "x-player": me.id,
     "x-room": id,
-    "x-a": room.a,
-    "x-b": room.b,
-    "x-opponent": encodeURIComponent(JSON.stringify(opponent ? publicProfile(opponent) : null)),
+    "x-kind": players.length > 2 ? "group" : "duo",
+    "x-players": encodeURIComponent(JSON.stringify(players)),
+    "x-profiles": encodeURIComponent(JSON.stringify(Object.fromEntries(rows.map((p) => [p.id, publicProfile(p)])))),
   });
 });

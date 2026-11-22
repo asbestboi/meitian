@@ -4,8 +4,28 @@ export interface Env {
   ROOMS: DurableObjectNamespace;
 }
 
-export const MODES = ["Duel", "Blitz", "Listen", "Sudden", "Survival"] as const;
+/** Same names as the battle modes in the Rust core (core/src/battle.rs). */
+export const MODES = [
+  "Duel",
+  "Blitz",
+  "Listen",
+  "Sudden",
+  "Survival",
+  "ToneClash",
+  "SentenceBuilder",
+  "PinyinType",
+  "BattleRoyale",
+  "Team2v2",
+] as const;
 export type Mode = (typeof MODES)[number];
+
+/** Most players in a room. */
+export const MAX_PLAYERS = 4;
+
+/** Fewest players a mode needs. */
+export function minPlayers(mode: string): number {
+  return mode === "Team2v2" ? 4 : mode === "BattleRoyale" ? 3 : 2;
+}
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
