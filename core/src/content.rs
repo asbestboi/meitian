@@ -112,6 +112,9 @@ pub struct Token {
     pub pinyin: String,
     /// The bank word these characters are, if any.
     pub word_id: Option<String>,
+    /// A word the learner hasn't learned yet (filled in by the story and sentence functions that are given
+    /// the learner's known words; false elsewhere).
+    pub is_new: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -238,7 +241,7 @@ pub fn content_load(kind: String, json: String) -> Result<u32, ContentError> {
             let mut store = sentences().write().unwrap_or_else(|e| e.into_inner());
             let mut added = 0;
             for r in pack.sentences {
-                let tokens = r.t.into_iter().map(|(text, pinyin)| Token { text, pinyin, word_id: None }).collect();
+                let tokens = r.t.into_iter().map(|(text, pinyin)| Token { text, pinyin, word_id: None, is_new: false }).collect();
                 let s = Sentence { id: r.id, zh: r.zh, pinyin: r.py, en: r.en, tokens, author: r.by, level: pack.level };
                 if store.add(s) {
                     added += 1;
@@ -375,6 +378,21 @@ mod real_packs {
         let w = crate::words::word_id_for_hanzi("喜欢".into()).unwrap();
         for s in sentences_for_word(w, 3) {
             println!("{} {}", s.zh, s.en);
+        }
+        // a beginner two units in: only learned words in sentence nodes, and what the shelf looks like
+        let level1: Vec<String> = crate::words::all_words().into_iter().filter(|w| w.level == 1).map(|w| w.id).collect();
+        for n in [15, 25, 50, 100, 200, 478] {
+            let known: Vec<String> = level1.iter().take(n).cloned().collect();
+            let t = std::time::Instant::now();
+            let lesson = crate::exercises::sentence_node_lesson(1, 5, "2026-11-22".into(), known.clone(), known.clone(), true);
+            let (lesson_ms, t) = (t.elapsed().as_millis(), std::time::Instant::now());
+            let shelf = crate::stories::story_availability(false, "2026-11-22".into(), known.clone());
+            println!("{n} words: {:?} | {shelf:?} | {lesson_ms} ms, {} ms", lesson.iter().map(|e| e.sentence.zh.as_str()).collect::<Vec<_>>(), t.elapsed().as_millis());
+            assert_eq!(lesson.len(), crate::exercises::SENTENCE_NODE_COUNT);
+            let set: std::collections::HashSet<&String> = known.iter().collect();
+            for t in lesson.iter().flat_map(|e| &e.sentence.tokens).filter(|t| crate::vocab::is_vocab(t)) {
+                assert!(t.word_id.as_ref().is_some_and(|id| set.contains(id)), "{} isn't learned", t.text);
+            }
         }
     }
 }

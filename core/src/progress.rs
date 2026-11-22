@@ -112,7 +112,7 @@ pub fn placement_level(answers: Vec<PlacementAnswer>) -> u8 {
 /// The adaptive placement test stops after a block of 3 questions if that level wasn't passed.
 #[uniffi::export]
 pub fn placement_should_continue(answers: Vec<PlacementAnswer>) -> bool {
-    if answers.is_empty() || answers.len() % 3 != 0 {
+    if !answers.len().is_multiple_of(3) || answers.is_empty() {
         return true;
     }
     let level = answers[answers.len() - 1].level;

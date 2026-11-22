@@ -7,7 +7,11 @@ use serde::Deserialize;
 
 use crate::challenge::day_seed;
 use crate::content::{ContentError, Token};
+use crate::vocab::{id_set, is_new, is_vocab, IdSet};
 use crate::words::bank;
+
+/// A story opens once it has at most this many words the learner hasn't learned.
+pub const STORY_MAX_NEW_WORDS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StoryImage {
@@ -179,6 +183,7 @@ fn tokens(t: Vec<(String, String)>, zh: &str, py: &str) -> Vec<Token> {
             text: zh.to_string(),
             pinyin: py.to_string(),
             word_id: None,
+            is_new: false,
         }]
     } else {
         t.into_iter()
@@ -187,6 +192,7 @@ fn tokens(t: Vec<(String, String)>, zh: &str, py: &str) -> Vec<Token> {
                 text: render_wechat(&text),
                 pinyin,
                 word_id: None,
+                is_new: false,
             })
             .collect()
     }
@@ -302,129 +308,172 @@ pub(crate) fn story_count() -> u32 {
     store().read().map(|s| s.len()).unwrap_or(0) as u32
 }
 
-fn resolve(mut s: Story) -> Story {
+fn tokens_mut(s: &mut Story) -> impl Iterator<Item = &mut Token> {
+    s.panels.iter_mut().flat_map(|p| {
+        let lines = p.lines.iter_mut().flat_map(|l| l.tokens.iter_mut());
+        let replies = p.reply.iter_mut().flat_map(|o| {
+            o.tokens.iter_mut().chain(o.reaction.iter_mut().flat_map(|r| r.tokens.iter_mut()))
+        });
+        lines.chain(replies)
+    })
+}
+
+/// Every token in reading order: lines, reply options and the reactions to them.
+fn tokens_of(s: &Story) -> impl Iterator<Item = &Token> {
+    s.panels.iter().flat_map(|p| {
+        let lines = p.lines.iter().flat_map(|l| l.tokens.iter());
+        let replies = p.reply.iter().flat_map(|o| {
+            o.tokens.iter().chain(o.reaction.iter().flat_map(|r| r.tokens.iter()))
+        });
+        lines.chain(replies)
+    })
+}
+
+/// Fills in word ids, and which words are new to a learner who knows `known` (None: marks nothing).
+fn resolve(mut s: Story, known: Option<&IdSet>) -> Story {
     let b = bank();
-    let fill = |tokens: &mut Vec<Token>| {
-        for t in tokens.iter_mut() {
-            if !t.pinyin.is_empty() {
-                t.word_id = b.by_hanzi.get(&t.text).cloned();
-            }
+    for t in tokens_mut(&mut s) {
+        if !t.pinyin.is_empty() {
+            t.word_id = b.by_hanzi.get(&t.text).cloned();
         }
-    };
-    for p in s.panels.iter_mut() {
-        for l in p.lines.iter_mut() {
-            fill(&mut l.tokens);
-        }
-        for o in p.reply.iter_mut() {
-            fill(&mut o.tokens);
-            if let Some(r) = o.reaction.as_mut() {
-                fill(&mut r.tokens);
-            }
-        }
+        t.is_new = known.is_some_and(|k| is_new(t, k));
     }
     s
+}
+
+fn all_for(known: Option<&IdSet>) -> Vec<Story> {
+    let all = store().read().map(|s| s.clone()).unwrap_or_default();
+    all.into_iter().map(|s| resolve(s, known)).collect()
 }
 
 /// All stories, easiest first (tokens resolved to word ids for tap-to-lookup).
 #[uniffi::export]
 pub fn all_stories() -> Vec<Story> {
-    store()
-        .read()
-        .map(|s| s.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .map(resolve)
+    all_for(None)
+}
+
+/// One story, with the words missing from `known_word_ids` marked as new.
+#[uniffi::export]
+pub fn story_by_id(id: String, known_word_ids: Vec<String>) -> Option<Story> {
+    let s = store().read().ok()?.iter().find(|s| s.id == id).cloned()?;
+    Some(resolve(s, Some(&id_set(known_word_ids))))
+}
+
+/// Unlearned words in the order they appear.
+fn new_words(s: &Story, known: &IdSet) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    tokens_of(s)
+        .filter(|t| is_new(t, known))
+        .filter_map(|t| t.word_id.clone())
+        .filter(|id| seen.insert(id.clone()))
         .collect()
 }
 
-#[uniffi::export]
-pub fn story_by_id(id: String) -> Option<Story> {
-    store()
-        .read()
-        .ok()?
-        .iter()
-        .find(|s| s.id == id)
-        .cloned()
-        .map(resolve)
+fn missing(s: &Story, known: &IdSet) -> usize {
+    new_words(s, known).len().saturating_sub(STORY_MAX_NEW_WORDS)
 }
 
-/// The learner's HSK level as a story cap (0 = beginner still reads HSK 1).
-fn cap(max_level: u8) -> u8 {
-    max_level.max(1)
+/// Can the learner read this story? At most `STORY_MAX_NEW_WORDS` of its words are unlearned, so it can be
+/// followed from context.
+#[uniffi::export]
+pub fn story_unlocked(story: Story, known_word_ids: Vec<String>) -> bool {
+    missing(&story, &id_set(known_word_ids)) == 0
 }
 
-/// Can a learner at `max_level` read this story? Stories are graded by HSK level, and a learner never
-/// gets one above their own level (it'd be full of words they haven't met yet).
+/// The unlearned words in a story, in the order they appear.
 #[uniffi::export]
-pub fn story_fits_level(story: Story, max_level: u8) -> bool {
-    story.level <= cap(max_level)
+pub fn story_new_words(story: Story, known_word_ids: Vec<String>) -> Vec<String> {
+    new_words(&story, &id_set(known_word_ids))
 }
 
-/// The day's story: the daily story dated today if it's at or below the learner's level, otherwise a
-/// pick at or below the learner's level from the undated stories (same on every launch that day).
-/// `None` when nothing fits.
+/// How many more words have to be learned before the story unlocks (0 = unlocked).
 #[uniffi::export]
-pub fn story_of_the_day(day_key: String, max_level: u8) -> Option<Story> {
-    let all = store().read().ok()?.clone();
-    let cap = cap(max_level);
-    if let Some(s) = all.iter().find(|s| s.date == day_key && s.level <= cap) {
-        return Some(resolve(s.clone()));
-    }
-    let pool: Vec<Story> = all
-        .iter()
-        .filter(|s| s.date.is_empty() && s.level <= cap)
-        .cloned()
+pub fn story_missing_words(story: Story, known_word_ids: Vec<String>) -> u32 {
+    missing(&story, &id_set(known_word_ids)) as u32
+}
+
+/// The day's story: the daily story dated today if it's unlocked, otherwise a pick from the unlocked undated
+/// stories (same on every launch that day). `None` when nothing is unlocked.
+#[uniffi::export]
+pub fn story_of_the_day(day_key: String, known_word_ids: Vec<String>) -> Option<Story> {
+    let known = id_set(known_word_ids);
+    let open: Vec<Story> = all_for(Some(&known))
+        .into_iter()
+        .filter(|s| s.date == day_key || s.date.is_empty())
+        .filter(|s| missing(s, &known) == 0)
         .collect();
-    if pool.is_empty() {
+    if let Some(s) = open.iter().find(|s| s.date == day_key) {
+        return Some(s.clone());
+    }
+    if open.is_empty() {
         return None;
     }
-    let i = day_seed(day_key) as usize % pool.len();
-    Some(resolve(pool[i].clone()))
+    let i = day_seed(day_key) as usize % open.len();
+    Some(open[i].clone())
 }
 
-/// Stories for the shelf: everything except daily stories whose day hasn't come yet.
-#[uniffi::export]
-pub fn shelf_stories(day_key: String) -> Vec<Story> {
-    all_stories()
+/// A story on the shelf, locked or not.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ShelfStory {
+    pub story: Story,
+    pub unlocked: bool,
+    /// Words still to learn before it unlocks (0 when unlocked).
+    pub missing_words: u32,
+}
+
+fn shelf(day_key: &str, known: &IdSet) -> Vec<ShelfStory> {
+    let mut out: Vec<ShelfStory> = all_for(Some(known))
         .into_iter()
-        .filter(|s| s.date.is_empty() || s.date <= day_key)
-        .collect()
+        .filter(|s| s.date.is_empty() || s.date.as_str() <= day_key)
+        .map(|story| {
+            let missing_words = missing(&story, known) as u32;
+            ShelfStory { story, unlocked: missing_words == 0, missing_words }
+        })
+        .collect();
+    // stable: unlocked ones keep the easiest-first order, locked ones go by how soon they open
+    out.sort_by_key(|s| s.missing_words);
+    out
 }
 
-/// The next unread story (or chat) for a learner, picked to fit the lesson they're on. Never repeats a
-/// story in `read` and never goes above the learner's HSK level; stories at the learner's own level
-/// come first, then easier ones. Within a level, stories are ranked by how many of the
-/// `recent` words (the current unit's lessons) they use and how few words the learner hasn't `learned`
-/// yet; a random one of the best three is picked so it's still a surprise. `None` when every story they
-/// can read has been read. Daily stories whose day hasn't come yet are skipped.
+/// Stories for the shelf: everything except daily stories whose day hasn't come yet. Unlocked stories come
+/// first, then the locked ones, the soonest to unlock first.
+#[uniffi::export]
+pub fn shelf_stories(day_key: String, known_word_ids: Vec<String>) -> Vec<ShelfStory> {
+    shelf(&day_key, &id_set(known_word_ids))
+}
+
+/// The next unread story (or chat) for a learner: an unlocked one that isn't in `read`. Stories are ranked by
+/// how well they fit: words of the `recent` unit count most, then new words that the `upcoming` lesson will
+/// teach (so the story previews it), then known words; other new words count against it. A random one of the
+/// best three is picked so it's still a surprise. `None` when every unlocked story has been read. Daily
+/// stories whose day hasn't come yet are skipped.
 #[uniffi::export]
 pub fn next_story(
     chat: bool,
     day_key: String,
-    max_level: u8,
     read: Vec<String>,
-    learned: Vec<String>,
+    known_word_ids: Vec<String>,
     recent: Vec<String>,
+    upcoming: Vec<String>,
     seed: u64,
 ) -> Option<Story> {
-    let cap = cap(max_level);
-    let learned: std::collections::HashSet<&str> = learned.iter().map(String::as_str).collect();
-    let recent: std::collections::HashSet<&str> = recent.iter().map(String::as_str).collect();
-    let unread: Vec<Story> = shelf_stories(day_key)
+    let known = id_set(known_word_ids);
+    let recent = id_set(recent);
+    let upcoming = id_set(upcoming);
+    let mut scored: Vec<(i64, Story)> = shelf(&day_key, &known)
         .into_iter()
-        .filter(|s| (s.style == "chat") == chat && !read.contains(&s.id) && s.level <= cap)
+        .filter(|s| s.unlocked)
+        .map(|s| s.story)
+        .filter(|s| (s.style == "chat") == chat && !read.contains(&s.id))
+        .map(|s| (lesson_fit(&s, &known, &recent, &upcoming), s))
         .collect();
-    // the learner's own level first, easier ones once those are read
-    let top = unread.iter().map(|s| s.level).max()?;
-    let mut scored: Vec<(i64, Story)> = unread
-        .into_iter()
-        .filter(|s| s.level == top)
-        .map(|s| (lesson_fit(&s, &learned, &recent), s))
-        .collect();
+    if scored.is_empty() {
+        return None;
+    }
     let mut rng = fastrand::Rng::with_seed(seed);
     // shuffle first so equal scores don't always favour the same (alphabetically first) story
     rng.shuffle(&mut scored);
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
     let best = scored[0].0;
     // the top three, as long as they're close to the best fit
     let pool: Vec<Story> = scored
@@ -436,25 +485,20 @@ pub fn next_story(
     Some(pool[rng.usize(..pool.len())].clone())
 }
 
-/// How well a story fits where the learner is: words from the current unit count most, words they
-/// know count a little, words they haven't met count against it.
-fn lesson_fit(
-    story: &Story,
-    learned: &std::collections::HashSet<&str>,
-    recent: &std::collections::HashSet<&str>,
-) -> i64 {
-    let ids = story_word_ids(story.clone());
-    let mut score = 0i64;
-    for id in &ids {
-        if recent.contains(id.as_str()) {
-            score += 4;
-        } else if learned.contains(id.as_str()) {
-            score += 1;
-        } else {
-            score -= 2;
-        }
-    }
-    score
+/// How well a story fits where the learner is.
+fn lesson_fit(story: &Story, known: &IdSet, recent: &IdSet, upcoming: &IdSet) -> i64 {
+    let mut ids: Vec<&String> = tokens_of(story).filter(|t| is_vocab(t)).filter_map(|t| t.word_id.as_ref()).collect();
+    ids.sort();
+    ids.dedup();
+    ids.into_iter()
+        .map(|id| match (known.contains(id), recent.contains(id), upcoming.contains(id)) {
+            (true, true, _) => 4,
+            (true, false, _) => 1,
+            (false, _, true) => 3,
+            (false, true, _) => 2,
+            _ => -2,
+        })
+        .sum()
 }
 
 /// Mix the order of every reply choice with a fresh seed (call it each time a story opens), so the
@@ -480,34 +524,54 @@ pub fn shuffle_story_replies(mut story: Story, seed: u64) -> Story {
     story
 }
 
-/// How many stories (or chats) are available right now, read or not.
-#[uniffi::export]
-pub fn story_count_for(chat: bool, day_key: String) -> u32 {
-    shelf_stories(day_key)
-        .iter()
-        .filter(|s| (s.style == "chat") == chat)
-        .count() as u32
-}
-
-/// How many stories (or chats) a learner at `max_level` can read right now, and how many more are
-/// waiting at higher levels.
+/// How many stories (or chats) a learner can read right now, read before or not, and how many are still locked.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StoryAvailability {
-    pub at_level: u32,
-    pub above_level: u32,
+    pub unlocked: u32,
+    pub locked: u32,
 }
 
 #[uniffi::export]
-pub fn story_availability(chat: bool, day_key: String, max_level: u8) -> StoryAvailability {
-    let cap = cap(max_level);
-    let kind: Vec<Story> = shelf_stories(day_key)
+pub fn story_availability(chat: bool, day_key: String, known_word_ids: Vec<String>) -> StoryAvailability {
+    let kind: Vec<ShelfStory> = shelf(&day_key, &id_set(known_word_ids))
         .into_iter()
-        .filter(|s| (s.style == "chat") == chat)
+        .filter(|s| (s.story.style == "chat") == chat)
         .collect();
-    let at_level = kind.iter().filter(|s| s.level <= cap).count() as u32;
-    StoryAvailability {
-        at_level,
-        above_level: kind.len() as u32 - at_level,
+    let unlocked = kind.iter().filter(|s| s.unlocked).count() as u32;
+    StoryAvailability { unlocked, locked: kind.len() as u32 - unlocked }
+}
+
+/// What revealing one more English line costs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TranslationCost {
+    /// The story's free peek.
+    Free,
+    /// Takes the story's XP away: ask first.
+    Xp,
+    /// The XP is already gone, so more reveals change nothing.
+    Nothing,
+}
+
+/// Free translation reveals per story.
+pub const STORY_FREE_PEEKS: u32 = 1;
+
+/// The cost of the next reveal, after `translations_revealed` so far.
+#[uniffi::export]
+pub fn translation_cost(translations_revealed: u32) -> TranslationCost {
+    match translations_revealed {
+        n if n < STORY_FREE_PEEKS => TranslationCost::Free,
+        STORY_FREE_PEEKS => TranslationCost::Xp,
+        _ => TranslationCost::Nothing,
+    }
+}
+
+/// XP a story pays: `base` with the free peek or none, nothing once more lines were translated.
+#[uniffi::export]
+pub fn story_xp(base: u32, translations_revealed: u32) -> u32 {
+    if translations_revealed <= STORY_FREE_PEEKS {
+        base
+    } else {
+        0
     }
 }
 
@@ -527,14 +591,11 @@ pub fn story_image_urls(story: Story) -> Vec<String> {
     urls
 }
 
-/// Word ids a story teaches (for adding to review after reading).
+/// The vocabulary a story uses (lines, replies and reactions; names and numbers don't count), sorted.
 #[uniffi::export]
 pub fn story_word_ids(story: Story) -> Vec<String> {
-    let mut ids: Vec<String> = story
-        .panels
-        .iter()
-        .flat_map(|p| p.lines.iter())
-        .flat_map(|l| l.tokens.iter())
+    let mut ids: Vec<String> = tokens_of(&story)
+        .filter(|t| is_vocab(t))
         .filter_map(|t| t.word_id.clone())
         .collect();
     ids.sort();
@@ -558,7 +619,7 @@ mod tests {
             "question":{"q":"?","options":["a","b"],"answer":1}},
            {"lines":[{"zh":"再见。"}],"question":{"q":"bad","options":["a"],"answer":5}}]}]}"#;
         assert_eq!(load_stories(json).unwrap(), 1);
-        let s = story_by_id("tea".into()).unwrap();
+        let s = story_by_id("tea".into(), vec![]).unwrap();
         assert_eq!(
             s.panels[0].lines[0].tokens[0].word_id.as_deref(),
             Some("1-你好")
@@ -567,7 +628,7 @@ mod tests {
             s.panels[1].question.is_none(),
             "out-of-range answers are dropped"
         );
-        assert_eq!(story_of_the_day("2026-11-19".into(), 1).unwrap().id, "tea");
+        assert_eq!(story_of_the_day("2026-11-19".into(), vec![]).unwrap().id, "tea");
         assert_eq!(story_word_ids(s.clone()), vec!["1-你好".to_string()]);
         assert_eq!(story_image_urls(s), vec!["https://x/1.jpg".to_string()]);
     }
@@ -577,146 +638,101 @@ mod tests {
 mod daily_tests {
     use super::*;
 
+    fn none() -> Vec<String> {
+        vec![]
+    }
+
     #[test]
     fn daily_and_chat_stories() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // d1 has four words, so it takes one learned word to open it
         let json = r#"{"stories":[
           {"id":"a","title":"A","level":1,"panels":[{"lines":[{"zh":"你好"}]}]},
           {"id":"d1","title":"D1","level":3,"date":"2026-11-20","style":"chat","me":"我",
-           "panels":[{"lines":[{"who":"丽丽","zh":"看！","image":{"url":"https://x/p.jpg"}}]}]},
+           "panels":[{"lines":[{"who":"丽丽","zh":"看猫喝茶！","image":{"url":"https://x/p.jpg"},
+             "t":[["看","kàn"],["猫","māo"],["喝","hē"],["茶","chá"],["！",""]]}]}]},
           {"id":"d2","title":"D2","level":1,"date":"2026-11-21","panels":[{"lines":[{"zh":"好"}]}]}]}"#;
         // note: other tests replace the global store, so load + check in one go
         load_stories(json).unwrap();
-        let today = story_of_the_day("2026-11-20".into(), 1).unwrap();
-        assert_eq!(
-            today.id, "a",
-            "a daily story above the learner's level is skipped"
-        );
-        let today = story_of_the_day("2026-11-20".into(), 3).unwrap();
-        assert_eq!(
-            today.id, "d1",
-            "the dated story wins at the learner's level"
-        );
+        let cat = vec!["1-猫".to_string()];
+        let day = || "2026-11-20".to_string();
+        assert_eq!(story_of_the_day(day(), none()).unwrap().id, "a", "a locked daily story is skipped");
+        let today = story_of_the_day(day(), cat.clone()).unwrap();
+        assert_eq!(today.id, "d1", "the dated story wins once it's unlocked");
         assert_eq!(today.style, "chat");
-        assert_eq!(
-            today.panels[0].lines[0].image.as_ref().unwrap().url,
-            "https://x/p.jpg"
-        );
-        assert_eq!(
-            story_of_the_day("2026-12-01".into(), 1).unwrap().id,
-            "a",
-            "no daily: undated pick"
-        );
+        assert_eq!(today.panels[0].lines[0].image.as_ref().unwrap().url, "https://x/p.jpg");
+        assert_eq!(story_of_the_day("2026-12-01".into(), none()).unwrap().id, "a", "no daily: undated pick");
         // next_story: chats only, never something already read, nothing from the future
-        assert!(
-            next_story(true, "2026-11-20".into(), 1, vec![], vec![], vec![], 1).is_none(),
-            "the only chat is HSK 3"
-        );
-        assert!(
-            next_story(true, "2026-11-20".into(), 2, vec![], vec![], vec![], 1).is_none(),
-            "HSK 2 can't read HSK 3 either"
-        );
-        assert_eq!(
-            next_story(true, "2026-11-20".into(), 3, vec![], vec![], vec![], 1)
-                .unwrap()
-                .id,
-            "d1"
-        );
-        assert!(
-            next_story(true, "2026-11-20".into(), 3, vec!["d1".into()], vec![], vec![], 1).is_none(),
-            "all chats read"
-        );
-        assert_eq!(
-            story_availability(true, "2026-11-20".into(), 1),
-            StoryAvailability {
-                at_level: 0,
-                above_level: 1
-            }
-        );
-        assert_eq!(
-            next_story(false, "2026-11-20".into(), 1, vec![], vec![], vec![], 9)
-                .unwrap()
-                .id,
-            "a",
-            "d2 is still in the future"
-        );
-        assert_eq!(story_count_for(false, "2026-11-21".into()), 2);
-        let shelf: Vec<String> = shelf_stories("2026-11-20".into())
-            .into_iter()
-            .map(|s| s.id)
-            .collect();
-        assert!(
-            shelf.contains(&"d1".to_string()) && !shelf.contains(&"d2".to_string()),
-            "future dailies hidden"
-        );
+        let next = |chat, read: Vec<String>, known| next_story(chat, "2026-11-20".into(), read, known, vec![], vec![], 1);
+        assert!(next(true, vec![], none()).is_none(), "the only chat is locked");
+        assert_eq!(next(true, vec![], cat.clone()).unwrap().id, "d1");
+        assert!(next(true, vec!["d1".into()], cat.clone()).is_none(), "all chats read");
+        assert_eq!(story_availability(true, day(), none()), StoryAvailability { unlocked: 0, locked: 1 });
+        assert_eq!(story_availability(true, day(), cat.clone()), StoryAvailability { unlocked: 1, locked: 0 });
+        assert_eq!(next(false, vec![], none()).unwrap().id, "a", "d2 is still in the future");
+        let shelf = shelf_stories(day(), none());
+        let ids: Vec<&str> = shelf.iter().map(|s| s.story.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "d1"], "future dailies hidden, locked stories shown last");
+        assert_eq!((shelf[1].unlocked, shelf[1].missing_words), (false, 1));
         let json2 = r#"{"stories":[{"id":"r","title":"R","level":1,"style":"chat","me":"我","panels":[{"lines":[{"who":"丽丽","zh":"你好吗？"}],
           "reply":{"options":[{"zh":"我很好！","ok":true,"t":[["我","wǒ"],["很","hěn"],["好","hǎo"],["！",""]],"then":{"who":"丽丽","zh":"太好了！"}},
                               {"zh":"再见。","ok":false}]}}]}]}"#;
         load_stories(json2).unwrap();
-        let r = story_by_id("r".into()).unwrap();
+        let r = story_by_id("r".into(), vec![]).unwrap();
         let opts = &r.panels[0].reply;
-        assert!(story_fits_level(r.clone(), 0) && story_fits_level(r.clone(), 1));
         assert_eq!(opts.len(), 2);
         assert_eq!(opts.iter().filter(|o| o.correct).count(), 1);
         let ok = opts.iter().find(|o| o.correct).unwrap();
         assert_eq!(ok.reaction.as_ref().unwrap().zh, "太好了！");
         assert_eq!(ok.tokens.len(), 4);
+        assert_eq!(story_word_ids(r.clone()).len(), 3, "reply words count too");
+        assert!(ok.tokens[0].is_new && !ok.tokens[3].is_new, "reply options are marked");
+        let r = story_by_id("r".into(), vec!["1-我".into()]).unwrap();
+        let ok = r.panels[0].reply.iter().find(|o| o.correct).unwrap();
+        assert!(!ok.tokens[0].is_new && ok.tokens[1].is_new);
     }
 }
 
 #[cfg(test)]
-mod level_tests {
+mod unlock_tests {
     use super::*;
 
     #[test]
-    fn never_above_the_learners_level() {
+    fn opens_with_at_most_three_new_words() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let json = r#"{"stories":[
-          {"id":"h1a","title":"1a","level":1,"panels":[{"lines":[{"zh":"好"}]}]},
-          {"id":"h1b","title":"1b","level":1,"panels":[{"lines":[{"zh":"好"}]}]},
-          {"id":"h2","title":"2","level":2,"panels":[{"lines":[{"zh":"好"}]}]},
-          {"id":"h3","title":"3","level":3,"panels":[{"lines":[{"zh":"好"}]}]}]}"#;
+        // six words: 我 喜欢 喝 茶 猫 狗 (plus a name, a number and punctuation, which don't count)
+        let json = r#"{"stories":[{"id":"s","title":"s","level":1,"panels":[
+          {"lines":[{"zh":"x","t":[["小明","Xiǎomíng"],["：",""],["我","wǒ"],["喜欢","xǐhuan"],["喝","hē"],["茶","chá"],["。",""]]},
+                    {"zh":"x","t":[["三","sān"],["猫","māo"],["喝","hē"],["茶","chá"]]},
+                    {"zh":"x","t":[["狗","gǒu"],["。",""]]}]}]}]}"#;
         load_stories(json).unwrap();
-        let day = "2026-11-19".to_string();
-        for seed in 0..50 {
-            let s = next_story(false, day.clone(), 1, vec![], vec![], vec![], seed).unwrap();
-            assert_eq!(s.level, 1, "HSK 1 learners only get HSK 1 stories");
-            // an HSK 2 learner gets the HSK 2 story first, then HSK 1 ones
-            assert_eq!(
-                next_story(false, day.clone(), 2, vec![], vec![], vec![], seed).unwrap().id,
-                "h2"
-            );
-            assert_eq!(
-                next_story(false, day.clone(), 2, vec!["h2".into()], vec![], vec![], seed)
-                    .unwrap()
-                    .level,
-                1
-            );
-            assert!(
-                story_of_the_day(format!("2026-11-{:02}", seed % 28 + 1), 1)
-                    .unwrap()
-                    .level
-                    == 1
-            );
-        }
-        assert!(
-            next_story(false, day.clone(), 1, vec!["h1a".into(), "h1b".into()], vec![], vec![], 1).is_none(),
-            "no fallback to HSK 2"
-        );
-        assert_eq!(
-            next_story(false, day.clone(), 0, vec!["h1a".into()], vec![], vec![], 1)
-                .unwrap()
-                .id,
-            "h1b",
-            "beginners read HSK 1"
-        );
-        assert_eq!(
-            story_availability(false, day, 2),
-            StoryAvailability {
-                at_level: 3,
-                above_level: 1
-            }
-        );
+        let ids = |h: &[&str]| -> Vec<String> { h.iter().map(|h| format!("1-{h}")).collect() };
+        let s = story_by_id("s".into(), vec![]).unwrap();
+        assert_eq!(story_word_ids(s.clone()).len(), 6);
+        assert_eq!(story_new_words(s.clone(), vec![]), ids(&["我", "喜欢", "喝", "茶", "猫", "狗"]), "reading order, once each");
+        assert!(!story_unlocked(s.clone(), vec![]));
+        assert_eq!(story_missing_words(s.clone(), vec![]), 3);
+        assert_eq!(story_missing_words(s.clone(), ids(&["我", "喜欢"])), 1);
+        assert!(!story_unlocked(s.clone(), ids(&["我", "喜欢"])));
+        let known = ids(&["我", "喜欢", "喝"]);
+        assert!(story_unlocked(s.clone(), known.clone()), "three new words are fine");
+        assert_eq!(story_missing_words(s.clone(), known.clone()), 0);
+        assert_eq!(story_new_words(s, known.clone()), ids(&["茶", "猫", "狗"]));
+        // the story handed to the app is marked
+        let s = story_by_id("s".into(), known).unwrap();
+        let new: Vec<&str> = s.panels[0].lines.iter().flat_map(|l| &l.tokens).filter(|t| t.is_new).map(|t| t.text.as_str()).collect();
+        assert_eq!(new, vec!["茶", "猫", "茶", "狗"]);
+    }
+
+    #[test]
+    fn translations() {
+        assert_eq!(story_xp(35, 0), 35);
+        assert_eq!(story_xp(35, 1), 35);
+        assert_eq!(story_xp(35, 2), 0);
+        assert_eq!(story_xp(35, 9), 0);
+        assert_eq!(translation_cost(0), TranslationCost::Free);
+        assert_eq!(translation_cost(1), TranslationCost::Xp);
+        assert_eq!(translation_cost(2), TranslationCost::Nothing);
     }
 }
 
@@ -772,12 +788,14 @@ mod lesson_tests {
           {"id":"sun","title":"s","level":1,"panels":[{"lines":[{"zh":"太阳","t":[["太阳","tàiyáng"]]}]}]},
           {"id":"car","title":"r","level":1,"panels":[{"lines":[{"zh":"车","t":[["车","chē"]]}]}]}]}"#;
         load_stories(json).unwrap();
-        let tea = story_by_id("tea".into()).unwrap();
+        let tea = story_by_id("tea".into(), vec![]).unwrap();
         let ids = story_word_ids(tea);
         assert!(!ids.is_empty(), "bundled words resolve");
         for seed in 0..40 {
-            let s = next_story(false, "2026-11-19".into(), 1, vec![], ids.clone(), ids.clone(), seed).unwrap();
+            let s = next_story(false, "2026-11-19".into(), vec![], ids.clone(), ids.clone(), vec![], seed).unwrap();
             assert_eq!(s.id, "tea", "the story using this unit's words wins");
+            let s = next_story(false, "2026-11-19".into(), vec![], vec![], vec![], ids.clone(), seed).unwrap();
+            assert_eq!(s.id, "tea", "new words from the next lesson beat other new words");
         }
     }
 
