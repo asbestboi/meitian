@@ -39,7 +39,7 @@ final class BattleSession {
         self.path = path
         self.me = me
         self.payOut = payOut
-        engine = Battle(card: me.json, auto: auto)
+        engine = Battle(card: me.json, autoMode: auto)
         view = engine.view(nowMs: Self.now)
     }
 

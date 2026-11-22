@@ -1300,11 +1300,11 @@ pub struct Battle {
 
 #[uniffi::export]
 impl Battle {
-    /// `card` is this player's card as JSON; `auto` starts that mode by itself once everybody is in the room.
+    /// `card` is this player's card as JSON; `auto_mode` starts that mode by itself once everybody is in the room.
     #[uniffi::constructor]
-    pub fn new(card: String, auto: Option<BattleMode>) -> std::sync::Arc<Battle> {
+    pub fn new(card: String, auto_mode: Option<BattleMode>) -> std::sync::Arc<Battle> {
         let card = serde_json::from_str(&card).unwrap_or(Value::Null);
-        std::sync::Arc::new(Battle { s: Mutex::new(State::new(card, auto)) })
+        std::sync::Arc::new(Battle { s: Mutex::new(State::new(card, auto_mode)) })
     }
 
     /// Something arrived on the room's socket.
