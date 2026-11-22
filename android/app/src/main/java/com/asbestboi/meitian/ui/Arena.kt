@@ -237,7 +237,7 @@ private fun ShopTile(item: Cosmetic, selected: Boolean, onTap: () -> Unit, onEqu
     val equipped = app.equipped(item.kind) == item.id
     val affordable = app.arena.coins >= item.price
     Column(
-        Modifier.fillMaxWidth().streetCard(Street.c.card, if (equipped) Street.c.jade else if (selected) Street.c.sky else Street.c.ink, shadow = 4.dp)
+        Modifier.fillMaxWidth().streetCard(Street.c.card, Street.c.ink, shadow = 4.dp).ring(equipped || selected, if (equipped) Street.c.jade else Street.c.sky)
             .clickable(onClickLabel = "Preview", onClick = onTap).padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {

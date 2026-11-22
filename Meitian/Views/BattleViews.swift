@@ -597,7 +597,7 @@ private struct PlayerBar: View {
                 if mode.hasHP { HPBar(hp: player.hp, tint: mine ? Theme.jade : Theme.sky) }
             }
         }
-        .padding(12)
+        .padding(.horizontal, 18).padding(.vertical, 14)
         .dressed(player)
         .opacity(player.out ? 0.5 : 1)
         .spot(player.id)

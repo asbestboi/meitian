@@ -32,6 +32,6 @@ fun TitledText(text: String, titleId: String, size: TextUnit, modifier: Modifier
     Text(text, modifier, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(brush = titleBrush(titleId), fontSize = size, fontWeight = weight))
 }
 
-/** The dark plate names sit on, so every title's colours can be read on every frame. */
+/** The light plate names sit on, so every title's colours can be read on every frame. */
 @Composable
-fun Modifier.namePlate(): Modifier = clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 10.dp, vertical = 5.dp)
+fun Modifier.namePlate(): Modifier = clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.92f)).padding(horizontal = 10.dp, vertical = 5.dp)

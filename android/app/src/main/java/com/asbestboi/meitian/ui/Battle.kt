@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -393,7 +394,7 @@ private fun Modifier.spot(id: String, spots: MutableMap<String, Offset>): Modifi
 @Composable
 private fun PlayerBar(p: BattlePlayer, mode: BattleMode, v: BattleView, spots: MutableMap<String, Offset>, mine: Boolean = false) {
     val hp by animateFloatAsState(p.hp.toFloat(), label = "hp")
-    Dressed(p, Modifier.fillMaxWidth().spot(p.id, spots).alpha(if (p.out) 0.5f else 1f)) { Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Dressed(p, Modifier.fillMaxWidth().spot(p.id, spots).alpha(if (p.out) 0.5f else 1f)) { Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         DressedPicture(p, 44.dp)
         HSpacer(10.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -418,7 +419,7 @@ private fun Dressed(p: BattlePlayer, modifier: Modifier, content: @Composable ()
     val card = p.playerCard
     val shape = RoundedCornerShape(22.dp)
     Box(modifier) {
-        Box(Modifier.clip(shape).background(Street.c.card).border(5.dp, com.asbestboi.meitian.data.Catalog.frame(card?.frame ?: "fr.lantern"), shape)) { content() }
+        Box(Modifier.background(Street.c.card, shape).border(5.dp, com.asbestboi.meitian.data.Catalog.frame(card?.frame ?: "fr.lantern"), shape)) { content() }
         card?.stickerSymbol?.let { Text(it, fontSize = 28.sp, modifier = Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-12).dp).rotate(14f)) }
     }
 }
@@ -426,8 +427,8 @@ private fun Dressed(p: BattlePlayer, modifier: Modifier, content: @Composable ()
 /** A player's picture with their aura around it. */
 @Composable
 private fun DressedPicture(p: BattlePlayer, size: androidx.compose.ui.unit.Dp) {
-    Box(contentAlignment = Alignment.Center) {
-        Aura(p.playerCard?.aura, size.value / 2f, Modifier.requiredSize(size * 1.9f))
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Box(Modifier.matchParentSize().wrapContentSize(unbounded = true)) { Aura(p.playerCard?.aura, size.value / 2f + 2f, Modifier.requiredSize(size * 2f)) }
         BattlePicture(p, size)
     }
 }
@@ -441,7 +442,7 @@ private fun BattleName(p: BattlePlayer, text: String, size: androidx.compose.ui.
 @Composable
 private fun PlayerChip(p: BattlePlayer, mode: BattleMode, v: BattleView, spots: MutableMap<String, Offset>, modifier: Modifier) {
     val hp by animateFloatAsState(p.hp.toFloat(), label = "hp")
-    Dressed(p, modifier.spot(p.id, spots).alpha(if (p.out || !p.here) 0.45f else 1f)) { Column(Modifier.fillMaxWidth().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Dressed(p, modifier.spot(p.id, spots).alpha(if (p.out || !p.here) 0.45f else 1f)) { Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box {
             DressedPicture(p, 40.dp)
             if (mode == BattleMode.TEAM2V2) Text(if (p.team == 0u) "🔴" else "🔵", fontSize = 12.sp, modifier = Modifier.align(Alignment.BottomEnd))

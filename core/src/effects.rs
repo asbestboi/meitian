@@ -1041,21 +1041,22 @@ pub fn aura_frame(id: String, t_ms: u64, w: f32, h: f32, radius: f32) -> Vec<u8>
             f(i.wrapping_mul(7919).wrapping_add(round as u32), u, rnd(i, round as u32 + 2));
         }
     };
+    // never additive: auras are also drawn on white player bars, where added light vanishes
     let pen = &mut pen;
     match id.as_str() {
         "au.flame" => {
-            pen.glow(c, radius * 1.7, x(0xff6a1a).a(0.28 + 0.06 * (t * 7.0).sin()), true);
+            pen.glow(c, radius * 1.7, x(0xff6a1a).a(0.28 + 0.06 * (t * 7.0).sin()), false);
             each(34, 0.85, &mut |k, u, r| {
                 let p = polar(c, radius * (0.92 + 0.15 * rnd(k, 4)), TAU * r);
                 let p = (p.0 + (t * 6.0 + k as f32).sin() * 2.0, p.1 - radius * 0.75 * u);
-                let col = x(0xfff1a8).mix(x(0xff8a1f), u * 2.0).mix(x(0xe0261e), u * 2.0 - 1.0);
-                pen.glow(p, radius * (0.3 - 0.2 * u), col.a(0.7 * (1.0 - u)), true);
+                let col = x(0xffb52e).mix(x(0xff7a14), u * 2.0).mix(x(0xe0261e), u * 2.0 - 1.0);
+                pen.glow(p, radius * (0.32 - 0.2 * u), col.a(0.95 * (1.0 - u)), false);
             });
         }
         "au.sparkle" => each(9, 1.5, &mut |k, u, r| {
             let p = polar(c, radius * (0.95 + 0.4 * rnd(k, 4)), TAU * r);
             let a = (u * PI).sin();
-            particle(pen, Shape::Star, p, radius * 0.17 * a * (0.6 + 0.6 * rnd(k, 5)), u * 3.0, 0.0, (0.0, 0.0), if rnd(k, 6) < 0.5 { x(0xc6ff3d) } else { WHITE }.a(a), true);
+            particle(pen, Shape::Star, p, radius * 0.17 * a * (0.6 + 0.6 * rnd(k, 5)), u * 3.0, 0.0, (0.0, 0.0), if rnd(k, 6) < 0.5 { x(0x9be01f) } else { x(0xffc21f) }.a(a), false);
         }),
         "au.hearts" => each(8, 2.0, &mut |k, u, r| {
             let p = polar(c, radius, TAU * r);
@@ -1063,10 +1064,10 @@ pub fn aura_frame(id: String, t_ms: u64, w: f32, h: f32, radius: f32) -> Vec<u8>
             particle(pen, Shape::Heart, p, radius * 0.17 * (0.7 + 0.5 * rnd(k, 5)), (u * 5.0).sin(), 0.0, (0.0, 0.0), pick(&[x(0xff3da8), x(0xff7cc4)], rnd(k, 6)).a((u * PI).sin()), false);
         }),
         "au.snow" => {
-            pen.ring(c, radius * 1.05, 1.5, x(0xbfe9ff).a(0.35), true);
+            pen.ring(c, radius * 1.05, 1.5, x(0x7cc8ff).a(0.6), false);
             each(12, 2.6, &mut |k, u, r| {
                 let p = (c.0 + (r - 0.5) * radius * 2.6 + (u * 5.0 + k as f32).sin() * radius * 0.1, c.1 - radius * 1.2 + radius * 2.4 * u);
-                particle(pen, Shape::Flake, p, radius * 0.13 * (0.7 + 0.6 * rnd(k, 5)), u * 3.0, 0.0, (0.0, 0.0), x(0xe8f7ff).a((u * PI).sin()), false);
+                particle(pen, Shape::Flake, p, radius * 0.13 * (0.7 + 0.6 * rnd(k, 5)), u * 3.0, 0.0, (0.0, 0.0), x(0x7cc8ff).a((u * PI).sin()), false);
             });
         }
         "au.money" => each(7, 2.2, &mut |k, u, r| {
@@ -1078,12 +1079,12 @@ pub fn aura_frame(id: String, t_ms: u64, w: f32, h: f32, radius: f32) -> Vec<u8>
             for k in 0..40 {
                 let a = TAU * k as f32 / 40.0;
                 let col = C::hue(k as f32 / 40.0 + t * 0.35);
-                pen.line(polar(c, radius * 1.06, a), polar(c, radius * 1.06, a + 0.17), radius * 0.09, col.a(0.75), true);
+                pen.line(polar(c, radius * 1.06, a), polar(c, radius * 1.06, a + 0.17), radius * 0.09, col.a(0.75), false);
             }
             for k in 0..4 {
                 let a = t * 1.7 + TAU * k as f32 / 4.0;
                 let p = polar(c, radius * 1.06, a);
-                particle(pen, Shape::Star, p, radius * 0.2, a, 0.0, (0.0, 0.0), WHITE, true);
+                particle(pen, Shape::Star, p, radius * 0.2, a, 0.0, (0.0, 0.0), x(0x8ea2ff), false);
             }
         }
         "au.glitch" => {
@@ -1092,7 +1093,7 @@ pub fn aura_frame(id: String, t_ms: u64, w: f32, h: f32, radius: f32) -> Vec<u8>
                 let p = polar(c, radius * (0.9 + 0.35 * rnd(k, tick)), TAU * rnd(k, tick + 1));
                 let w = radius * (0.08 + 0.28 * rnd(k, tick + 2));
                 let hh = radius * (0.03 + 0.06 * rnd(k, tick + 3));
-                pen.poly(&[(p.0 - w, p.1), (p.0 + w, p.1), (p.0 + w, p.1 + hh), (p.0 - w, p.1 + hh)], pick(&[x(0xff3da8), x(0x3dfff0), x(0xc6ff3d)], rnd(k, tick + 4)).a(0.85), true);
+                pen.poly(&[(p.0 - w, p.1), (p.0 + w, p.1), (p.0 + w, p.1 + hh), (p.0 - w, p.1 + hh)], pick(&[x(0xff3da8), x(0x3dfff0), x(0xc6ff3d)], rnd(k, tick + 4)).a(0.85), false);
             }
         }
         _ => each(6, 2.0, &mut |k, u, r| {

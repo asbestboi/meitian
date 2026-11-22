@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -209,7 +210,7 @@ fun PlayerCardView(card: PlayerCard, compact: Boolean = false, coins: Int? = nul
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Aura(card.aura, if (compact) 28f else 40f, Modifier.requiredSize(if (compact) 110.dp else 160.dp))
+                Box(Modifier.matchParentSize().wrapContentSize(unbounded = true)) { Aura(card.aura, if (compact) 30f else 42f, Modifier.requiredSize(if (compact) 110.dp else 160.dp)) }
                 Box(Modifier.border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape), contentAlignment = Alignment.Center) { picture() }
             }
             HSpacer(14.dp)

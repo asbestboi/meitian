@@ -11,9 +11,9 @@ extension Text {
 }
 
 extension View {
-    /// The dark plate names sit on, so every title's colours can be read on every frame.
+    /// The light plate names sit on, so every title's colours can be read on every frame.
     func namePlate() -> some View {
         padding(.horizontal, 10).padding(.vertical, 5)
-            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
