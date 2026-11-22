@@ -44,6 +44,13 @@ pub fn day_number(day_key: String) -> Option<i64> {
     Some(era * 146097 + doe - 719468)
 }
 
+/// Stable number for a day key like "2026-11-19": the same all day, on every launch and both platforms.
+#[uniffi::export]
+pub fn day_seed(day_key: String) -> u32 {
+    let v = day_key.chars().fold(7i64, |acc, c| (acc.wrapping_mul(31).wrapping_add(c as i64)) & 0x7fff_ffff);
+    v as u32
+}
+
 /// Current streak: consecutive active days ending today, or yesterday if today isn't done yet.
 #[uniffi::export]
 pub fn current_streak(active_days: Vec<i64>, today: i64) -> u32 {
@@ -185,6 +192,7 @@ mod tests {
         assert_eq!(day_number("2026-11-19".into()), Some(20776));
         assert_eq!(day_number("2024-03-01".into()).unwrap() - day_number("2024-02-28".into()).unwrap(), 2);
         assert_eq!(day_number("nope".into()), None);
+        assert_eq!(day_seed("a".into()), 7 * 31 + 97);
     }
 
     #[test]

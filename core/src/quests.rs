@@ -1,6 +1,6 @@
 //! Daily quests (three small goals a day that pay Arena coins) and streak freezes.
 
-use crate::challenge::day_seed;
+use crate::progress::day_seed;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum QuestKind {

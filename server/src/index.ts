@@ -10,6 +10,8 @@ const MAX_XP_PER_SYNC = 1500;
 const XP_SYNC_GAP_MS = 30_000;
 const CHALLENGE_TTL_MS = 10 * 60_000;
 const PARTY_TTL_MS = 12 * 3_600_000;
+/** One slot machine spin per rolling 24 hours. */
+const SPIN_GAP_MS = 24 * 3_600_000;
 
 type Handler = (req: Request, env: Env, params: string[], url: URL) => Promise<Response>;
 const routes: [string, RegExp, Handler][] = [];
@@ -157,6 +159,27 @@ route("DELETE", "/v1/me", async (req, env) => {
     env.DB.prepare("DELETE FROM players WHERE id = ?").bind(me.id),
   ]);
   return json({ deleted: true });
+});
+
+// MARK: daily slot machine
+
+/**
+ * Records a spin, if 24 hours have passed on the server's clock. The app sends how many spins it knows about
+ * (`count`, so spins made offline aren't lost); the answer's `spins` is this spin's number. `wait` is how long until
+ * the next one, so the phone's clock doesn't matter.
+ */
+route("POST", "/v1/spin", async (req, env) => {
+  const me = await authenticate(env, req);
+  const { count } = await body<{ count?: number }>(req);
+  const t = now();
+  const known = clampInt(count, 0, 100_000) ?? 0;
+  // one statement, so two requests at once can't both win
+  const r = await env.DB.prepare("UPDATE players SET last_spin = ?1, spins = MAX(spins, ?2) + 1 WHERE id = ?3 AND last_spin <= ?4")
+    .bind(t, known, me.id, t - SPIN_GAP_MS)
+    .run();
+  const p = (await getPlayer(env, me.id))!;
+  const wait = Math.max(0, p.last_spin + SPIN_GAP_MS - t);
+  return json({ allowed: r.meta.changes > 0, spins: p.spins, wait }, 200);
 });
 
 // MARK: profile pictures

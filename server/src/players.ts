@@ -18,6 +18,8 @@ export interface PlayerRow {
   xp_synced_at: number;
   created: number;
   last_seen: number;
+  last_spin: number;
+  spins: number;
 }
 
 export const ONLINE_MS = 60_000;

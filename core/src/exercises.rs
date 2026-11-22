@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::challenge::day_seed;
+use crate::progress::day_seed;
 use crate::content::{resolved, sentences, Sentence, Token};
 use crate::vocab::{id_set, is_vocab, mark_new, IdSet};
 use crate::words::{bank, CoreWord};

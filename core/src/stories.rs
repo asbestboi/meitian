@@ -5,7 +5,7 @@ use std::sync::{OnceLock, RwLock};
 
 use serde::Deserialize;
 
-use crate::challenge::day_seed;
+use crate::progress::day_seed;
 use crate::content::{ContentError, Token};
 use crate::vocab::{id_set, is_new, is_vocab, IdSet};
 use crate::words::bank;

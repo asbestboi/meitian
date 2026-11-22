@@ -75,6 +75,30 @@ describe("accounts", () => {
   });
 });
 
+describe("daily slot machine", () => {
+  it("one spin per 24 hours on the server's clock", async () => {
+    const { token } = await register("Spinner");
+    const spin = async (count = 0) => (await call("POST", "/v1/spin", token, { count })).data;
+    const first = await spin();
+    expect(first).toMatchObject({ allowed: true, spins: 1 });
+    expect(first.wait).toBe(24 * 3_600_000);
+    const again = await spin(1);
+    expect(again.allowed).toBe(false);
+    expect(again.spins).toBe(1);
+    expect(again.wait).toBeGreaterThan(23 * 3_600_000);
+    // 23 hours later: still not
+    await env.DB.prepare("UPDATE players SET last_spin = last_spin - ?").bind(23 * 3_600_000).run();
+    expect((await spin(1)).allowed).toBe(false);
+    await env.DB.prepare("UPDATE players SET last_spin = last_spin - ?").bind(3_600_000).run();
+    expect(await spin(4)).toMatchObject({ allowed: true, spins: 5 });
+    // two requests at the same moment: only one counts
+    await env.DB.prepare("UPDATE players SET last_spin = 0").run();
+    const both = await Promise.all([spin(5), spin(5)]);
+    expect(both.filter((r) => r.allowed)).toHaveLength(1);
+    expect((await call("POST", "/v1/spin", undefined, {})).status).toBe(401);
+  });
+});
+
 describe("profile pictures", () => {
   it("a new picture replaces the old one, which is deleted", async () => {
     const { token, profile } = await register("Pic");
