@@ -1,42 +1,14 @@
-//! The daily slot machine: one free spin every 24 hours, never paid. The core decides the prize, seeded from the
-//! day, the player and how often they have spun, so restarting the app can't reroll it.
+//! The slot machine: every finished unit of the learning path is a free spin, never paid, and spins stack up. The core
+//! decides the prize, seeded from the player and how often they have spun, so restarting the app can't reroll it.
 
 use crate::content::{resolved, sentences, Sentence};
-use crate::progress::day_seed;
 use crate::vocab::{id_set, is_new, is_vocab, mark_new};
 
-/// Rolling wait between two spins.
-pub const SPIN_GAP_MS: i64 = 24 * 60 * 60 * 1000;
-
-/// Milliseconds until the next spin (0 = ready). `last_spin_ms` 0 = never spun. `server_next_ms` is when the server
-/// allows the next one (0 = it hasn't said); it has the last word. Setting the clock back doesn't help.
+/// Spins waiting: one for every finished unit (`finished_units` are "level-unit" keys, each counts once) that wasn't
+/// used yet.
 #[uniffi::export]
-pub fn spin_wait_ms(last_spin_ms: i64, server_next_ms: i64, now_ms: i64) -> i64 {
-    let local = if last_spin_ms <= 0 { 0 } else { last_spin_ms + SPIN_GAP_MS - now_ms };
-    local.max(if server_next_ms > 0 { server_next_ms - now_ms } else { 0 }).clamp(0, SPIN_GAP_MS)
-}
-
-/// The server's answer to `POST /v1/spin`.
-#[derive(Debug, Clone, PartialEq, uniffi::Record)]
-pub struct ServerSpin {
-    pub allowed: bool,
-    /// Spins so far, this one included: seeds the prize.
-    pub spins: u32,
-    /// Until the next one.
-    pub wait_ms: i64,
-}
-
-#[uniffi::export]
-pub fn online_parse_spin(json: String) -> Option<ServerSpin> {
-    let v: serde_json::Value = serde_json::from_str(&json).ok()?;
-    Some(ServerSpin { allowed: v["allowed"].as_bool()?, spins: v["spins"].as_u64()? as u32, wait_ms: v["wait"].as_i64()? })
-}
-
-/// "13:42:10" for the countdown.
-#[uniffi::export]
-pub fn spin_countdown(wait_ms: i64) -> String {
-    let s = (wait_ms.max(0) + 999) / 1000;
-    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+pub fn spins_left(finished_units: Vec<String>, used: u32) -> u32 {
+    (id_set(finished_units).len() as u32).saturating_sub(used)
 }
 
 /// What the reels can show.
@@ -52,7 +24,7 @@ pub enum SlotPrize {
     Coins { amount: u32, jackpot: bool },
     /// A cosmetic the player doesn't own yet.
     Cosmetic { id: String },
-    /// The sentence of the day: learned words plus at most one new one.
+    /// A bonus sentence: learned words plus at most one new one.
     Sentence { sentence: Sentence },
 }
 
@@ -63,7 +35,7 @@ pub struct SpinResult {
     pub prize: SlotPrize,
 }
 
-/// XP for finishing the sentence of the day.
+/// XP for finishing the bonus sentence.
 #[uniffi::export]
 pub fn spin_sentence_xp() -> u32 {
     20
@@ -90,11 +62,11 @@ const ODDS: [(Kind, u32); 6] = [
 const JACKPOT: u32 = 500;
 
 /// Spins. `cosmetic_ids` are the cosmetics the player could win (not owned, and allowed by their settings): when
-/// there are none, or no sentence fits, the spin pays coins instead.
+/// there are none, or no sentence fits (or the last one is still waiting: `sentence_waiting`), the spin pays coins.
 #[uniffi::export]
-pub fn spin_slots(day_key: String, player_id: String, spin_count: u32, cosmetic_ids: Vec<String>, known_word_ids: Vec<String>) -> SpinResult {
+pub fn spin_slots(player_id: String, spin_count: u32, cosmetic_ids: Vec<String>, known_word_ids: Vec<String>, sentence_waiting: bool) -> SpinResult {
     let player = player_id.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
-    let seed = player ^ ((day_seed(day_key) as u64) << 17) ^ (spin_count as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let seed = player ^ (spin_count as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     let mut rng = fastrand::Rng::with_seed(seed);
     let mut roll = rng.u32(..ODDS.iter().map(|o| o.1).sum::<u32>());
     let kind = ODDS
@@ -118,7 +90,8 @@ pub fn spin_slots(day_key: String, player_id: String, spin_count: u32, cosmetic_
                 SlotPrize::Cosmetic { id: ids.swap_remove(rng.usize(..ids.len())) }
             }
         }
-        Kind::Sentence => daily_sentence(&mut rng, known_word_ids).map_or(coins(50), |sentence| SlotPrize::Sentence { sentence }),
+        Kind::Sentence if sentence_waiting => coins(50),
+        Kind::Sentence => bonus_sentence(&mut rng, known_word_ids).map_or(coins(50), |sentence| SlotPrize::Sentence { sentence }),
     };
     let symbol = match &prize {
         SlotPrize::Coins { jackpot: true, .. } => "福",
@@ -139,7 +112,7 @@ pub fn spin_slots(day_key: String, player_id: String, spin_count: u32, cosmetic_
 
 /// A sentence of 3–8 words, all learned except at most one (which the word bank can explain). One with exactly one
 /// new word is preferred.
-fn daily_sentence(rng: &mut fastrand::Rng, known_word_ids: Vec<String>) -> Option<Sentence> {
+fn bonus_sentence(rng: &mut fastrand::Rng, known_word_ids: Vec<String>) -> Option<Sentence> {
     let known = id_set(known_word_ids);
     if known.is_empty() {
         return None;
@@ -203,24 +176,17 @@ mod tests {
 
     fn spin(count: u32, cosmetics: &[&str]) -> SpinResult {
         let ids = cosmetics.iter().map(|s| s.to_string()).collect();
-        spin_slots("2026-11-22".into(), "p1".into(), count, ids, known(&["我", "很", "好", "他", "是"]))
+        spin_slots("p1".into(), count, ids, known(&["我", "很", "好", "他", "是"]), false)
     }
 
     #[test]
-    fn once_a_day() {
-        let h = 3_600_000;
-        assert_eq!(spin_wait_ms(0, 0, 1_000_000_000), 0, "the first spin is ready");
-        let t = 1_800_000_000_000;
-        assert_eq!(spin_wait_ms(t, 0, t), SPIN_GAP_MS);
-        assert_eq!(spin_wait_ms(t, 0, t + 23 * h), h);
-        assert_eq!(spin_wait_ms(t, 0, t + 24 * h), 0);
-        assert_eq!(spin_wait_ms(t, 0, t - 5 * h), SPIN_GAP_MS, "setting the clock back never shortens the wait");
-        assert_eq!(spin_wait_ms(t, t + 30 * h, t + 25 * h), 5 * h, "the server has the last word");
-        assert_eq!(spin_wait_ms(0, t + h, t), h);
-        assert_eq!(spin_countdown(13 * h + 42 * 60_000 + 10_000), "13:42:10");
-        assert_eq!(spin_countdown(0), "00:00:00");
-        assert_eq!(spin_countdown(1), "00:00:01");
-        assert_eq!(spin_countdown(SPIN_GAP_MS), "24:00:00");
+    fn a_spin_for_every_unit() {
+        let keys = |k: &[&str]| k.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(spins_left(vec![], 0), 0);
+        assert_eq!(spins_left(keys(&["1-1", "1-2", "2-1"]), 0), 3, "they stack up");
+        assert_eq!(spins_left(keys(&["1-1", "1-2", "2-1"]), 2), 1);
+        assert_eq!(spins_left(keys(&["1-1", "1-1"]), 0), 1, "a unit counts once");
+        assert_eq!(spins_left(keys(&["1-1"]), 5), 0, "progress was reset");
     }
 
     #[test]
@@ -229,8 +195,8 @@ mod tests {
         assert_eq!(spin(3, &["fx.fire", "fr.jade"]), spin(3, &["fr.jade", "fx.fire"]), "restarting can't reroll it");
         let first: Vec<Vec<String>> = (0..30).map(|i| spin(i, &["fx.fire"]).reels).collect();
         assert!(first.iter().any(|r| *r != first[0]), "spins differ");
-        let a = spin_slots("2026-11-22".into(), "p1".into(), 1, vec![], vec![]);
-        assert!((0..20).any(|i| spin_slots("2026-11-22".into(), format!("q{i}"), 1, vec![], vec![]) != a), "players differ");
+        let a = spin_slots("p1".into(), 1, vec![], vec![], false);
+        assert!((0..20).any(|i| spin_slots(format!("q{i}"), 1, vec![], vec![], false) != a), "players differ");
     }
 
     #[test]
@@ -266,20 +232,16 @@ mod tests {
         }
         assert!(jackpots > 20 && jackpots < 200, "{jackpots} jackpots");
         assert!(coins > 2000 && cosmetics > 300 && sentences > 700, "{coins} {cosmetics} {sentences}");
+        // a sentence is still waiting: none is won on top of it
+        for i in 0..400 {
+            let r = spin_slots("p1".into(), i, vec![], known(&["我", "很", "好", "他", "是"]), true);
+            assert!(!matches!(r.prize, SlotPrize::Sentence { .. }));
+        }
         // owns everything, knows nothing: always coins
         for i in 0..200 {
-            let r = spin_slots("2026-11-22".into(), "p1".into(), i, vec![], vec![]);
+            let r = spin_slots("p1".into(), i, vec![], vec![], false);
             assert!(matches!(r.prize, SlotPrize::Coins { .. }));
         }
-    }
-
-    #[test]
-    fn server_answers() {
-        assert_eq!(
-            online_parse_spin(r#"{"allowed":true,"spins":3,"wait":86400000}"#.into()),
-            Some(ServerSpin { allowed: true, spins: 3, wait_ms: SPIN_GAP_MS })
-        );
-        assert_eq!(online_parse_spin("{}".into()), None);
     }
 
     #[test]

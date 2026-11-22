@@ -22,6 +22,7 @@ pub mod quests;
 pub mod slots;
 pub mod sounds;
 pub mod stories;
+pub mod titles;
 pub mod vocab;
 pub mod wechat;
 pub mod words;
@@ -44,7 +45,7 @@ pub use quests::*;
 pub use slots::*;
 pub use sounds::*;
 pub use stories::*;
+pub use titles::*;
 pub use vocab::*;
 pub use wechat::*;
 pub use words::*;
-

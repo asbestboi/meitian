@@ -24,6 +24,7 @@ pub struct OnlineProfile {
     /// Equipped cosmetics as sent by their app (`aura`, `fx`, `title`…; older apps also send `avatar`, which is ignored).
     pub cosmetic_aura: String,
     pub cosmetic_fx: String,
+    pub cosmetic_title: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -51,6 +52,7 @@ impl From<RawProfile> for OnlineProfile {
         OnlineProfile {
             cosmetic_aura: cos("aura"),
             cosmetic_fx: cos("fx"),
+            cosmetic_title: cos("title"),
             id: r.id,
             nickname: r.nickname,
             tag: r.tag,
@@ -391,7 +393,7 @@ mod tests {
     use super::*;
 
     const P: &str = r#"{"id":"u1","nickname":"小明","tag":"1234","level":2,"streak":5,"xpTotal":900,"xpWeek":40,
-      "rating":1016,"wins":1,"losses":0,"cosmetics":{"avatar":"av.panda","aura":"au.fire"},
+      "rating":1016,"wins":1,"losses":0,"cosmetics":{"avatar":"av.panda","aura":"au.fire","title":"ti.boss"},
       "avatar":"/v1/avatars/u1/2","online":true,"friendCode":"ABC234"}"#;
 
     #[test]
@@ -418,6 +420,7 @@ mod tests {
         let p = online_parse_profile(format!(r#"{{"profile":{P}}}"#)).unwrap();
         assert_eq!(p.nickname, "小明");
         assert_eq!(p.cosmetic_aura, "au.fire");
+        assert_eq!(p.cosmetic_title, "ti.boss");
         assert_eq!(p.friend_code, "ABC234");
         assert_eq!(p.avatar, "/v1/avatars/u1/2");
         let a = online_parse_account(format!(r#"{{"token":"u1.s","profile":{P}}}"#)).unwrap();

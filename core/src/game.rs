@@ -277,6 +277,12 @@ pub struct BattleQuestion {
     pub solution: String,
 }
 
+/// Read aloud once the round is over: the finished sentence ("" = silent).
+#[uniffi::export]
+pub fn say_after_round(question: BattleQuestion) -> String {
+    if question.ask == BattleAsk::Sentence { question.solution } else { String::new() }
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum BattleAnswer {
     Option { index: u32 },
@@ -473,7 +479,7 @@ pub(crate) fn make_questions(mode: BattleMode, level: u8, swears: bool, seed: u6
                 ask: BattleAsk::Pinyin,
                 prompt: w.hanzi.clone(),
                 prompt_pinyin: String::new(),
-                say: String::new(),
+                say: w.hanzi.clone(),
                 options: vec![],
                 answer: 0,
                 tiles: vec![],
@@ -557,6 +563,8 @@ mod tests {
                 for q in &qs {
                     match q.ask {
                         BattleAsk::Sentence => {
+                            assert!(q.say.is_empty(), "hearing it would give the order away");
+                            assert_eq!(say_after_round(q.clone()), q.solution);
                             assert!((3..=7).contains(&q.tiles.len()));
                             assert!(!q.is_right(&BattleAnswer::Tiles { tiles: vec!["x".into()] }));
                             let mut sorted: Vec<char> = q.tiles.concat().chars().collect();
@@ -566,6 +574,7 @@ mod tests {
                             assert_eq!(sorted, want);
                         }
                         BattleAsk::Pinyin => {
+                            assert_eq!(q.say, q.prompt, "you hear the word");
                             assert!(q.is_right(&BattleAnswer::Text { text: q.solution.clone() }));
                             assert!(q.is_right(&BattleAnswer::Text { text: toneless(q.solution.clone()) }), "{}", q.solution);
                             assert!(!q.is_right(&BattleAnswer::Text { text: "zzz".into() }));

@@ -514,9 +514,18 @@ pub fn reread_story(day_key: String, read: Vec<String>, known_word_ids: Vec<Stri
         .min_by_key(|s| read.iter().position(|r| *r == s.id).map_or(0, |i| i + 1))
 }
 
+pub(crate) struct StoryNeed {
+    pub id: String,
+    pub chat: bool,
+    /// Unlearned words of the level.
+    pub need: Vec<String>,
+    /// How many of its words are harder than the level.
+    pub harder: usize,
+}
+
 /// For the lesson planner: what every undated story needs of `level` (its unlearned words, as ids, in reading order)
 /// for a learner who knows `known`, and how many words of harder levels it has.
-pub(crate) fn story_needs(level: u8, known: &IdSet) -> Vec<(String, Vec<String>, usize)> {
+pub(crate) fn story_needs(level: u8, known: &IdSet) -> Vec<StoryNeed> {
     let b = bank();
     let all = store().read().unwrap_or_else(|e| e.into_inner());
     all.iter()
@@ -539,9 +548,15 @@ pub(crate) fn story_needs(level: u8, known: &IdSet) -> Vec<(String, Vec<String>,
                     }
                 }
             }
-            (s.id.clone(), need, harder)
+            StoryNeed { id: s.id.clone(), chat: s.style == "chat", need, harder }
         })
         .collect()
+}
+
+/// The words of a story somebody who knows `known` hasn't learned, in reading order; None when there's no such story.
+pub(crate) fn story_new_ids(id: &str, known: &IdSet) -> Option<Vec<String>> {
+    let s = store().read().ok()?.iter().find(|s| s.id == id).cloned()?;
+    Some(new_words(&resolve(s, None), known))
 }
 
 /// Bumped whenever a story pack is loaded (the planner caches what it computed from it).

@@ -1,6 +1,10 @@
 //! The learning path (Duolingo-style map): an HSK level's words split into lessons, grouped in units,
 //! with sentence nodes and a story checkpoint in every unit and the level-up test at the end.
 
+use crate::plan::unit_story_ready;
+use crate::vocab::{id_set, known_word_ids};
+use crate::words::bank;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum PathNodeKind {
     Lesson,
@@ -42,10 +46,14 @@ pub struct PathUnit {
     pub nodes: Vec<PathNode>,
 }
 
-/// Lessons per unit.
+/// Words a unit should have, whatever the daily goal.
+const UNIT_WORDS: u32 = 25;
+
+/// Lessons per unit, for lessons of `lesson_size` words: units are about the same size for everybody.
 #[uniffi::export]
-pub fn path_unit_size() -> u32 {
-    5
+pub fn path_unit_size(lesson_size: u32) -> u32 {
+    let size = lesson_size.max(1);
+    ((UNIT_WORDS + size / 2) / size).max(1)
 }
 
 /// A second sentence node in the middle of a unit, after this many of its lessons (0 = none).
@@ -57,14 +65,41 @@ pub fn path_sentences_xp() -> u32 {
     15
 }
 
-/// Builds the path for one level: each unit is lessons → sentences → story (the last one ends with the test).
-/// `learned`/`total` count the level's words, `lesson_size` is the daily goal, `stories_done` lists the units
-/// whose story checkpoint is finished, `sentences_done` the numbers of finished sentence nodes.
+/// The path of one level: each unit is lessons → sentences → story (a picture story in odd units, an SMS chat in even
+/// ones), and the level-up test comes last. `card_ids` are the learned words, `confirmed_level` the levels below that
+/// count as known, `lesson_size` is the daily goal, `stories_done` lists the units whose story is finished,
+/// `sentences_done` the numbers of finished sentence nodes.
 #[uniffi::export]
-pub fn learn_path(learned: u32, total: u32, lesson_size: u32, stories_done: Vec<u32>, sentences_done: Vec<u32>) -> Vec<PathUnit> {
+pub fn level_path(
+    level: u8,
+    lesson_size: u32,
+    card_ids: Vec<String>,
+    confirmed_level: u8,
+    stories_done: Vec<u32>,
+    sentences_done: Vec<u32>,
+) -> Vec<PathUnit> {
+    let cards = id_set(card_ids.clone());
+    let (learned, total) = {
+        let b = bank();
+        let words: Vec<_> = b.regular.iter().filter(|w| w.level == level).collect();
+        (words.iter().filter(|w| cards.contains(&w.id)).count() as u32, words.len() as u32)
+    };
+    let known = id_set(known_word_ids(card_ids, confirmed_level));
+    learn_path(learned, total, lesson_size, stories_done, sentences_done, |unit| unit_story_ready(level, lesson_size, unit, &known))
+}
+
+/// `ready`: is this unit's story readable yet? (Only asked when everything before it is done.)
+pub(crate) fn learn_path(
+    learned: u32,
+    total: u32,
+    lesson_size: u32,
+    stories_done: Vec<u32>,
+    sentences_done: Vec<u32>,
+    ready: impl Fn(u32) -> bool,
+) -> Vec<PathUnit> {
     let size = lesson_size.max(1);
     let lessons = total.div_ceil(size).max(1);
-    let per_unit = path_unit_size();
+    let per_unit = path_unit_size(size);
     let units = lessons.div_ceil(per_unit);
     let done_lessons = if learned >= total { lessons } else { learned / size };
     let state = |done: bool, open: bool| match (done, open) {
@@ -86,11 +121,11 @@ pub fn learn_path(learned: u32, total: u32, lesson_size: u32, stories_done: Vec<
             }
         }
         push(PathNodeKind::Sentences, last, sentences(last));
-        if u < units {
-            // stories finished before sentence nodes existed stay done
-            let ready = sentences(last) == PathNodeState::Done;
-            push(PathNodeKind::Story, u, state(stories_done.contains(&u), ready));
-        } else {
+        // stories finished before sentence nodes existed stay done
+        let done = stories_done.contains(&u) && done_lessons >= last;
+        let open = !done && sentences(last) == PathNodeState::Done && ready(u);
+        push(PathNodeKind::Story, u, state(done, open));
+        if u == units {
             push(PathNodeKind::Test, 0, state(false, done_lessons >= lessons));
         }
         out.push(PathUnit { number: u, first_lesson: first, last_lesson: last, nodes });
@@ -134,14 +169,14 @@ mod tests {
     #[test]
     fn layout() {
         // 60 words, 5 a lesson: 12 lessons, units of 5 → 3 units (5, 5, 2)
-        let p = learn_path(0, 60, 5, vec![], vec![]);
+        let p = learn_path(0, 60, 5, vec![], vec![], |_| true);
         assert_eq!(p.len(), 3);
         assert_eq!((p[2].first_lesson, p[2].last_lesson), (11, 12));
         use PathNodeKind::*;
         let kinds: Vec<_> = p[0].nodes.iter().map(|n| n.kind).collect();
         assert_eq!(kinds, vec![Lesson, Lesson, Lesson, Sentences, Lesson, Lesson, Sentences, Story]);
         let kinds: Vec<_> = p[2].nodes.iter().map(|n| n.kind).collect();
-        assert_eq!(kinds, vec![Lesson, Lesson, Sentences, Test], "a short unit has no middle node");
+        assert_eq!(kinds, vec![Lesson, Lesson, Sentences, Story, Test], "a short unit has no middle node, but it has a story");
         let n = flat(&p);
         let mut numbers: Vec<u32> = n.iter().filter(|x| x.kind == Sentences).map(|x| x.number).collect();
         assert_eq!(numbers, vec![3, 5, 8, 10, 12]);
@@ -155,7 +190,7 @@ mod tests {
     fn sentences_then_story() {
         use PathNodeKind::*;
         // 5 lessons done: both sentence nodes open, the story waits for the second one
-        let n = flat(&learn_path(27, 60, 5, vec![], vec![]));
+        let n = flat(&learn_path(27, 60, 5, vec![], vec![], |_| true));
         assert_eq!(find(&n, Lesson, 5).state, PathNodeState::Done);
         assert_eq!(find(&n, Sentences, 3).state, PathNodeState::Open);
         assert_eq!(find(&n, Sentences, 5).state, PathNodeState::Open);
@@ -165,29 +200,49 @@ mod tests {
         assert_eq!(find(&n, Lesson, 6).state, PathNodeState::Open, "but lesson 6 isn't blocked");
         assert_eq!(n.iter().filter(|x| x.next).count(), 1);
 
-        let n = flat(&learn_path(27, 60, 5, vec![], vec![5]));
+        let n = flat(&learn_path(27, 60, 5, vec![], vec![5], |_| true));
         assert_eq!(find(&n, Story, 1).state, PathNodeState::Open);
         assert!(find(&n, Lesson, 6).next, "older open sentence nodes are optional");
-        let n = flat(&learn_path(27, 60, 5, vec![1], vec![]));
+        let n = flat(&learn_path(27, 60, 5, vec![1], vec![], |_| true));
         assert_eq!(find(&n, Story, 1).state, PathNodeState::Done, "old saves keep finished stories");
 
         // the middle node
-        let n = flat(&learn_path(15, 60, 5, vec![], vec![]));
+        let n = flat(&learn_path(15, 60, 5, vec![], vec![], |_| true));
         assert!(find(&n, Sentences, 3).next);
-        assert!(flat(&learn_path(16, 60, 5, vec![], vec![3])).iter().any(|x| x.next && x.number == 4));
+        assert!(flat(&learn_path(16, 60, 5, vec![], vec![3], |_| true)).iter().any(|x| x.next && x.number == 4));
     }
 
     #[test]
     fn test_comes_last() {
         // everything learned → the last sentence node, then the test
-        let n = flat(&learn_path(60, 60, 5, vec![1, 2], vec![]));
+        let n = flat(&learn_path(60, 60, 5, vec![1, 2], vec![], |_| true));
         let t = n.last().unwrap();
         assert!(!t.next && t.state == PathNodeState::Open, "sentences never block the test");
-        let n = flat(&learn_path(60, 60, 5, vec![1, 2], vec![12]));
+        let n = flat(&learn_path(60, 60, 5, vec![1, 2], vec![12], |_| true));
         assert!(n.last().unwrap().next);
         // partial last lesson counts once every word is in
-        let n = flat(&learn_path(58, 58, 5, vec![], vec![12]));
+        let n = flat(&learn_path(58, 58, 5, vec![], vec![12], |_| true));
         assert!(n.last().unwrap().next);
+    }
+
+    #[test]
+    fn units_are_the_same_size_for_everybody() {
+        assert_eq!((path_unit_size(3), path_unit_size(5), path_unit_size(8), path_unit_size(1)), (8, 5, 3, 25));
+        for size in 1..=15 {
+            let words = size * path_unit_size(size);
+            assert!((22..=30).contains(&words), "{size} a day: {words} words a unit");
+        }
+        assert!(path_unit_size(0) > 0 && path_unit_size(99) == 1);
+    }
+
+    #[test]
+    fn stories_wait_for_their_words() {
+        use PathNodeKind::*;
+        let n = flat(&learn_path(27, 60, 5, vec![], vec![5], |_| false));
+        assert_eq!(find(&n, Story, 1).state, PathNodeState::Locked);
+        // a story marked done in a unit that isn't reached yet (the daily goal changed)
+        let n = flat(&learn_path(27, 60, 5, vec![1, 2], vec![5], |_| true));
+        assert_eq!((find(&n, Story, 1).state, find(&n, Story, 2).state), (PathNodeState::Done, PathNodeState::Locked));
     }
 
     #[test]
