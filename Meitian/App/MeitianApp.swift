@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct MeitianApp: App {
@@ -15,6 +16,7 @@ struct MeitianApp: App {
         let inline = UIFont.systemFont(ofSize: 17, weight: .bold)
         UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
         UINavigationBar.appearance().titleTextAttributes = [.font: inline]
+        UNUserNotificationCenter.current().delegate = NotificationTaps.shared
     }
 
     var body: some Scene {
@@ -37,14 +39,31 @@ struct MeitianApp: App {
                             await OnlineService.shared.refreshInbox()
                         }
                     }
-                    if p == .background { store.save(); arena.save() }
+                    if p == .background {
+                        store.save()
+                        arena.save()
+                        Invites.shared.lingerInBackground()
+                    }
                 }
+                // invitations to battles, while the app is open
+                .task(id: phase) {
+                    while phase == .active, !Task.isCancelled {
+                        await Invites.shared.poll(foreground: true)
+                        try? await Task.sleep(for: .seconds(8))
+                    }
+                }
+        }
+        .backgroundTask(.appRefresh(Invites.taskId)) {
+            await Invites.shared.schedule()
+            await Invites.shared.poll(foreground: false)
         }
     }
 }
 
 struct RootView: View {
     @Environment(AppStore.self) private var store
+    @Environment(ArenaStore.self) private var arena
+    @State private var invites = Invites.shared
 
     var body: some View {
         ZStack {
@@ -56,6 +75,9 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: store.profile.onboarded)
         .tint(Theme.ink)
+        .fullScreenCover(item: $invites.joining) { ref in
+            OnlineHub(joinNow: ref.invite).environment(store).environment(arena)
+        }
     }
 }
 

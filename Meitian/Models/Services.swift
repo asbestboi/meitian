@@ -28,6 +28,7 @@ final class Speaker {
         u.voice = voice
         u.rate = slow ? 0.32 : 0.45
         u.pitchMultiplier = 1.05
+        u.volume = 0.85   // the voice and the sound effects sit at the same level
         synth.speak(u)
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StatsView: View {
     @Environment(AppStore.self) private var store
+    @AppStorage(Invites.settingKey) private var inviteNotifications = true
     @Environment(ContentSync.self) private var content
     @AppStorage(ContentSync.allLevelsKey) private var allLevels = false
     @State private var confirmClear = false
@@ -443,6 +444,12 @@ struct StatsView: View {
                 Label("Spin reminder", systemImage: "bell.badge.fill")
             }
             .padding(16)
+            Divider().padding(.leading, 16)
+            Toggle(isOn: $inviteNotifications) {
+                Label("Battle invitations", systemImage: "envelope.badge.fill")
+            }
+            .padding(16)
+            .onChange(of: inviteNotifications) { _, on in if on { Task { await Invites.shared.askPermission() } } }
             Divider().padding(.leading, 16)
             Button { retake = true } label: {
                 Label("Retake placement quiz", systemImage: "checkmark.seal.fill")

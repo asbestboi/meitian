@@ -48,5 +48,3 @@ pub use vocab::*;
 pub use wechat::*;
 pub use words::*;
 
-#[cfg(test)]
-mod preview_tests;

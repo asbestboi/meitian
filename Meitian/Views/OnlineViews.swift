@@ -9,6 +9,8 @@ enum HubStart: String, Identifiable {
 /// Online play: quick matches and groups, parties with friends, leaderboards, your public profile.
 struct OnlineHub: View {
     var startAt: HubStart = .play
+    /// An accepted invitation: join it right away.
+    var joinNow: OnlineChallenge? = nil
     @Environment(AppStore.self) private var store
     @Environment(ArenaStore.self) private var arena
     @Environment(\.dismiss) private var dismiss
@@ -18,7 +20,7 @@ struct OnlineHub: View {
     enum Stage: Equatable {
         case hub
         case searching(BattleMode, group: Bool)
-        case playing(path: String, mode: BattleMode?, people: [OnlineProfile], party: String?)
+        case playing(path: String, mode: BattleMode?, people: [OnlineProfile], party: String?, invited: String? = nil)
     }
 
     var body: some View {
@@ -30,7 +32,7 @@ struct OnlineHub: View {
                     OnlineTabs(startAt: startAt, close: { dismiss() },
                                play: { stage = .searching($0, group: $1) },
                                join: join,
-                               challenge: { stage = .playing(path: "/v1/rooms/\($0)", mode: $1, people: [$2], party: nil) },
+                               challenge: { stage = .playing(path: "/v1/rooms/\($0)", mode: $1, people: [$2], party: nil, invited: $0) },
                                party: { openParty($0, people: []) })
                 } else {
                     OnlineSetup(close: { dismiss() })
@@ -39,15 +41,18 @@ struct OnlineHub: View {
                 QuickMatchSearch(mode: mode, group: group, cancel: { stage = .hub }) { room, people in
                     stage = .playing(path: "/v1/rooms/\(room)", mode: mode, people: people, party: nil)
                 }
-            case .playing(let path, let mode, let people, let party):
-                BattleScreen(path: path, auto: mode, partyCode: party, waitingFor: people) { stage = .hub }
+            case .playing(let path, let mode, let people, let party, let invited):
+                BattleScreen(path: path, auto: mode, partyCode: party, waitingFor: people, invited: invited) { stage = .hub }
             }
         }
         .animation(Theme.spring, value: stage)
+        .onAppear { if let joinNow, stage == .hub { join(joinNow) } }
         .task {
             try? await online.refreshMe()
             await online.sync(store: store, arena: arena, force: true)
         }
+        // asked once, so invitations can be shown while the app is closed
+        .task(id: online.signedIn) { if online.signedIn { await Invites.shared.askPermission() } }
     }
 
     private func join(_ c: OnlineChallenge) {
@@ -671,7 +676,7 @@ private struct QuickMatchSearch: View {
                 .background(info.gradient, in: Circle())
                 .scaleEffect(reduceMotion ? 1 : pulse ? 1.12 : 0.88)
                 .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: pulse)
-            Text(problem ?? (group ? "looking for a group… \(waiting)/4" : "looking for an opponent…"))
+            Text(problem != nil ? "can't search right now" : (group ? "looking for a group… \(waiting)/4" : "looking for an opponent…"))
                 .font(.rounded(.title2, weight: .heavy)).multilineTextAlignment(.center)
             TimelineView(.periodic(from: .now, by: 1)) { tl in
                 Text(hint(info, seconds: Int(tl.date.timeIntervalSince(started))))
@@ -687,7 +692,7 @@ private struct QuickMatchSearch: View {
     }
 
     private func hint(_ info: ModeInfo, seconds: Int) -> String {
-        if problem != nil { return "Check your internet and try again." }
+        if let problem { return problem }
         let base = "\(info.title) · \(seconds)s. "
         if !group { return base + "The search widens the longer you wait." }
         return base + (info.minPlayers < 4 ? "Starts with three if nobody else shows up." : "This one needs four players.")
@@ -713,7 +718,10 @@ private struct QuickMatchSearch: View {
                     break
                 }
             } catch {
-                if !Task.isCancelled { problem = "Lost the connection to the server." }
+                if !Task.isCancelled {
+                    let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+                    problem = queueProblem(status: (400..<600).contains(status) ? UInt16(status) : 0)
+                }
                 return
             }
         }

@@ -35,7 +35,7 @@ final class SFX {
     /// The impact of a hit effect cosmetic.
     func playHit(_ effectId: String) {
         guard enabled else { return }
-        let key = effectSpec(id: effectId).sound
+        let key = hitInfo(id: effectId).sound
         if hits[key] == nil { hits[key] = buffer(hitSoundPcm(key: key)) }
         play(hits[key])
     }
@@ -51,7 +51,7 @@ final class SFX {
         }
         if !engine.isRunning { try? engine.start() }
         guard engine.isRunning else { return }
-        engine.mainMixerNode.outputVolume = Float(Prefs.soundVolume)
+        engine.mainMixerNode.outputVolume = min(Float(Prefs.soundVolume) * 1.25, 1)   // 80 %, the default, is full scale
         let p = players[next]
         next = (next + 1) % players.count
         p.stop()

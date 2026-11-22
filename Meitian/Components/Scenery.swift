@@ -12,71 +12,70 @@ struct ScrollOffsetKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-private final class SceneParticles {
-    let system = ParticleSystem()
-    var debt = 0.0
-}
-
-/// An arena's scenery (sky, three silhouettes, drifting particles), drawn from the core's numbers. `strength` fades
-/// it into the paper colour so text on top stays readable; `scroll` moves the silhouettes a little (parallax).
+/// An arena's scenery, drawn by the core: still layers that move a little with `scroll` (parallax) and a moving part
+/// on top. `strength` fades it into the paper colour so text on top stays readable.
 struct ArenaBackground: View {
     let theme: ArenaTheme
     var strength: Double = 0.55
+    var live = true
     var scroll: ScrollOffset? = nil
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var particles = SceneParticles()
 
     var body: some View {
-        let look = arenaLook(theme: theme)
         let dark = scheme == .dark
-        let offset = reduceMotion ? 0 : (scroll?.y ?? 0)
-        ZStack {
-            LinearGradient(colors: (dark ? look.skyDark : look.skyLight).map { Color(hex: $0) }, startPoint: .top, endPoint: .bottom)
-            Canvas { ctx, size in
-                for layer in look.layers {
-                    let limit = size.height * 0.12
-                    let shift = min(max(-offset * CGFloat(layer.parallax), -limit), limit)
-                    ctx.fill(silhouette(layer.heights, size, shift), with: .color(Color(hex: dark ? layer.colorDark : layer.colorLight)))
+        GeometryReader { geo in
+            ZStack {
+                SceneLayers(theme: theme, size: geo.size, dark: dark, offset: reduceMotion ? 0 : (scroll?.y ?? 0))
+                if live && !reduceMotion {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30)) { tl in moving(tl.date, dark: dark) }
+                } else {
+                    moving(.init(timeIntervalSinceReferenceDate: 0), dark: dark)
                 }
+                Theme.background.opacity(1 - strength)
             }
-            if !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 30)) { tl in
-                    Canvas { ctx, size in
-                        drift(look, now: tl.date, size: size)
-                        particles.system.draw(&ctx, spec: look.particles)
-                    }
-                }
-            }
-            Theme.background.opacity(1 - strength)
         }
         .clipped()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func silhouette(_ heights: [Float], _ size: CGSize, _ shift: CGFloat) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: 0, y: size.height))
-        for (i, h) in heights.enumerated() {
-            let x = size.width * CGFloat(i) / CGFloat(max(heights.count - 1, 1))
-            p.addLine(to: CGPoint(x: x, y: size.height - size.height * CGFloat(h) + shift))
+    private func moving(_ now: Date, dark: Bool) -> some View {
+        Canvas { ctx, size in
+            let ms = UInt64(max(0, now.timeIntervalSinceReferenceDate * 1000))
+            OpsRenderer.draw(arenaFrame(theme: theme, tMs: ms, w: Float(size.width), h: Float(size.height), dark: dark), in: ctx, size: size)
         }
-        p.addLine(to: CGPoint(x: size.width, y: size.height))
-        p.closeSubpath()
-        return p
+    }
+}
+
+/// The still layers: computed once per arena and size, drawn once each and only moved while scrolling.
+private struct SceneLayers: View {
+    let theme: ArenaTheme
+    let size: CGSize
+    let dark: Bool
+    let offset: CGFloat
+    @State private var layers: [SceneLayer] = []
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(layers.enumerated()), id: \.offset) { _, layer in
+                let limit = size.height * 0.12
+                // taller than the view, so moving it up never uncovers its bottom
+                Canvas { ctx, _ in OpsRenderer.draw(layer.ops, in: ctx, size: size) }
+                    .frame(width: size.width, height: size.height * 1.3)
+                    .drawingGroup()
+                    .offset(y: size.height * 0.15 + min(max(-offset * CGFloat(layer.parallax), -limit), limit))
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .onAppear(perform: load)
+        .onChange(of: "\(theme.id)-\(dark)-\(Int(size.width))x\(Int(size.height))") { _, _ in load() }
     }
 
-    private func drift(_ look: ArenaLook, now: Date, size: CGSize) {
-        let dt = particles.system.step(to: now, gravity: Double(look.particles.gravity))
-        particles.debt += Double(look.particles.rate) * dt
-        while particles.debt >= 1 {
-            particles.debt -= 1
-            let y = look.rising ? size.height * CGFloat.random(in: 0.75...1) : -10
-            particles.system.burst(look.particles, at: CGPoint(x: CGFloat.random(in: 0...max(size.width, 1)), y: y), count: 1,
-                                   direction: look.rising ? -Double.pi / 2 : Double.pi / 2)
-        }
+    private func load() {
+        guard size.width > 1, size.height > 1 else { return }
+        layers = arenaScene(theme: theme, w: Float(size.width), h: Float(size.height), dark: dark)
     }
 }
 
@@ -136,6 +135,100 @@ struct ArenaReveal: View {
             SFX.shared.play(.arenaUnlock)
             withAnimation(.easeOut(duration: reduceMotion ? 0.2 : 0.7)) { shown = true }
             withAnimation(Theme.bouncy.delay(reduceMotion ? 0 : 0.45)) { popped = true }
+        }
+    }
+}
+
+/// One arena on the road: its scenery, name and what it takes to get there.
+struct ArenaPanel: View {
+    let stop: ArenaStop
+    var height: CGFloat = 400
+
+    var body: some View {
+        let locked = stop.state == .locked
+        let here = stop.state == .current
+        let theme = stop.theme
+        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+        ZStack(alignment: .bottomLeading) {
+            ArenaBackground(theme: theme, strength: 1)
+            // locked arenas stay visible, just a little dimmed
+            if locked { Color.black.opacity(0.28) }
+            LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom).frame(height: 150)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(theme.emoji) \(theme.nameZh)").font(.hanzi(30, weight: .black))
+                Text("\(theme.pinyin) · \(theme.nameEn)").font(.rounded(.subheadline, weight: .bold)).opacity(0.9)
+                Text(locked ? "HSK \(stop.level) · pass the HSK \(Int(stop.level) - 1) test" : "HSK \(stop.level)")
+                    .font(.rounded(.footnote, weight: .bold)).opacity(0.8)
+            }
+            .foregroundStyle(.white)
+            .padding(18)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .overlay(alignment: .topLeading) { tag("arena \(theme.tier)", .black.opacity(0.45), .white).padding(14) }
+        .overlay(alignment: .topTrailing) {
+            Group {
+                if locked {
+                    Image(systemName: "lock.fill").font(.title3).foregroundStyle(.white)
+                        .padding(10).background(.black.opacity(0.45), in: Circle())
+                } else {
+                    tag(here ? "you are here" : "✓ conquered", here ? Theme.lime : .black.opacity(0.45), here ? .black : .white)
+                }
+            }
+            .padding(14)
+        }
+        .clipShape(shape)
+        .overlay { if here { shape.stroke(Theme.lime, lineWidth: 4) } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Arena \(theme.tier): \(theme.nameEn). \(locked ? "Locked, unlocks at HSK \(stop.level)" : here ? "You are here" : "Conquered")")
+    }
+
+    private func tag(_ text: String, _ fill: Color, _ ink: Color) -> some View {
+        Text(text).font(.rounded(.footnote, weight: .heavy)).foregroundStyle(ink)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(fill, in: Capsule())
+    }
+}
+
+/// Every arena, the last one at the top: climb from the meadow to the gates of hell.
+struct ArenaRoad: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let stops = Array(arenaRoad(level: UInt8(clamping: store.currentLevel), unit: 1).reversed())
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(Array(stops.enumerated()), id: \.element.theme.id) { i, stop in
+                        ArenaPanel(stop: stop).id(stop.theme.id)
+                        if i < stops.count - 1 {
+                            Image(systemName: "chevron.up").font(.title3.weight(.heavy))
+                                .foregroundStyle(stop.state == .locked ? Color.secondary : Theme.lime)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 32)
+            }
+            .onAppear { if let here = stops.first(where: { $0.state == .current }) { proxy.scrollTo(here.theme.id, anchor: .center) } }
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 12) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.headline.weight(.bold))
+                        .frame(width: 40, height: 40)
+                        .background(Theme.card, in: Circle())
+                }
+                .buttonStyle(PressableStyle(scale: 0.9))
+                .foregroundStyle(.primary)
+                .accessibilityLabel("Close")
+                Text("arena road").font(.rounded(.title2, weight: .heavy))
+                Spacer()
+            }
+            .padding(16)
+            .background(Theme.background.opacity(0.94))
         }
     }
 }

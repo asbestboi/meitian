@@ -225,6 +225,7 @@ impl Scene {
         self.pen.stroke(&eave, (tall * 0.13).max(1.0), edge, false);
         self.pen.line((c.0 - half * 0.42, c.1 - tall), (c.0 + half * 0.42, c.1 - tall), (tall * 0.14).max(1.0), edge, false);
     }
+    #[allow(clippy::too_many_arguments)]
     fn pagoda(&mut self, at: P, size: f32, tiers: u32, wall: C, roof: C, edge: C, window: C) {
         for k in 0..tiers {
             let s = 1.0 - 0.17 * k as f32;

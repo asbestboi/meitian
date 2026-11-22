@@ -195,8 +195,8 @@ final class OnlineService {
         _ = try await request("POST", "/v1/party/\(code)/invite", .json(["friendId": friendId]))
     }
 
-    /// Is the server reachable? (Battles need internet; lessons don't.)
-    func reachable() async -> Bool { (try? await request("GET", "/", auth: false)) != nil }
+    /// Can we battle? (Battles need internet and an up-to-date server; lessons don't.)
+    func state() async -> ServerState { serverState(answer: try? await request("GET", "/", auth: false)) }
 
     /// Creates the online profile from the learner's name, if there isn't one yet.
     func ensureAccount(name: String) async throws {

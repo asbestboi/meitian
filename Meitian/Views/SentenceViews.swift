@@ -54,6 +54,8 @@ struct TokenSentence: View {
                     .foregroundStyle(gapFill == nil ? Color.secondary : Theme.jade)
                     .padding(.horizontal, 4)
                     .background(Theme.gold.opacity(gapFill == nil ? 0.18 : 0), in: RoundedRectangle(cornerRadius: 6))
+            } else if t.pinyin.isEmpty, let picture = WeChat.image(t.text) {
+                Image(uiImage: picture).resizable().interpolation(.high).frame(width: size * 1.3, height: size * 1.3)
             } else {
                 Text(t.text).font(.hanzi(size, weight: .medium))
                     .underline(t.wordId != nil && !t.isNew, pattern: .dot, color: Color.secondary.opacity(0.5))
@@ -70,7 +72,7 @@ struct TokenSentence: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(isGap ? "blank" : "\(t.isNew ? "new word, " : "")\(t.text) \(t.pinyin)")
+        .accessibilityLabel(isGap ? "blank" : "\(t.isNew ? "new word, " : "")\(renderWechatText(text: t.text)) \(t.pinyin)")
     }
 }
 

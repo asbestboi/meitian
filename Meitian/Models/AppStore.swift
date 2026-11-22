@@ -366,7 +366,7 @@ final class AppStore {
 
     /// What the next lesson will teach (stories like to preview it).
     var upcomingIds: [String] {
-        WordBank.words(level: currentLevel).filter { cards[$0.id] == nil }.prefix(profile.dailyGoal).map(\.id)
+        pathWords.filter { cards[$0.id] == nil }.prefix(profile.dailyGoal).map(\.id)
     }
 
     // MARK: daily words
@@ -400,7 +400,7 @@ final class AppStore {
             return today.newWordIds.compactMap(WordBank.word)
         }
         // only from the current level: the next one opens with the level-up test
-        var picked = Array(WordBank.words(level: currentLevel).filter { cards[$0.id] == nil }.prefix(profile.dailyGoal))
+        var picked = Array(pathWords.filter { cards[$0.id] == nil }.prefix(profile.dailyGoal))
         // street mode: one swear word a day on top of the regular ones
         if Prefs.swearsOn, let street = WordBank.swears.first(where: { cards[$0.id] == nil }) {
             picked.append(street)
@@ -419,7 +419,7 @@ final class AppStore {
     /// Empty while today's words aren't learned yet, or when everything has been learned.
     func nextLessonWords() -> [Word] {
         guard today.learnedDone else { return [] }
-        return Array(WordBank.words(level: currentLevel).filter { cards[$0.id] == nil }.prefix(profile.dailyGoal))
+        return Array(pathWords.filter { cards[$0.id] == nil }.prefix(profile.dailyGoal))
     }
 
     /// Where the learner is on their current HSK level's path of lessons.
@@ -473,12 +473,19 @@ final class AppStore {
         return gained
     }
 
+    /// The level's words in the order they're taught: learned ones first, then the order that opens a story per unit.
+    var pathWords: [Word] {
+        let byId = Dictionary(WordBank.words(level: currentLevel).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return Meitian.pathWords(level: UInt8(clamping: currentLevel), lessonSize: UInt32(max(profile.dailyGoal, 1)),
+                                 learnedWordIds: Array(cards.keys)).compactMap { byId[$0] }
+    }
+
     /// Word ids of one unit on the current level's path (default: the unit of the last finished lesson),
     /// so stories can be picked to fit what the learner just studied.
     func unitWordIds(_ unit: Int? = nil) -> [String] {
         let size = max(profile.dailyGoal, 1)
         let perUnit = Int(pathUnitSize())
-        let all = WordBank.words(level: currentLevel)
+        let all = pathWords
         let doneLessons = learnedCount(level: currentLevel) / size
         let u = unit ?? max(1, (doneLessons + perUnit - 1) / perUnit)
         let start = (u - 1) * perUnit * size
@@ -489,7 +496,7 @@ final class AppStore {
     /// The words of one lesson on the current level's path (for replaying a finished lesson).
     func lessonWords(_ lesson: Int) -> [Word] {
         let size = max(profile.dailyGoal, 1)
-        let all = WordBank.words(level: currentLevel)
+        let all = pathWords
         let start = (lesson - 1) * size
         guard start >= 0, start < all.count else { return [] }
         return Array(all[start..<min(start + size, all.count)])

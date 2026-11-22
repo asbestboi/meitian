@@ -5,11 +5,13 @@ extension Array where Element == Token {
     var newIds: [String] { filter(\.isNew).compactMap(\.wordId) }
 
     /// What VoiceOver reads for a line: "new word" before every new word.
-    var spoken: String { map { $0.isNew ? " new word \($0.text) " : $0.text }.joined() }
+    var spoken: String { map { $0.isNew ? " new word \($0.text) " : renderWechatText(text: $0.text) }.joined() }
 
     /// One line of text with the new words marked (reply choices).
-    var markedText: Text {
+    @MainActor
+    func markedText(size: CGFloat) -> Text {
         reduce(Text(verbatim: "")) { line, t in
+            if t.pinyin.isEmpty, let picture = WeChat.inline(t.text, size: size) { return line + picture }
             guard t.isNew else { return line + Text(verbatim: t.text) }
             var a = AttributedString(t.text)
             a.backgroundColor = Theme.lime.opacity(0.3)

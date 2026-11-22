@@ -329,6 +329,7 @@ fn comic(pen: &mut Pen, c: P, t: f32, dur: f32, radius: f32, colors: [C; 3]) {
 }
 
 /// Jagged lightning with branches.
+#[allow(clippy::too_many_arguments)]
 fn lightning(pen: &mut Pen, a: P, b: P, seed: u32, width: f32, color: C, alpha: f32, branches: u32) {
     let n = 14u32;
     let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt().max(1.0);
@@ -900,8 +901,8 @@ fn draw_hit(pen: &mut Pen, key: &str, t: f32, f: f32, i: f32, s: f32, a: P, b: P
             if flying {
                 let p = path(f);
                 pen.glow(p, 56.0 * s, h(0xffd23f).a(0.5), true);
-                for k in 0..3 {
-                    particle(pen, Shape::Bill, p, 24.0 * s, t * 9.0 + k as f32 * 0.5, 0.0, (0.0, 0.0), greens[k], false);
+                for (k, green) in greens.iter().enumerate() {
+                    particle(pen, Shape::Bill, p, 24.0 * s, t * 9.0 + k as f32 * 0.5, 0.0, (0.0, 0.0), *green, false);
                 }
             }
             rays(pen, b, i, 1.2, 160.0 * s, 12, h(0xffe27a), -0.6);

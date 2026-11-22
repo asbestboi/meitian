@@ -6,6 +6,8 @@ struct BattleScreen: View {
     let auto: BattleMode?
     var partyCode: String? = nil
     var waitingFor: [OnlineProfile] = []
+    /// Our own open invitation (its room), to take back if we leave before they come.
+    var invited: String? = nil
     let close: () -> Void
 
     @Environment(AppStore.self) private var store
@@ -17,17 +19,19 @@ struct BattleScreen: View {
 
     var body: some View {
         ZStack {
-            ArenaBackground(theme: store.arenaTheme, strength: 0.5).ignoresSafeArea()
+            ArenaBackground(theme: store.arenaTheme, strength: 0.62).ignoresSafeArea()
             if let session { content(session) }
             ConfettiView(trigger: confetti, sound: nil)
         }
         .modifier(ImpactShake(amount: shakeT, strength: shakeStrength))
         .onAppear {
             begin()
+            Invites.shared.busy = true
             UIApplication.shared.isIdleTimerDisabled = true
         }
         .onDisappear {
             session?.leave()
+            Invites.shared.busy = false
             UIApplication.shared.isIdleTimerDisabled = false
             Task { await OnlineService.shared.sync(store: store, arena: arena, force: true) }
         }
@@ -48,6 +52,10 @@ struct BattleScreen: View {
     }
 
     private func leave() {
+        // gave up before they came: take the invitation back
+        if let invited, let phase = session?.view.phase, phase == .waiting || phase == .lobby {
+            Task { try? await OnlineService.shared.decline(invited) }
+        }
         session?.leave()
         close()
     }
@@ -213,7 +221,8 @@ private struct DuoLobby: View {
         } else {
             VStack {
                 BattleConnecting(people: opp?.profile.map { [$0] } ?? waitingFor)
-                Text("waiting for them to join…").font(.rounded(.subheadline)).foregroundStyle(.secondary)
+                Text("they got your invitation ✉️ it stays open for 30 minutes. The battle starts as soon as they accept.")
+                    .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
     }

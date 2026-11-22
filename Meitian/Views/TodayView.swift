@@ -14,6 +14,7 @@ struct TodayView: View {
     @State private var storyUnit = 0
     @State private var sentenceNode: SentenceNodeRef?
     @State private var goals = false
+    @State private var road = false
     @State private var hint: String?
     @State private var hintTick = 0
     @State private var scroll = ScrollOffset()
@@ -35,9 +36,17 @@ struct TodayView: View {
                                     .id(nodeId(node))
                             }
                         }
-                        Text("HSK \(store.currentLevel + 1) unlocks after the test ✦")
-                            .font(.rounded(.footnote, weight: .semibold)).foregroundStyle(.secondary)
-                            .padding(.vertical, 32)
+                        // what's ahead: every arena up to the gates of hell
+                        LazyVStack(spacing: 0) {
+                            ForEach(arenaRoad(level: UInt8(clamping: store.currentLevel), unit: 1).filter { $0.state == .locked }, id: \.theme.id) { stop in
+                                Image(systemName: "chevron.down").font(.headline.weight(.heavy)).foregroundStyle(.white)
+                                    .padding(10).background(.black.opacity(0.35), in: Circle())
+                                    .padding(.vertical, 10)
+                                Button { road = true } label: { ArenaPanel(stop: stop, height: 340) }
+                                    .buttonStyle(PressableStyle(scale: 0.98))
+                            }
+                        }
+                        .padding(.vertical, 24)
                     }
                     .padding(.horizontal, 16)
                     .background(GeometryReader { geo in
@@ -51,7 +60,7 @@ struct TodayView: View {
                     if let next { proxy.scrollTo(nodeId(next), anchor: .center) }
                 }
             }
-            .background(ArenaBackground(theme: store.arenaTheme, strength: 0.42, scroll: scroll).ignoresSafeArea())
+            .background(ArenaBackground(theme: store.arenaTheme, strength: 0.92, scroll: scroll).ignoresSafeArea())
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     topBar
@@ -73,6 +82,7 @@ struct TodayView: View {
         .fullScreenCover(item: $sentenceNode) { ref in
             SentenceSession(node: ref.node).environment(store)
         }
+        .fullScreenCover(isPresented: $road) { ArenaRoad().environment(store) }
         .sheet(isPresented: $goals) {
             GoalsSheet()
                 .environment(store).environment(arena)
@@ -124,11 +134,8 @@ struct TodayView: View {
         learning = true
     }
 
-    /// Odd units get a picture story, even units an SMS chat.
     private func openStory(unit: Int, done: Bool) {
-        let chat = unit % 2 == 0
-        if let s = StoryProgress.next(chat: chat, store: store, unit: unit)
-            ?? StoryProgress.next(chat: !chat, store: store, unit: unit) {
+        if let s = StoryProgress.forPath(unit: unit, store: store) {
             ImagePrefetch.run(s)
             storyUnit = done ? 0 : unit
             story = StoryRef(story: s)
@@ -163,11 +170,14 @@ struct TodayView: View {
         let claimable = store.quests.filter { $0.done && !store.isClaimed($0.quest) }.count
         let questsDone = store.quests.filter(\.done).count
         return HStack(spacing: 8) {
-            Text("HSK \(store.currentLevel)")
-                .font(.rounded(.subheadline, weight: .heavy))
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Theme.levelColor(store.currentLevel).opacity(0.16), in: Capsule())
-                .foregroundStyle(Theme.levelColor(store.currentLevel))
+            Button { road = true } label: {
+                Text("\(store.arenaTheme.emoji) HSK \(store.currentLevel)")
+                    .font(.rounded(.subheadline, weight: .heavy))
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Theme.levelColor(store.currentLevel).opacity(0.16), in: Capsule())
+                    .foregroundStyle(Theme.levelColor(store.currentLevel))
+            }
+            .accessibilityHint("Shows every arena")
             Spacer()
             StreakBadge(streak: store.streak)
             Button { goals = true } label: {
@@ -303,7 +313,7 @@ struct PathNodeButton: View {
 
     private var color: Color {
         switch node.state {
-        case .locked: return Color.secondary.opacity(0.22)
+        case .locked: return Color(white: 0.62)
         case .done, .open:
             switch node.kind {
             case .test: return Theme.gold
@@ -327,13 +337,36 @@ struct PathNodeButton: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if node.next { start.padding(.bottom, 16) }
+            button
+            if node.kind != .lesson {
+                Text(caption)
+                    .font(.rounded(.caption, weight: .bold))
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(Theme.card.opacity(0.92), in: Capsule())
+                    .padding(.top, 14)
+                    .fixedSize()
+            }
+        }
+        .offset(x: CGFloat(swing) * 72)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, node.kind == .lesson ? 10 : 22)
+        .onAppear {
+            guard node.next, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .accessibilityLabel(accessibility)
+    }
+
+    private var button: some View {
         Button(action: action) {
             ZStack {
                 Circle().fill(color).brightness(-0.18).offset(y: 6)
                 Circle().fill(color)
                 Image(systemName: icon)
                     .font(.system(size: size * 0.38, weight: .heavy))
-                    .foregroundStyle(node.state == .locked ? Color.secondary : Color.white)
+                    .foregroundStyle(node.state == .locked ? Color.white.opacity(0.85) : Color.white)
             }
             .frame(width: size, height: size)
             .background {
@@ -345,33 +378,21 @@ struct PathNodeButton: View {
             }
         }
         .buttonStyle(PressableStyle(scale: 0.92))
-        .overlay(alignment: .top) {
-            if node.next {
-                Text(node.kind == .test ? "TEST" : "START")
-                    .font(.rounded(.caption, weight: .heavy))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.card, in: Capsule())
-                    .shadow(color: .black.opacity(0.1), radius: 8, y: 3)
-                    .foregroundStyle(color)
-                    .offset(y: pulse ? -44 : -40)
-                    .fixedSize()
-            }
+    }
+
+    /// "START" over the next stop, with a tail pointing down at it.
+    private var start: some View {
+        VStack(spacing: 0) {
+            Text(node.kind == .test ? "TEST" : "START")
+                .font(.rounded(.subheadline, weight: .black))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(color, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            BubbleTail().fill(color).frame(width: 18, height: 9)
         }
-        .overlay(alignment: .bottom) {
-            if node.kind != .lesson {
-                Text(caption)
-                    .font(.rounded(.caption, weight: .bold)).foregroundStyle(.secondary)
-                    .offset(y: 28).fixedSize()
-            }
-        }
-        .offset(x: CGFloat(swing) * 72)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, node.kind == .lesson ? 10 : 22)
-        .onAppear {
-            guard node.next, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
-        }
-        .accessibilityLabel(accessibility)
+        .offset(y: pulse ? -4 : 0)
+        .fixedSize()
+        .accessibilityHidden(true)
     }
 
     private var caption: String {
@@ -396,6 +417,17 @@ struct PathNodeButton: View {
         case .locked: "locked"
         }
         return "\(what), \(state)"
+    }
+}
+
+private struct BubbleTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }
 

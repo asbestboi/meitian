@@ -61,7 +61,8 @@ struct ArenaView: View {
     @State private var hub: HubStart?
     @State private var shop = false
     /// Battles need internet; ask the server whether it can be reached (nil = still checking).
-    @State private var reachable: Bool?
+    @State private var server: ServerState?
+    @State private var road = false
     @State private var retry = 0
 
     private var myCard: PlayerCard {
@@ -73,9 +74,11 @@ struct ArenaView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     PlayerCardView(card: myCard, coins: arena.coins) { MyPicture(size: 78) }
-                    ArenaBadge(theme: store.arenaTheme)
+                    Button { road = true } label: { ArenaBadge(theme: store.arenaTheme) }
+                        .buttonStyle(PressableStyle())
+                        .accessibilityHint("Shows every arena")
 
-                    if reachable == false {
+                    if server == .offline || server == .outdated {
                         offline
                     } else {
                         entry("Battle", "Quick match anyone, battle friends, climb the leaderboards. iPhone + Android.",
@@ -101,9 +104,10 @@ struct ArenaView: View {
             OnlineHub(startAt: start).environment(store).environment(arena).sheetSounds()
         }
         .task(id: retry) {
-            reachable = nil
-            reachable = await OnlineService.shared.reachable()
+            server = nil
+            server = await OnlineService.shared.state()
         }
+        .fullScreenCover(isPresented: $road) { ArenaRoad().environment(store) }
         .sheet(isPresented: $shop) {
             ShopView(card: myCard).environment(store).environment(arena).sheetSounds()
                 .presentationDetents([.large])
@@ -117,9 +121,10 @@ struct ArenaView: View {
 
     private var offline: some View {
         VStack(spacing: 10) {
-            Image(systemName: "wifi.slash").font(.system(size: 40, weight: .semibold)).foregroundStyle(.secondary)
-            Text("battles need internet").font(.rounded(.title3, weight: .heavy))
-            Text("Lessons, stories and reviews work offline. Come back here when you're connected.")
+            Image(systemName: server == .outdated ? "wrench.and.screwdriver.fill" : "wifi.slash").font(.system(size: 40, weight: .semibold)).foregroundStyle(.secondary)
+            Text(server == .outdated ? "the battle server is being updated" : "battles need internet").font(.rounded(.title3, weight: .heavy))
+            Text(server == .outdated ? "It doesn't know this version's battles yet. Come back in a little while."
+                 : "Lessons, stories and reviews work offline. Come back here when you're connected.")
                 .font(.rounded(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             BigButton(title: "try again", systemImage: "arrow.clockwise") { retry += 1 }
         }

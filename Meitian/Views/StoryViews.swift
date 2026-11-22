@@ -62,6 +62,17 @@ enum StoryProgress {
     }
 }
 
+extension StoryProgress {
+    /// What the story stop of a unit plays: something unread that fits the unit (odd units a picture story, even units
+    /// a chat, the other kind if there's none), else the story read longest ago. Nil when nothing is unlocked.
+    @MainActor
+    static func forPath(unit: Int, store: AppStore) -> Story? {
+        let chat = unit % 2 == 0
+        return next(chat: chat, store: store, unit: unit) ?? next(chat: !chat, store: store, unit: unit)
+            ?? rereadStory(dayKey: store.todayKey, read: read(), knownWordIds: store.known)
+    }
+}
+
 /// Illustration from the story pack. The whole picture is shown (fit) over a blurred, filled copy of
 /// itself, so wide images never push the layout off screen and nothing gets cropped away.
 struct StoryImageView: View {
@@ -198,8 +209,8 @@ struct FullScreenImage: View {
     }
 }
 
-/// Practice tab: a mystery "next story" (no cover, no title: a surprise, like Duolingo), the stories that unlock
-/// next, and the history of stories already read, which can be revisited (no XP the second time).
+/// Practice tab: a mystery "next story" (no cover, no title: a surprise, like Duolingo) and the history of stories
+/// already read, which can be revisited (no XP the second time). Nothing of a locked story is shown.
 struct StoryHub: View {
     /// true: SMS chats; false: picture stories.
     var chats = false
@@ -211,8 +222,8 @@ struct StoryHub: View {
     /// Unlocked stories, and how many of them were read.
     @State private var total = 0
     @State private var readCount = 0
-    /// Stories with too many unlearned words, the soonest to unlock first.
-    @State private var locked: [ShelfStory] = []
+    /// How many more words the next locked story needs (nil: none is locked).
+    @State private var soonest: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -225,18 +236,6 @@ struct StoryHub: View {
                 }
             }
             mysteryCard
-            if !locked.isEmpty {
-                Text("coming up").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 12) {
-                        ForEach(locked, id: \.story.id) { s in
-                            StoryCard(story: s.story, missing: Int(s.missingWords), width: 180)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .scrollIndicators(.hidden)
-            }
             if !history.isEmpty {
                 Text("history").font(.rounded(.subheadline, weight: .bold)).foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
@@ -281,7 +280,7 @@ struct StoryHub: View {
                 .streetBlock(Theme.nightGradient, padding: 18)
             }
             .buttonStyle(PressableStyle(scale: 0.98))
-        } else if total > 0 || !locked.isEmpty {
+        } else if total > 0 || soonest != nil {
             Text(nothingNew)
                 .font(.rounded(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -290,8 +289,8 @@ struct StoryHub: View {
     }
 
     private var nothingNew: String {
-        if let soonest = locked.first {
-            return "\(learnMoreWords(Int(soonest.missingWords))) the next \(chats ? "chat" : "story") ✦"
+        if let soonest {
+            return "\(learnMoreWords(soonest)) the next \(chats ? "chat" : "story") ✦"
         }
         return chats ? "You've read every chat ✦ new ones arrive soon." : "You've read every story ✦ new ones arrive soon."
     }
@@ -303,7 +302,7 @@ struct StoryHub: View {
         let readIds = Set(read)
         total = Int(storyAvailability(chat: chats, dayKey: store.todayKey, knownWordIds: known).unlocked)
         readCount = shelf.filter { $0.unlocked && readIds.contains($0.story.id) }.count
-        locked = shelf.filter { !$0.unlocked && !readIds.contains($0.story.id) }
+        soonest = shelf.first { !$0.unlocked && !readIds.contains($0.story.id) }.map { Int($0.missingWords) }
         let byId = Dictionary(shelf.map { ($0.story.id, $0.story) }, uniquingKeysWith: { a, _ in a })
         history = read.reversed().compactMap { byId[$0] }   // most recent first
         next = StoryProgress.next(chat: chats, store: store)
@@ -320,11 +319,7 @@ struct StoryRef: Identifiable {
 
 struct StoryCard: View {
     let story: Story
-    /// Words still to learn before it unlocks (0 = open).
-    var missing = 0
     var width: CGFloat = 200
-
-    private var locked: Bool { missing > 0 }
 
     var body: some View {
         let done = StoryProgress.isRead(story.id)
@@ -362,19 +357,6 @@ struct StoryCard: View {
         .background(Theme.card)
         .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
         .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
-        .opacity(locked ? 0.55 : 1)
-        .overlay {
-            if locked {
-                VStack(spacing: 4) {
-                    Image(systemName: "lock.fill").font(.title)
-                    Text(learnMoreWords(missing)).font(.rounded(.caption, weight: .bold)).multilineTextAlignment(.center)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(.black.opacity(0.6), in: Capsule())
-                }
-                .foregroundStyle(.white).shadow(radius: 6)
-                .padding(8)
-            }
-        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -691,7 +673,7 @@ private struct StoryAttempt: View {
                 SpeakButton(text: line.zh, size: 32, tint: Theme.sky)
             }
             if translations.shown.contains(key) {
-                Text(line.en).font(.rounded(.subheadline)).foregroundStyle(.secondary)
+                WeChat.text(line.en, size: 15).font(.rounded(.subheadline)).foregroundStyle(.secondary)
             }
         }
         .padding(14)
@@ -713,7 +695,7 @@ private struct StoryAttempt: View {
                 VStack(spacing: 2) {
                     TokenSentence(tokens: line.tokens, size: 14, alignment: .center)
                     if translations.shown.contains(key) {
-                        Text(line.en).font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
+                        WeChat.text(line.en, size: 12).font(.rounded(.caption, weight: .semibold)).foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -759,7 +741,7 @@ private struct StoryAttempt: View {
                                     SpeakButton(text: line.zh, size: 28, tint: Theme.sky)
                                 }
                                 if translations.shown.contains(key) {
-                                    Text(line.en).font(.rounded(.caption)).foregroundStyle(.secondary)
+                                    WeChat.text(line.en, size: 12).font(.rounded(.caption)).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.horizontal, 12).padding(.vertical, 9)
@@ -848,9 +830,9 @@ private struct StoryAttempt: View {
                 let key = "\(panel)-r-\(option.zh)"
                 Button { sendReply(i) } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        option.tokens.markedText.font(.hanzi(18, weight: .medium))
+                        option.tokens.markedText(size: 18).font(.hanzi(18, weight: .medium))
                         Text(option.pinyin).font(.rounded(.caption)).foregroundStyle(.secondary)
-                        if translations.shown.contains(key) { Text(option.en).font(.rounded(.caption)).foregroundStyle(.secondary) }
+                        if translations.shown.contains(key) { WeChat.text(option.en, size: 12).font(.rounded(.caption)).foregroundStyle(.secondary) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.vertical, 10)
