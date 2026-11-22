@@ -28,7 +28,11 @@ jobs:
         run: scripts/build-ipa.sh
       - name: Show build log on failure
         if: failure()
-        run: grep -E "error|Error" -A3 build/xcodebuild.log | head -200 || true
+        run: |
+          grep -E "error|Error" -A3 build/xcodebuild.log | head -200 || true
+          # also as an annotation on the run page
+          errors=$(grep -E "error:" build/xcodebuild.log | sed "s|$PWD/||" | sort -u | head -40 | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Swift errors::$errors"
       - uses: actions/upload-artifact@v4
         with:
           name: Meitian-ipa
