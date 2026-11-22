@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -47,7 +48,7 @@ fun HeartsBar(hearts: Int) {
         if (hearts < before) {
             broken = hearts
             before = hearts
-            Sfx.play(Sfx.Sound.HeartLost)
+            Sfx.play(SoundId.HEART_LOST)
             // two thuds, like an error buzz
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             launch { delay(110); haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
@@ -79,7 +80,7 @@ fun OutOfHearts(onRetry: () -> Unit, onQuit: () -> Unit) {
     val reduce = reduceMotion()
     val scale = remember { Animatable(if (reduce) 1f else 0.3f) }
     LaunchedEffect(Unit) {
-        Sfx.play(Sfx.Sound.OutOfHearts)
+        Sfx.play(SoundId.OUT_OF_HEARTS)
         scale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
     }
     Column(Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -49,9 +49,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     // UniFFI's Kotlin bindings call the Rust library through JNA
     implementation("net.java.dev.jna:jna:5.15.0@aar")
-    // offline battles: Nearby Connections (Bluetooth / Wi‑Fi, no server) + QR codes
-    implementation("com.google.android.gms:play-services-nearby:19.3.0")
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // story illustrations (cached on disk)
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

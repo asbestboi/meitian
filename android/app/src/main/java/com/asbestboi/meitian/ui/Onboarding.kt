@@ -102,10 +102,28 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                         Text("That's how you say “My name is $name.”", fontSize = 13.sp, color = Street.c.secondary)
                     }
                     Spacer(Modifier.weight(1f))
-                    BigButton("Next", enabled = name.isNotBlank()) { step = 2 }
+                    BigButton("Next", enabled = name.isNotBlank()) { step = 6 }
+                }
+                6 -> {
+                    CloseButton { step = 1 }
+                    Spacer(Modifier.weight(1f))
+                    val picker = rememberPicturePicker(name)
+                    val me = com.asbestboi.meitian.data.Online.profile
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.clickable(enabled = !picker.busy) { picker.pick() }) { Picture(me?.id ?: app.arena.playerId, name, me?.avatar.orEmpty(), 140.dp) }
+                        Text("add a picture", style = street(32.sp), color = Street.c.text)
+                        Text("Friends see it when you battle. It creates your online profile with your name as the nickname. You can do this later, too.",
+                            color = Street.c.secondary, textAlign = TextAlign.Center)
+                        picker.note?.let { Text(it, fontWeight = FontWeight.Bold, color = Street.c.text, textAlign = TextAlign.Center) }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    val done = !me?.avatar.isNullOrEmpty()
+                    if (!done) BigButton(if (picker.busy) "…" else "choose a picture", brush = Street.sky(), enabled = !picker.busy) { picker.pick() }
+                    Gap(10.dp)
+                    BigButton(if (done) "Next" else "Maybe later") { step = 2 }
                 }
                 2 -> {
-                    CloseButton { if (retakeOnly) onDone() else step = 1 }
+                    CloseButton { if (retakeOnly) onDone() else step = 6 }
                     Gap(14.dp)
                     Text("how's your chinese?", style = street(34.sp), color = Street.c.text)
                     Text("Pick what feels right. Then a quick quiz confirms it.", color = Street.c.secondary)

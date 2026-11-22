@@ -165,6 +165,7 @@ fun BigButton(
             .background(fill, alpha = if (enabled) 1f else 0.35f)
             .clickable(source, null, enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                com.asbestboi.meitian.data.Sfx.play(uniffi.meitian_core.SoundId.TAP)
                 onClick()
             }
             .padding(vertical = 18.dp),

@@ -313,6 +313,18 @@ pub fn nickname_ok(name: String) -> bool {
     !["http", "www", ".com", ".net", ".org", ".cn"].iter().any(|b| lower.contains(b))
 }
 
+/// A nickname made from the name someone typed in onboarding: allowed characters only, "learner" if nothing's left.
+#[uniffi::export]
+pub fn nickname_from(name: String) -> String {
+    let clean: String = name.chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-')).take(16).collect();
+    let clean = clean.trim().to_string();
+    if nickname_ok(clean.clone()) {
+        clean
+    } else {
+        "learner".into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +404,9 @@ mod tests {
         assert!(!nickname_ok("visit www.x".into()));
         assert!(!nickname_ok("x".repeat(17)));
         assert!(!nickname_ok("<script>".into()));
+        for (name, want) in [("Anna", "Anna"), (" 小明 ", "小明"), ("A", "learner"), ("Zoë 🎉!", "Zoë"), ("www.spam.com", "learner"), ("abcdefghijklmnopqrstu", "abcdefghijklmnop")] {
+            assert_eq!(nickname_from(name.into()), want);
+            assert!(nickname_ok(nickname_from(name.into())));
+        }
     }
 }

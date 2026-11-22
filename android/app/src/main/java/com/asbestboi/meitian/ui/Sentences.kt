@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.fadeIn
@@ -254,7 +255,7 @@ private fun SentenceAttempt(node: PathNode?, onRetry: () -> Unit, close: () -> U
                                 app.count(com.asbestboi.meitian.data.AppState.Counter.Sentences)
                             }
                             finished = true
-                            if (correct > 0) { confetti++; Sfx.play(Sfx.Sound.Win) }
+                            if (correct > 0) { confetti++; Sfx.play(SoundId.WIN) }
                         } else index = i + 1
                     }
                 }
@@ -281,11 +282,11 @@ private fun ExerciseView(ex: Exercise, onResult: (Boolean) -> Unit, onNext: () -
         result = right
         onResult(right)
         if (right) {
-            Sfx.play(Sfx.Sound.Correct)
+            Sfx.play(SoundId.CORRECT)
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             if (ex.kind != ExerciseKind.LISTEN_PICK) Speaker.say(s.zh)
         } else {
-            Sfx.play(Sfx.Sound.Wrong)
+            Sfx.play(SoundId.WRONG)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             scope.launch { shake.snapTo(0f); shake.animateTo(1f, androidx.compose.animation.core.tween(400)) }
         }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -40,6 +41,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.LocalApp
+import uniffi.meitian_core.SoundId
+import com.asbestboi.meitian.data.Sfx
 import kotlinx.coroutines.launch
 import com.asbestboi.meitian.data.ContentSync
 import com.asbestboi.meitian.LocalNav
@@ -226,15 +229,20 @@ fun ProgressScreen() {
         }
         val lv = app.level
         Row(Modifier.fillMaxWidth().card().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(80.dp).clip(RoundedCornerShape(50)).border(6.dp, Street.c.gold, RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
-                Text("Lv ${lv.level}", style = street(22.sp), color = Street.c.text)
+            val picker = rememberPicturePicker()
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.clickable(enabled = !picker.busy) { picker.pick() }) {
+                MyPicture(84.dp)
+                Text(if (picker.busy) "…" else if (com.asbestboi.meitian.data.Online.profile?.avatar.isNullOrEmpty()) "＋ add picture" else "change", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.red)
+                picker.note?.let { Text(it, fontSize = 11.sp, color = Street.c.secondary, textAlign = TextAlign.Center, modifier = Modifier.width(96.dp)) }
             }
             HSpacer(16.dp)
             Column {
                 Text(app.profile.name.ifBlank { "Learner" }, style = street(26.sp), color = Street.c.text)
-                Text("${app.xp} XP · ${lv.xpToNext} to level ${lv.level.toInt() + 1}", color = Street.c.secondary)
+                Text("Lv ${lv.level} · ${app.xp} XP · ${lv.xpToNext} to level ${lv.level.toInt() + 1}", color = Street.c.secondary)
                 Gap(4.dp)
                 Pill("Learning HSK ${app.currentLevel}", Street.levelColor(app.currentLevel))
+                Gap(6.dp)
+                ArenaBadge(app.arenaTheme, background = Street.c.paper)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -289,6 +297,15 @@ fun ProgressScreen() {
         SectionTitle("Sound & exercises")
         Column(Modifier.fillMaxWidth().card()) {
             ToggleRow("Sound effects", null, s.sounds) { set(s.copy(sounds = it)) }
+            if (s.sounds) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("🔈", fontSize = 16.sp)
+                var volume by remember { androidx.compose.runtime.mutableFloatStateOf(s.volume) }
+                androidx.compose.material3.Slider(volume, { volume = it }, Modifier.weight(1f).padding(horizontal = 10.dp),
+                    onValueChangeFinished = { set(app.settings.copy(volume = volume)); Sfx.volume = volume; Sfx.play(SoundId.COIN) })
+                Text("🔊", fontSize = 16.sp)
+            }
+            HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
+            ToggleRow("Haptics", "Little vibrations when you tap and answer.", s.haptics) { set(s.copy(haptics = it)) }
             HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
             ToggleRow("Listening exercises", if (s.listening && !s.canListen) "Paused for now" else null, s.listening) { set(s.copy(listening = it)) }
             HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
@@ -355,7 +372,7 @@ fun ToggleRow(title: String, subtitle: String?, value: Boolean, onChange: (Boole
             Text(title, fontWeight = FontWeight.Bold, color = Street.c.text)
             subtitle?.let { Text(it, fontSize = 12.sp, color = Street.c.secondary) }
         }
-        Switch(value, onChange)
+        Switch(value, { Sfx.play(if (it) SoundId.TOGGLE_ON else SoundId.TOGGLE_OFF); onChange(it) })
     }
 }
 

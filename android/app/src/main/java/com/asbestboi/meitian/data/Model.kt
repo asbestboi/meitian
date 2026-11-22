@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.data
 
+import uniffi.meitian_core.SoundId
 import android.content.Context
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -17,7 +18,13 @@ import uniffi.meitian_core.Milestone
 import uniffi.meitian_core.MilestoneProgress
 import uniffi.meitian_core.milestoneAt
 import uniffi.meitian_core.milestonesReached
+import uniffi.meitian_core.ArenaTheme
+import uniffi.meitian_core.BattleResult
 import uniffi.meitian_core.Outcome
+import uniffi.meitian_core.arenaFor
+import uniffi.meitian_core.newArena
+import uniffi.meitian_core.retiredAvatarRefund
+import uniffi.meitian_core.withoutRetiredAvatars
 import uniffi.meitian_core.allWords
 import uniffi.meitian_core.CardStat
 import uniffi.meitian_core.DayStats
@@ -173,6 +180,8 @@ data class Profile(
     val pathStories: List<String> = emptyList(),
     /** Sentence nodes finished on the learning path, as "level-number". */
     val pathSentences: List<String> = emptyList(),
+    /** Highest arena tier already revealed (0 = a save from before arenas). */
+    val arenaSeen: Int = 1,
 )
 
 data class Settings(
@@ -184,18 +193,23 @@ data class Settings(
     val speaking: Boolean = true,
     val noListenUntil: Long = 0,
     val noSpeakUntil: Long = 0,
+    /** Sound effects, 0–1. */
+    val volume: Float = 0.8f,
+    val haptics: Boolean = true,
 ) {
     val canListen get() = listening && System.currentTimeMillis() > noListenUntil
     val canSpeak get() = speaking && System.currentTimeMillis() > noSpeakUntil
 }
 
-data class Rival(val id: String, val name: String, val avatar: String, val wins: Int = 0, val losses: Int = 0, val draws: Int = 0, val last: Long = 0)
+/** [picture]: path of their profile picture on the server, "" for initials. */
+data class Rival(val id: String, val name: String, val picture: String = "", val wins: Int = 0, val losses: Int = 0, val draws: Int = 0, val last: Long = 0)
+
+val FREE_COSMETICS = setOf("fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none")
 
 data class Arena(
     val playerId: String = UUID.randomUUID().toString(),
     val coins: Int = 0,
-    val owned: Set<String> = setOf("av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"),
-    val avatar: String = "av.chick",
+    val owned: Set<String> = FREE_COSMETICS,
     val frame: String = "fr.lantern",
     val title: String = "ti.newbie",
     val effect: String = "fx.boom",
@@ -226,10 +240,49 @@ class AppState(private val context: Context) {
     val milestoneQueue = mutableStateListOf<Milestone>()
     /** Set when freezes just saved the streak (shown once on Today). */
     var freezeNotice by mutableStateOf<Int?>(null)
+    /** A short message shown over everything for a moment. */
+    var toast by mutableStateOf<String?>(null)
+    /** An arena the learner just reached, waiting for its reveal. */
+    var arenaReveal by mutableStateOf<ArenaTheme?>(null)
 
     private val prefs = context.getSharedPreferences("meitian", Context.MODE_PRIVATE)
 
-    init { load(); migrateToLevelTests(); applyFreezes() }
+    init { load(); migrateToLevelTests(); applyFreezes(); retireAvatars(); checkArena() }
+
+    /** Emoji avatars left the shop in 1.13: their price comes back once (they leave the collection with it). */
+    private fun retireAvatars() {
+        val owned = arena.owned.toList()
+        if (owned.none { it.startsWith("av.") }) return
+        val refund = retiredAvatarRefund(owned).toInt()
+        arena = arena.copy(owned = withoutRetiredAvatars(owned).toSet(), coins = arena.coins + refund)
+        if (refund > 0) toast = "Avatars were retired, +$refund 🪙 refunded"
+        save()
+    }
+
+    /** The scenery for where the learner is. */
+    val arenaTheme: ArenaTheme
+        get() {
+            val size = profile.dailyGoal.coerceAtLeast(1) * uniffi.meitian_core.pathUnitSize().toInt()
+            return arenaFor(currentLevel.coerceIn(0, 255).toUByte(), (learnedCount(currentLevel) / size + 1).toUInt())
+        }
+
+    /** Reaching a new arena gets a reveal; a save from before arenas just starts in its own. */
+    fun checkArena() {
+        val tier = arenaTheme.tier.toInt()
+        if (tier == profile.arenaSeen) return
+        newArena(currentLevel.coerceIn(0, 255).toUByte(), profile.arenaSeen.toUInt())?.let { arenaReveal = it }
+        profile = profile.copy(arenaSeen = maxOf(tier, profile.arenaSeen))
+        save()
+    }
+
+    /** Runs something that earns XP and plays what it leads to: a new player level, the day's streak. */
+    private fun celebrating(work: () -> Unit) {
+        val before = level.level
+        val active = today.active
+        work()
+        if (level.level > before) Sfx.play(SoundId.LEVEL_UP)
+        else if (!active && today.active) Sfx.play(SoundId.STREAK)
+    }
 
     fun refreshDay() { todayKey = LocalDate.now().toString(); applyFreezes() }
 
@@ -320,7 +373,7 @@ class AppState(private val context: Context) {
         val fresh = ids.filter { it !in seen && it !in known }
         if (fresh.isEmpty()) return
         seen = seen + fresh
-        if (ding) Sfx.play(Sfx.Sound.NewWord)
+        if (ding) Sfx.play(SoundId.NEW_WORD)
         save()
     }
 
@@ -345,6 +398,7 @@ class AppState(private val context: Context) {
     fun passLevelTest(level: Int) {
         profile = profile.copy(confirmedLevel = maxOf(profile.confirmedLevel, level))
         addXP(100)
+        checkArena()
     }
 
     /** Before level-up tests, finishing a level's words moved you up by itself. Confirm those levels once. */
@@ -452,7 +506,7 @@ class AppState(private val context: Context) {
         milestoneQueue += fresh
     }
 
-    fun finishLearning(words: List<CoreWord>, quizCorrect: Int) {
+    fun finishLearning(words: List<CoreWord>, quizCorrect: Int) = celebrating {
         val extraLesson = today.learnedDone && words.any { cards[it.id] == null }
         words.forEach { if (cards[it.id] == null) cards[it.id] = Card(dueDay = todayNumber + 1) }
         val gained = words.size * 10 + quizCorrect * 5
@@ -467,7 +521,7 @@ class AppState(private val context: Context) {
         save()
     }
 
-    fun addXP(amount: Int) {
+    fun addXP(amount: Int) = celebrating {
         today = today.copy(xp = today.xp + amount, reviewed = today.reviewed + 1)
         xp += amount
         checkMilestones()
@@ -485,8 +539,8 @@ class AppState(private val context: Context) {
 
     val learnedWords: List<CoreWord> get() = Words.visible(settings.swears).filter { cards[it.id] != null }
 
-    fun grade(word: CoreWord, right: Boolean) {
-        val c = cards[word.id] ?: return
+    fun grade(word: CoreWord, right: Boolean) = celebrating {
+        val c = cards[word.id] ?: return@celebrating
         val step = srsGrade(c.box.toUByte(), right)
         cards[word.id] = c.copy(
             box = step.boxLevel.toInt(), dueDay = todayNumber + step.daysUntilDue.toLong(),
@@ -528,10 +582,20 @@ class AppState(private val context: Context) {
 
     // ----- arena -----
 
-    fun recordMatch(outcome: Outcome, rival: PlayerCard, bonus: Int, fastest: Int?): Int {
+    /** Records a finished battle and returns the coins it paid. Group games pay by place and don't count as wins. */
+    fun recordBattle(result: BattleResult, rival: PlayerCard?, picture: String): Int {
+        val fastest = result.fastestMs?.toInt()
+        if (result.ranked && rival != null) return recordMatch(result.outcome, rival, picture, result.bonus.toInt(), fastest)
+        val earned = result.groupCoins.toInt()
+        arena = arena.copy(coins = arena.coins + earned, fastestMs = listOfNotNull(arena.fastestMs, fastest).minOrNull())
+        save()
+        return earned
+    }
+
+    private fun recordMatch(outcome: Outcome, rival: PlayerCard, picture: String, bonus: Int, fastest: Int?): Int {
         val a = arena
-        val old = a.rivals[rival.id] ?: Rival(rival.id, rival.name, rival.avatar)
-        var r = old.copy(name = rival.name, avatar = rival.avatar, last = System.currentTimeMillis())
+        val old = a.rivals[rival.id] ?: Rival(rival.id, rival.name)
+        var r = old.copy(name = rival.name, picture = picture, last = System.currentTimeMillis())
         var next = a
         when (outcome) {
             Outcome.WIN -> {
@@ -561,7 +625,6 @@ class AppState(private val context: Context) {
     fun equip(item: Cosmetic) {
         if (item.id !in arena.owned) return
         arena = when (item.kind) {
-            CosmeticKind.Avatar -> arena.copy(avatar = item.id)
             CosmeticKind.Frame -> arena.copy(frame = item.id)
             CosmeticKind.Title -> arena.copy(title = item.id)
             CosmeticKind.Effect -> arena.copy(effect = item.id)
@@ -572,7 +635,7 @@ class AppState(private val context: Context) {
     }
 
     fun equipped(kind: CosmeticKind) = when (kind) {
-        CosmeticKind.Avatar -> arena.avatar; CosmeticKind.Frame -> arena.frame; CosmeticKind.Title -> arena.title
+        CosmeticKind.Frame -> arena.frame; CosmeticKind.Title -> arena.title
         CosmeticKind.Effect -> arena.effect; CosmeticKind.Aura -> arena.aura; CosmeticKind.Sticker -> arena.sticker
     }
 
@@ -582,7 +645,7 @@ class AppState(private val context: Context) {
         val a = arena
         return PlayerCard(
             id = a.playerId, name = profile.name.ifBlank { "Player" }, level = currentLevel, wordsLearned = cards.size,
-            wins = a.wins, losses = a.losses, avatar = clean(a.avatar, "av.chick"), frame = a.frame,
+            wins = a.wins, losses = a.losses, frame = a.frame,
             title = clean(a.title, "ti.newbie"), effect = clean(a.effect, "fx.boom"),
             sticker = clean(a.sticker, "st.none"), swears = sw, aura = a.aura,
         )
@@ -610,12 +673,14 @@ class AppState(private val context: Context) {
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
             put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
             put("pathSt", JSONArray(profile.pathStories)); put("pathSe", JSONArray(profile.pathSentences))
+            put("arenaSeen", profile.arenaSeen)
         })
         o.put("seen", JSONArray(seen.toList()))
         o.put("settings", JSONObject().apply {
             val s = settings
             put("pinyin", s.showPinyin); put("tones", s.toneColors); put("swears", s.swears); put("sounds", s.sounds)
             put("listening", s.listening); put("speaking", s.speaking); put("noListen", s.noListenUntil); put("noSpeak", s.noSpeakUntil)
+            put("volume", s.volume.toDouble()); put("haptics", s.haptics)
         })
         o.put("cards", JSONObject().apply {
             cards.forEach { (k, c) -> put(k, JSONArray(listOf(c.box, c.dueDay, c.correct, c.wrong))) }
@@ -643,12 +708,12 @@ class AppState(private val context: Context) {
         o.put("arena", JSONObject().apply {
             val a = arena
             put("id", a.playerId); put("coins", a.coins); put("owned", JSONArray(a.owned.toList()))
-            put("avatar", a.avatar); put("frame", a.frame); put("title", a.title); put("effect", a.effect); put("sticker", a.sticker); put("aura", a.aura)
+            put("frame", a.frame); put("title", a.title); put("effect", a.effect); put("sticker", a.sticker); put("aura", a.aura)
             put("wins", a.wins); put("losses", a.losses); put("draws", a.draws); put("streak", a.streak); put("best", a.bestStreak)
             put("fastest", a.fastestMs ?: -1)
             put("rivals", JSONArray(a.rivals.values.map { r ->
                 JSONObject().apply {
-                    put("id", r.id); put("name", r.name); put("avatar", r.avatar); put("w", r.wins); put("l", r.losses); put("d", r.draws); put("t", r.last)
+                    put("id", r.id); put("name", r.name); put("pic", r.picture); put("w", r.wins); put("l", r.losses); put("d", r.draws); put("t", r.last)
                 }
             }))
         })
@@ -694,13 +759,14 @@ class AppState(private val context: Context) {
                     p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList(),
                     p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0),
                     p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
-                    p.optJSONArray("pathSe")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
+                    p.optJSONArray("pathSe")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+                    p.optInt("arenaSeen", 0))
             }
             o.optJSONArray("seen")?.let { a -> seen = (0 until a.length()).map { a.getString(it) }.toSet() }
             o.optJSONObject("settings")?.let { s ->
                 settings = Settings(s.optBoolean("pinyin", true), s.optBoolean("tones", true), s.optBoolean("swears"),
                     s.optBoolean("sounds", true), s.optBoolean("listening", true), s.optBoolean("speaking", true),
-                    s.optLong("noListen"), s.optLong("noSpeak"))
+                    s.optLong("noListen"), s.optLong("noSpeak"), s.optDouble("volume", 0.8).toFloat(), s.optBoolean("haptics", true))
             }
             o.optJSONObject("cards")?.let { c ->
                 c.keys().forEach { k ->
@@ -724,14 +790,13 @@ class AppState(private val context: Context) {
                 val owned = a.optJSONArray("owned")?.let { arr -> (0 until arr.length()).map { arr.getString(it) }.toSet() } ?: emptySet()
                 val rivals = a.optJSONArray("rivals")?.let { arr ->
                     (0 until arr.length()).map { arr.getJSONObject(it) }.associate { r ->
-                        r.getString("id") to Rival(r.getString("id"), r.optString("name"), r.optString("avatar"),
+                        r.getString("id") to Rival(r.getString("id"), r.optString("name"), r.optString("pic"),
                             r.optInt("w"), r.optInt("l"), r.optInt("d"), r.optLong("t"))
                     }
                 } ?: emptyMap()
                 arena = Arena(
                     playerId = a.optString("id", UUID.randomUUID().toString()), coins = a.optInt("coins"),
-                    owned = owned + setOf("av.chick", "fr.lantern", "ti.newbie", "fx.boom", "st.none", "au.none"),
-                    avatar = a.optString("avatar", "av.chick"), frame = a.optString("frame", "fr.lantern"),
+                    owned = owned + FREE_COSMETICS, frame = a.optString("frame", "fr.lantern"),
                     title = a.optString("title", "ti.newbie"), effect = a.optString("effect", "fx.boom"),
                     sticker = a.optString("sticker", "st.none"), aura = a.optString("aura", "au.none"), wins = a.optInt("wins"), losses = a.optInt("losses"),
                     draws = a.optInt("draws"), streak = a.optInt("streak"), bestStreak = a.optInt("best"),

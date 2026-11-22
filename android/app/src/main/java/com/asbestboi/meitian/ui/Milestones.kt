@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -79,7 +80,7 @@ fun MilestoneCelebration() {
     val m = app.milestoneQueue.firstOrNull()
     var confetti by remember { mutableIntStateOf(0) }
     if (m != null) {
-        LaunchedEffect(m.index) { confetti++; Sfx.play(Sfx.Sound.Win) }
+        LaunchedEffect(m.index) { confetti++; Sfx.play(SoundId.MILESTONE) }
         val dismiss = { if (app.milestoneQueue.isNotEmpty()) app.milestoneQueue.removeAt(0) }
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
             .clickable(remember { MutableInteractionSource() }, null) { dismiss() }, contentAlignment = Alignment.Center) {

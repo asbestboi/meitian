@@ -4,8 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,26 +45,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.asbestboi.meitian.LocalApp
-import com.asbestboi.meitian.data.BattleLink
 import com.asbestboi.meitian.data.Catalog
-import com.asbestboi.meitian.data.Match
-import com.asbestboi.meitian.data.Mode
 import com.asbestboi.meitian.data.Online
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.meitian_core.Leaderboard
+import uniffi.meitian_core.BattleMode
 import uniffi.meitian_core.OnlineChallenge
-import uniffi.meitian_core.OnlineEvent
+import uniffi.meitian_core.QueueEvent
+import uniffi.meitian_core.battleMode
+import uniffi.meitian_core.modeInfo
+import uniffi.meitian_core.modesFor
+import uniffi.meitian_core.SoundId
+import com.asbestboi.meitian.data.Sfx
 import uniffi.meitian_core.OnlineFriends
 import uniffi.meitian_core.OnlineProfile
 import uniffi.meitian_core.nicknameOk
@@ -74,27 +72,38 @@ import uniffi.meitian_core.nicknameOk
 /** What the online screen is showing on top of its tabs. */
 private sealed interface OnlineStage {
     data object Hub : OnlineStage
-    data class Searching(val mode: Mode) : OnlineStage
-    data class Playing(val room: String, val mode: Mode, val opponent: OnlineProfile?) : OnlineStage
+    data class Searching(val mode: BattleMode, val group: Boolean) : OnlineStage
+    data class Playing(val path: String, val mode: BattleMode?, val people: List<OnlineProfile>, val party: String? = null) : OnlineStage
 }
 
-/** Online play: quick match against anyone, friends by code, leaderboards, your public profile. */
+enum class HubStart { Play, Party }
+
+/** Online play: quick matches and groups, parties with friends, leaderboards, your public profile. */
 @Composable
-fun OnlineHub(close: () -> Unit) {
+fun OnlineHub(startAt: HubStart = HubStart.Play, close: () -> Unit) {
     val app = LocalApp.current
     val ctx = LocalContext.current
-    LaunchedEffect(Unit) { Online.init(ctx); Online.refreshMe(); Online.sync(app, force = true) }
+    LaunchedEffect(Unit) { Online.init(ctx); runCatching { Online.refreshMe() }; Online.sync(app, force = true) }
     var stage by remember { mutableStateOf<OnlineStage>(OnlineStage.Hub) }
+    val join: (OnlineChallenge) -> Unit = { c ->
+        stage = if (c.party.isNotEmpty()) OnlineStage.Playing(partyPath(c.party, app.settings.swears), null, listOf(c.from), c.party)
+        else OnlineStage.Playing("/v1/rooms/${c.room}", battleMode(c.mode) ?: BattleMode.DUEL, listOf(c.from))
+    }
     when (val s = stage) {
         is OnlineStage.Hub ->
             if (Online.profile == null && !Online.signedIn) OnlineSetup(close)
-            else OnlineTabs(close, play = { stage = OnlineStage.Searching(it) }, join = { room, mode, opp -> stage = OnlineStage.Playing(room, mode, opp) })
-        is OnlineStage.Searching -> QuickMatchSearch(s.mode, cancel = { stage = OnlineStage.Hub }) { room, opp ->
-            stage = OnlineStage.Playing(room, s.mode, opp)
+            else OnlineTabs(close, startAt,
+                play = { mode, group -> stage = OnlineStage.Searching(mode, group) }, join = join,
+                challenge = { room, mode, p -> stage = OnlineStage.Playing("/v1/rooms/$room", mode, listOf(p)) },
+                party = { code -> stage = OnlineStage.Playing(partyPath(code, app.settings.swears), null, emptyList(), code) })
+        is OnlineStage.Searching -> QuickMatchSearch(s.mode, s.group, cancel = { stage = OnlineStage.Hub }) { room, people ->
+            stage = OnlineStage.Playing("/v1/rooms/$room", s.mode, people)
         }
-        is OnlineStage.Playing -> OnlineMatchScreen(s.room, s.mode, s.opponent) { stage = OnlineStage.Hub }
+        is OnlineStage.Playing -> BattleScreen(s.path, s.mode, s.party, s.people) { stage = OnlineStage.Hub }
     }
 }
+
+private fun partyPath(code: String, swears: Boolean) = "/v1/party/$code?swears=${if (swears) 1 else 0}"
 
 // ----- sign up -----
 
@@ -148,8 +157,9 @@ private fun OnlineSetup(close: () -> Unit) {
 // ----- tabs -----
 
 @Composable
-private fun OnlineTabs(close: () -> Unit, play: (Mode) -> Unit, join: (String, Mode, OnlineProfile?) -> Unit) {
-    var tab by remember { mutableIntStateOf(0) }
+private fun OnlineTabs(close: () -> Unit, startAt: HubStart, play: (BattleMode, Boolean) -> Unit, join: (OnlineChallenge) -> Unit,
+                       challenge: (String, BattleMode, OnlineProfile) -> Unit, party: (String) -> Unit) {
+    var tab by remember { mutableIntStateOf(if (startAt == HubStart.Party) 1 else 0) }
     val me = Online.profile
     // incoming challenges and friend requests while this screen is open
     LaunchedEffect(Unit) { while (true) { Online.refreshInbox(); delay(8_000) } }
@@ -159,7 +169,7 @@ private fun OnlineTabs(close: () -> Unit, play: (Mode) -> Unit, join: (String, M
             if (me != null) ProfileRow(me, trailing = "${me.rating}")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val requests = Online.inbox?.requests?.toInt() ?: 0
-                listOf("play", if (requests > 0) "friends ($requests)" else "friends", "ranks", "me").forEachIndexed { i, t ->
+                listOf("play", "party", if (requests > 0) "friends ($requests)" else "friends", "ranks", "me").forEachIndexed { i, t ->
                     Box(Modifier.weight(1f).clip(RoundedCornerShape(50)).background(if (tab == i) Street.c.ink else Street.c.card).clickable { tab = i }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
                         Text(t, color = if (tab == i) Street.c.paper else Street.c.text, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
                     }
@@ -169,20 +179,12 @@ private fun OnlineTabs(close: () -> Unit, play: (Mode) -> Unit, join: (String, M
         Box(Modifier.weight(1f)) {
             when (tab) {
                 0 -> PlayTab(play, join)
-                1 -> FriendsTab(join)
-                2 -> RanksTab()
+                1 -> PartyTab(party)
+                2 -> FriendsTab(challenge)
+                3 -> RanksTab()
                 else -> MeTab()
             }
         }
-    }
-}
-
-@Composable
-fun Avatar(p: OnlineProfile?, size: Dp = 46.dp) {
-    val url = Online.avatarUrl(p)
-    Box(Modifier.size(size).clip(CircleShape).background(Street.chrome()), contentAlignment = Alignment.Center) {
-        if (url != null) AsyncImage(url, "profile picture", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else Text(Catalog[p?.cosmeticAvatar ?: ""]?.symbol ?: "🐣", fontSize = (size.value * 0.5f).sp)
     }
 }
 
@@ -207,59 +209,110 @@ private fun ProfileRow(p: OnlineProfile, trailing: String? = null, rank: Int? = 
     }
 }
 
+/** The modes [players] people can play, as a grid. */
 @Composable
-private fun ModePicker(mode: Mode, pick: (Mode) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Mode.entries.forEach { m ->
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(if (m == mode) Street.c.ink else Street.c.card).clickable { pick(m) }.padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(m.emoji, fontSize = 20.sp)
-                Text(m.name.lowercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (m == mode) Street.c.paper else Street.c.text, maxLines = 1)
+private fun ModePicker(players: Int, mode: BattleMode, pick: (BattleMode) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        modesFor(players.toUInt()).chunked(4).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { m ->
+                    Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(if (m.mode == mode) Street.c.ink else Street.c.card).clickable { pick(m.mode) }.padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(m.emoji, fontSize = 20.sp)
+                        Text(m.title.lowercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (m.mode == mode) Street.c.paper else Street.c.text, maxLines = 1)
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
 
 @Composable
-private fun PlayTab(play: (Mode) -> Unit, join: (String, Mode, OnlineProfile?) -> Unit) {
-    var mode by remember { mutableStateOf(Mode.Duel) }
+private fun PlayTab(play: (BattleMode, Boolean) -> Unit, join: (OnlineChallenge) -> Unit) {
+    var group by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(BattleMode.DUEL) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Online.inbox?.challenges?.forEach { c -> ChallengeCard(c, join) }
-        Column(Modifier.fillMaxWidth().block(Street.warm()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("quick match", style = street(26.sp), color = Color.White)
-            Text("Battle a random player near your rating, on iPhone or Android.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+        val info = modeInfo(mode)
+        Column(Modifier.fillMaxWidth().block(info.brush()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("${info.emoji} ${info.title.lowercase()}", style = street(26.sp), color = Color.White)
+            Text(info.blurb, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
         }
-        ModePicker(mode) { mode = it }
-        Text(mode.blurb, fontSize = 13.sp, color = Street.c.secondary)
-        BigButton("find an opponent", brush = Street.warm()) { play(mode) }
-        Text("Wins and losses move your rating. Both phones have to agree on the result for it to count.", fontSize = 12.sp, color = Street.c.secondary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(false to "1 vs 1", true to "group of 4").forEach { (g, label) ->
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(50)).background(if (group == g) Street.c.ink else Street.c.card).clickable {
+                    group = g
+                    if (modesFor(if (g) 4u else 2u).none { it.mode == mode }) mode = BattleMode.DUEL
+                }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                    Text(label, fontWeight = FontWeight.Bold, color = if (group == g) Street.c.paper else Street.c.text)
+                }
+            }
+        }
+        ModePicker(if (group) 4 else 2, mode) { mode = it }
+        BigButton(if (group) "find a group" else "find an opponent", brush = info.brush()) { play(mode, group) }
+        Text(if (group) "Groups are for coins: the better your place, the more you get. Ratings don't change."
+            else "Wins and losses move your rating. Both phones have to agree on the result for it to count.", fontSize = 12.sp, color = Street.c.secondary)
+        Gap(30.dp)
+    }
+}
+
+/** Private parties of up to four: open one, or join with a code. */
+@Composable
+private fun PartyTab(open: (String) -> Unit) {
+    val app = LocalApp.current
+    val scope = rememberCoroutineScope()
+    var code by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().block(Street.pink()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("🎉 party", style = street(26.sp), color = Color.White)
+            Text("Up to four friends, every mode. You get a code to share; the host picks the games.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+        }
+        BigButton(if (busy) "…" else "start a party", brush = Street.pink(), enabled = !busy) {
+            busy = true; error = null
+            scope.launch {
+                runCatching { Online.createParty(app.settings.swears) }.onSuccess(open).onFailure { error = it.message }
+                busy = false
+            }
+        }
+        Column(Modifier.fillMaxWidth().card().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("join a party", fontWeight = FontWeight.Bold, color = Street.c.text)
+            OutlinedTextField(code, { code = it.uppercase().filter(Char::isLetterOrDigit).take(6) }, label = { Text("party code") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters), modifier = Modifier.fillMaxWidth())
+            BigButton("join", brush = Street.jade(), enabled = code.length == 6) { open(code) }
+        }
+        error?.let { Text(it, color = Street.c.red, fontWeight = FontWeight.Bold) }
         Gap(30.dp)
     }
 }
 
 @Composable
-private fun ChallengeCard(c: OnlineChallenge, join: (String, Mode, OnlineProfile?) -> Unit) {
+private fun ChallengeCard(c: OnlineChallenge, join: (OnlineChallenge) -> Unit) {
     val scope = rememberCoroutineScope()
+    val mode = battleMode(c.mode)?.let(::modeInfo)
     Column(Modifier.fillMaxWidth().block(Street.pink()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(c.from); HSpacer(10.dp)
-            Text("${c.from.nickname} challenges you to ${Mode.of(c.mode).title.lowercase()} ${Mode.of(c.mode).emoji}", color = Color.White, fontWeight = FontWeight.Bold)
+            Text(if (c.party.isNotEmpty()) "${c.from.nickname} invites you to a party 🎉" else "${c.from.nickname} challenges you to ${mode?.title?.lowercase() ?: "a battle"} ${mode?.emoji ?: "⚔️"}",
+                color = Color.White, fontWeight = FontWeight.Bold)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            BigButton("accept", Modifier.weight(1f), brush = Street.jade()) { join(c.room, Mode.of(c.mode), c.from) }
+            BigButton(if (c.party.isNotEmpty()) "join" else "accept", Modifier.weight(1f), brush = Street.jade()) { join(c) }
             BigButton("no thanks", Modifier.weight(1f)) { scope.launch { runCatching { Online.decline(c.room) }; Online.refreshInbox() } }
         }
     }
 }
 
 @Composable
-private fun FriendsTab(join: (String, Mode, OnlineProfile?) -> Unit) {
+private fun FriendsTab(challenge: (String, BattleMode, OnlineProfile) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var data by remember { mutableStateOf<OnlineFriends?>(null) }
     var code by remember { mutableStateOf("") }
     var note by remember { mutableStateOf<String?>(null) }
-    var challengeMode by remember { mutableStateOf(Mode.Duel) }
+    var challengeMode by remember { mutableStateOf(BattleMode.DUEL) }
     var viewing by remember { mutableStateOf<OnlineProfile?>(null) }
     suspend fun reload() { runCatching { data = Online.friends() }.onFailure { note = it.message } }
     LaunchedEffect(Unit) { while (true) { reload(); delay(10_000) } }
@@ -298,7 +351,7 @@ private fun FriendsTab(join: (String, Mode, OnlineProfile?) -> Unit) {
         val friends = data?.friends.orEmpty()
         if (friends.isNotEmpty()) {
             SectionTitle("challenge mode")
-            ModePicker(challengeMode) { challengeMode = it }
+            ModePicker(2, challengeMode) { challengeMode = it }
         }
         friends.forEach { p ->
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -307,7 +360,7 @@ private fun FriendsTab(join: (String, Mode, OnlineProfile?) -> Unit) {
                 Pill("⚔️ battle", Street.c.red, modifier = Modifier.clickable {
                     scope.launch {
                         runCatching { Online.challenge(p.id, challengeMode) }
-                            .onSuccess { room -> join(room, challengeMode, p) }
+                            .onSuccess { room -> challenge(room, challengeMode, p) }
                             .onFailure { note = it.message }
                     }
                 })
@@ -429,81 +482,39 @@ private fun MeTab() {
 // ----- quick match -----
 
 @Composable
-private fun QuickMatchSearch(mode: Mode, cancel: () -> Unit, found: (String, OnlineProfile) -> Unit) {
+private fun QuickMatchSearch(mode: BattleMode, group: Boolean, cancel: () -> Unit, found: (String, List<OnlineProfile>) -> Unit) {
     val app = LocalApp.current
+    val info = modeInfo(mode)
     var seconds by remember { mutableIntStateOf(0) }
+    var waiting by remember { mutableIntStateOf(1) }
     var problem by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableIntStateOf(0) }
     DisposableEffect(retry) {
         var done = false
-        val ws = Online.queue(mode, app.settings.swears, { e ->
-            if (e is OnlineEvent.Matched && !done) { done = true; android.os.Handler(android.os.Looper.getMainLooper()).post { found(e.room, e.opponent) } }
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val ws = Online.queue(mode, group, app.settings.swears, { e ->
+            main.post {
+                if (done) return@post
+                if (e is QueueEvent.Waiting) waiting = e.count.toInt()
+                if (e is QueueEvent.Matched) { done = true; Sfx.play(SoundId.GO); found(e.room, e.opponents) }
+            }
         }) { code ->
-            if (!done && code != 1000) android.os.Handler(android.os.Looper.getMainLooper()).post { problem = "Lost the connection to the server." }
+            main.post { if (!done && code != 1000) problem = "Lost the connection to the server." }
         }
         onDispose { done = true; ws.close(1000, "cancel") }
     }
     LaunchedEffect(retry) { seconds = 0; while (true) { delay(1000); seconds++ } }
     val pulse by rememberInfiniteTransition(label = "search").animateFloat(0.85f, 1.15f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulse")
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
-        Box(Modifier.size(150.dp).scale(pulse).clip(CircleShape).background(Street.warm()), contentAlignment = Alignment.Center) { Text(mode.emoji, fontSize = 60.sp) }
-        Text(problem ?: "looking for an opponent…", style = street(24.sp), color = Street.c.text, textAlign = TextAlign.Center)
-        Text(if (problem != null) "Check your internet and try again." else "${mode.title} · ${seconds}s. The search widens the longer you wait.",
-            color = Street.c.secondary, textAlign = TextAlign.Center)
+        Box(Modifier.size(150.dp).scale(if (reduceMotion()) 1f else pulse).clip(CircleShape).background(info.brush()), contentAlignment = Alignment.Center) { Text(info.emoji, fontSize = 60.sp) }
+        Text(problem ?: if (group) "looking for a group… $waiting/4" else "looking for an opponent…", style = street(24.sp), color = Street.c.text, textAlign = TextAlign.Center)
+        Text(when {
+            problem != null -> "Check your internet and try again."
+            group && info.minPlayers < 4u -> "${info.title} · ${seconds}s. Starts with three if nobody else shows up."
+            group -> "${info.title} · ${seconds}s. This one needs four players."
+            else -> "${info.title} · ${seconds}s. The search widens the longer you wait."
+        }, color = Street.c.secondary, textAlign = TextAlign.Center)
         if (problem != null) BigButton("try again") { problem = null; retry++ }
         BigButton("cancel", onClick = cancel)
-    }
-}
-
-// ----- an online battle -----
-
-@Composable
-private fun OnlineMatchScreen(room: String, mode: Mode, opponent: OnlineProfile?, close: () -> Unit) {
-    val app = LocalApp.current
-    val context = LocalContext.current
-    val me = remember { app.myCard() }
-    val link = remember { BattleLink(context, me.id) }
-    val match = remember { Match(link, me) { outcome, opp, bonus, fastest -> app.recordMatch(outcome, opp, bonus, fastest) }.also { it.autoMode = mode } }
-    var confetti by remember { mutableIntStateOf(0) }
-    val scope = rememberCoroutineScope()
-    DisposableEffect(Unit) {
-        val window = (context as? ComponentActivity)?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        link.connectOnline(room)
-        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); match.close(); scope.launch { Online.sync(app, force = true) } }
-    }
-    LaunchedEffect(link.state) { if (link.state == BattleLink.State.Connected) match.hello() }
-    Box(Modifier.fillMaxSize()) {
-        if (match.opponent != null) {
-            MatchScreen(match, close) { confetti++ }
-            link.rating?.let { r ->
-                Text(if (r.counted) "rating ${r.rating} (${if (r.delta >= 0) "+" else ""}${r.delta})" else "the phones disagreed: no rating change",
-                    color = Color.White, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 60.dp).clip(RoundedCornerShape(50)).background(Street.ink()).padding(horizontal = 16.dp, vertical = 8.dp))
-            }
-            if (link.state != BattleLink.State.Connected && !match.finished) {
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
-                    Column(Modifier.padding(30.dp).card().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CircularProgressIndicator(color = Street.c.red)
-                        Text("Waiting for ${match.opponent?.name} to reconnect…", fontWeight = FontWeight.Bold, color = Street.c.text, textAlign = TextAlign.Center)
-                        Text("If they're gone for 30 seconds, you win.", color = Street.c.secondary, textAlign = TextAlign.Center)
-                        Text("Leave match", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = close).padding(6.dp))
-                    }
-                }
-            }
-        } else {
-            Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
-                Avatar(opponent, 110.dp)
-                Text(opponent?.let { "${it.nickname} #${it.tag}" } ?: "opponent", style = street(24.sp), color = Street.c.text)
-                Text(when {
-                    link.lanUnreachable -> "This battle isn't available any more (declined or expired)."
-                    link.peerWaiting -> "Waiting for them to join… ${mode.emoji} ${mode.title}"
-                    else -> "Connecting…"
-                }, color = Street.c.secondary, textAlign = TextAlign.Center)
-                if (!link.lanUnreachable) CircularProgressIndicator(color = Street.c.red)
-                BigButton("leave", onClick = close)
-            }
-        }
-        Confetti(confetti)
     }
 }

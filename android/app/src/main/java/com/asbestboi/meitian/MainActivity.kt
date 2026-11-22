@@ -32,6 +32,10 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import uniffi.meitian_core.SoundId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,8 +91,19 @@ class MainActivity : ComponentActivity() {
 /** A screen pushed over the tabs (learning session, games, shop…). */
 class Overlay {
     var content by mutableStateOf<(@Composable () -> Unit)?>(null)
-    fun show(c: @Composable () -> Unit) { content = c }
-    fun close() { content = null }
+    fun show(c: @Composable () -> Unit) {
+        if (content == null) Sfx.play(SoundId.SHEET_OPEN)
+        content = c
+    }
+    fun close() {
+        if (content != null) Sfx.play(SoundId.SHEET_CLOSE)
+        content = null
+    }
+}
+
+/** Haptics switched off in settings. */
+private object NoHaptics : HapticFeedback {
+    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {}
 }
 
 val LocalNav = staticCompositionLocalOf { Overlay() }
@@ -97,6 +112,7 @@ val LocalNav = staticCompositionLocalOf { Overlay() }
 fun Root() {
     val app = LocalApp.current
     Sfx.enabled = app.settings.sounds
+    Sfx.volume = app.settings.volume
     val overlay = remember { Overlay() }
     val context = androidx.compose.ui.platform.LocalContext.current
     // Downloaded lessons: load the cache, refresh daily, and again when the placement level changes.
@@ -104,7 +120,8 @@ fun Root() {
         ContentSync.start(context.applicationContext, app.profile.confirmedLevel + 1)
     }
     Box(Modifier.fillMaxSize().background(Street.c.paper)) {
-        CompositionLocalProvider(LocalNav provides overlay) {
+        val haptics = LocalHapticFeedback.current
+        CompositionLocalProvider(LocalNav provides overlay, LocalHapticFeedback provides if (app.settings.haptics) haptics else NoHaptics) {
             if (!app.profile.onboarded) {
                 Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) { OnboardingScreen() }
             } else {
@@ -116,6 +133,17 @@ fun Root() {
             }
             // milestones reached during a lesson or game pop up once it's closed
             if (app.profile.onboarded && overlay.content == null) com.asbestboi.meitian.ui.MilestoneCelebration()
+            val arena = app.arenaReveal
+            if (app.profile.onboarded && overlay.content == null && arena != null) {
+                BackHandler { app.arenaReveal = null }
+                com.asbestboi.meitian.ui.ArenaReveal(arena) { app.arenaReveal = null }
+            }
+            app.toast?.let { text ->
+                androidx.compose.runtime.LaunchedEffect(text) { Sfx.play(SoundId.COIN); kotlinx.coroutines.delay(4_500); app.toast = null }
+                Text(text, color = Street.c.paper, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 12.dp)
+                        .background(Street.c.ink, androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 18.dp, vertical = 10.dp))
+            }
         }
     }
 }
@@ -139,7 +167,7 @@ fun Tabs() {
         ) {
             tabs.forEachIndexed { i, (icon, label) ->
                 Column(
-                    Modifier.weight(1f).clickable { tab = i }.padding(vertical = 4.dp),
+                    Modifier.weight(1f).clickable { if (tab != i) Sfx.play(SoundId.TAB_SWITCH); tab = i }.padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     val scale by androidx.compose.animation.core.animateFloatAsState(if (tab == i) 1.18f else 1f,

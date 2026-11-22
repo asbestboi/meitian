@@ -14,14 +14,13 @@ import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import uniffi.meitian_core.SoundId
+import uniffi.meitian_core.effectSpec
+import uniffi.meitian_core.hitSoundPcm
+import uniffi.meitian_core.soundPcm
+import uniffi.meitian_core.soundSampleRate
 import uniffi.meitian_core.speechMatches
 import java.util.Locale
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.exp
-import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.random.Random
 
 /** Mandarin text-to-speech. */
 object Speaker {
@@ -49,87 +48,37 @@ object Speaker {
     }
 }
 
-/** Synthesized lo-fi sound effects (same recipes as iOS), played from static AudioTracks. */
+/** Sound effects, synthesized by the Rust core (the same on iOS) and played from static AudioTracks. */
 object Sfx {
-    enum class Sound { Correct, Wrong, Hit, Coin, Win, Lose, Tick, Go, Swoosh, MicOn, MicOff, NewWord, HeartLost, OutOfHearts }
-
     var enabled = true
-    private const val RATE = 44100
-    private val cache = HashMap<Sound, ShortArray>()
+    /** 0–1, from settings. */
+    var volume = 0.8f
+    private val rate = soundSampleRate().toInt()
+    private val cache = HashMap<Any, ByteArray>()
 
-    private data class Note(val f: Double, val d: Double, val wave: Int = 0, val bend: Double = 0.0, val vol: Double = 1.0)
+    fun play(sound: SoundId) = play(sound) { soundPcm(sound) }
 
-    private fun tones(notes: List<Note>): FloatArray {
-        val out = ArrayList<Float>()
-        for (n in notes) {
-            val count = (n.d * RATE).toInt()
-            var phase = 0.0
-            for (i in 0 until count) {
-                val t = i.toDouble() / RATE
-                phase += (n.f + n.bend * (t / n.d)) / RATE
-                val x = phase % 1.0
-                var v = when (n.wave) {
-                    1 -> 1 - 4 * abs(x - 0.5)
-                    2 -> if (x < 0.5) 0.6 else -0.6
-                    else -> sin(2 * PI * x)
-                }
-                v = (v * 8).roundToInt() / 8.0
-                val env = minOf(1.0, t / 0.005) * exp(-3.5 * t / n.d)
-                out += (v * env * n.vol * 0.5).toFloat()
-            }
-        }
-        return out.toFloatArray()
-    }
+    /** The impact of a hit effect cosmetic. */
+    fun playHit(effectId: String) = effectSpec(effectId).sound.let { key -> play(key) { hitSoundPcm(key) } }
 
-    private fun noise(d: Double, vol: Double, sweep: Boolean = false): FloatArray {
-        val count = (d * RATE).toInt()
-        var last = 0.0
-        return FloatArray(count) { i ->
-            val t = i.toDouble() / RATE
-            val a = if (sweep) 0.05 + 0.6 * (t / d) else 0.35
-            last += a * (Random.nextDouble(-1.0, 1.0) - last)
-            val env = if (sweep) sin(PI * t / d) else exp(-6 * t / d)
-            (last * env * vol).toFloat()
-        }
-    }
-
-    private fun mix(a: FloatArray, b: FloatArray) = FloatArray(maxOf(a.size, b.size)) { i ->
-        ((a.getOrElse(i) { 0f }) + (b.getOrElse(i) { 0f })).coerceIn(-1f, 1f)
-    }
-
-    private fun render(s: Sound): FloatArray = when (s) {
-        Sound.Correct -> tones(listOf(Note(880.0, 0.08, 1), Note(1320.0, 0.14, 1)))
-        Sound.Wrong -> tones(listOf(Note(200.0, 0.24, 2, -80.0, 0.6)))
-        Sound.Hit -> mix(noise(0.14, 0.9), tones(listOf(Note(95.0, 0.18, 0, -40.0))))
-        Sound.Coin -> tones(listOf(Note(1568.0, 0.06, 2, vol = 0.5), Note(2093.0, 0.16, 2, vol = 0.5)))
-        Sound.Win -> tones(listOf(523.0, 659.0, 784.0, 1047.0).map { Note(it, 0.11, 1) } + Note(1047.0, 0.25, 1))
-        Sound.Lose -> tones(listOf(392.0, 330.0, 262.0).map { Note(it, 0.16, 2, vol = 0.55) })
-        Sound.Tick -> tones(listOf(Note(660.0, 0.07, 1, vol = 0.7)))
-        Sound.Go -> tones(listOf(Note(990.0, 0.2, 1)))
-        Sound.Swoosh -> noise(0.16, 0.35, sweep = true)
-        Sound.MicOn -> tones(listOf(Note(740.0, 0.06), Note(1110.0, 0.08)))
-        Sound.MicOff -> tones(listOf(Note(1110.0, 0.06), Note(740.0, 0.08)))
-        Sound.NewWord -> tones(listOf(Note(1319.0, 0.07, vol = 0.45), Note(1760.0, 0.22, vol = 0.45)))
-        Sound.HeartLost -> mix(noise(0.08, 0.4), tones(listOf(Note(440.0, 0.1, 1, -120.0, 0.7), Note(262.0, 0.2, 1, -90.0, 0.7))))
-        Sound.OutOfHearts -> tones(listOf(Note(392.0, 0.16, 1, vol = 0.7), Note(311.0, 0.16, 1, vol = 0.7), Note(233.0, 0.36, 1, -50.0, 0.7)))
-    }
-
-    fun play(s: Sound) {
-        if (!enabled) return
-        val pcm = cache.getOrPut(s) { render(s).map { (it * 0.55f * Short.MAX_VALUE).toInt().toShort() }.toShortArray() }
+    private fun play(key: Any, render: () -> ByteArray) {
+        if (!enabled || volume <= 0f) return
+        val level = volume
         Thread {
             runCatching {
+                val pcm = synchronized(cache) { cache.getOrPut(key, render) }
                 val track = AudioTrack.Builder()
                     .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                        .setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
                     .setTransferMode(AudioTrack.MODE_STATIC)
-                    .setBufferSizeInBytes(pcm.size * 2)
+                    .setBufferSizeInBytes(pcm.size)
                     .build()
                 track.write(pcm, 0, pcm.size)
+                track.setVolume(level)
                 track.play()
-                Thread.sleep((pcm.size * 1000L / RATE) + 60)
+                Thread.sleep((pcm.size / 2 * 1000L / rate) + 60)
                 track.release()
             }
         }.start()
@@ -199,7 +148,7 @@ class SpeechListener(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 800L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         }
-        Sfx.play(Sfx.Sound.MicOn)
+        Sfx.play(SoundId.MIC_ON)
         state = State.Listening
         r.startListening(intent)
     }
@@ -222,7 +171,7 @@ class SpeechListener(private val context: Context) {
     private fun finish(s: State) {
         stop()
         state = s
-        Sfx.play(if (s == State.Matched) Sfx.Sound.Correct else Sfx.Sound.MicOff)
+        Sfx.play(if (s == State.Matched) SoundId.CORRECT else SoundId.MIC_OFF)
     }
 
     fun stop() {
@@ -238,6 +187,6 @@ class SpeechListener(private val context: Context) {
         heard = results.firstOrNull() ?: ""
         problem = ""
         state = if (results.any { matches(it, word) }) State.Matched else State.Missed
-        Sfx.play(if (state == State.Matched) Sfx.Sound.Correct else Sfx.Sound.MicOff)
+        Sfx.play(if (state == State.Matched) SoundId.CORRECT else SoundId.MIC_OFF)
     }
 }

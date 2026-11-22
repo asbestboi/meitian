@@ -115,6 +115,15 @@ fun LearnScreen(goToPractice: () -> Unit) {
         units.flatMap { u -> listOf<Any>(u) + u.nodes.mapIndexed { i, n -> n to i } }
     }
     val listState = rememberLazyListState()
+    // finishing a node opens the next one
+    var lastNext by remember { mutableStateOf<Pair<PathNodeKind, UInt>?>(null) }
+    LaunchedEffect(next?.kind, next?.number, nav.content == null) {
+        if (nav.content != null || next == null) return@LaunchedEffect
+        val now = next.kind to next.number
+        if (lastNext != null && lastNext != now) com.asbestboi.meitian.data.Sfx.play(uniffi.meitian_core.SoundId.NODE_UNLOCK)
+        lastNext = now
+    }
+    LaunchedEffect(app.currentLevel) { app.checkArena() }
     LaunchedEffect(Unit) {
         val i = rows.indexOfFirst { (it as? Pair<*, *>)?.first == next }
         if (i > 2) listState.scrollToItem(i - 2)
@@ -123,6 +132,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TopBar { nav.show { GoalsScreen { nav.close() } } }
         Box(Modifier.weight(1f)) {
+            ArenaBackground(app.arenaTheme, strength = 0.42f, scroll = { listState.firstVisibleItemIndex * 120f + listState.firstVisibleItemScrollOffset })
             LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
                 app.freezeNotice?.let { saved ->
                     item {

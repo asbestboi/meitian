@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -312,7 +313,7 @@ private fun Translatable(key: String, tr: Translations, modifier: Modifier = Mod
     Box(if (armed) modifier.border(2.dp, Street.c.sky, RoundedCornerShape(18.dp)) else modifier) {
         content()
         if (armed) Box(Modifier.matchParentSize().clip(RoundedCornerShape(18.dp)).clickable(onClickLabel = "Show translation") {
-            Sfx.play(Sfx.Sound.Tick); tr.reveal(key)
+            Sfx.play(SoundId.TICK); tr.reveal(key)
         })
     }
 }
@@ -377,9 +378,9 @@ private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, on
         picked = i
         if (i == q.answer.toInt()) {
             if (!retrying) correct++
-            Sfx.play(Sfx.Sound.Correct)
+            Sfx.play(SoundId.CORRECT)
         } else {
-            Sfx.play(Sfx.Sound.Wrong)
+            Sfx.play(SoundId.WRONG)
             hearts = loseHeart(hearts.toUInt()).toInt()
             again.add(panel)
         }
@@ -389,7 +390,7 @@ private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, on
         val option = p.reply[i]
         val pi = panel
         sent[pi] = (sent[pi] ?: emptyList()) + StoryLine(story.me, null, option.zh, option.pinyin, option.en, option.tokens)
-        Sfx.play(Sfx.Sound.Swoosh); Speaker.say(option.zh)
+        Sfx.play(SoundId.SWOOSH); Speaker.say(option.zh)
         if (option.correct) { if (triedWrong.isEmpty()) correct++ }
         else { triedWrong.add(i); hearts = loseHeart(hearts.toUInt()).toInt() }
         scope.launch {
@@ -397,7 +398,7 @@ private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, on
                 typing = true; delay(900); typing = false
                 sent[pi] = (sent[pi] ?: emptyList()) + r
                 app.markSeen(r.tokens.newIds)
-                Sfx.play(if (option.correct) Sfx.Sound.Correct else Sfx.Sound.Wrong)
+                Sfx.play(if (option.correct) SoundId.CORRECT else SoundId.WRONG)
             }
             if (option.correct) { replyDone.add(pi); triedWrong.clear() }
         }
@@ -412,7 +413,7 @@ private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, on
         app.markSeen(newWords, ding = false)
         onFinished(tr.shown.size)
         finished = true; confetti++
-        Sfx.play(Sfx.Sound.Win)
+        Sfx.play(SoundId.WIN)
     }
 
     /** After the last panel: wrong questions come back until they're right. */
@@ -502,10 +503,10 @@ private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, on
                 when {
                     !linesDone && isChat -> if (!typing) scope.launch {
                         // "…" first, like a real chat
-                        typing = true; delay(650); typing = false; shown++; Sfx.play(Sfx.Sound.Tick)
+                        typing = true; delay(650); typing = false; shown++; Sfx.play(SoundId.TICK)
                     }
                     !linesDone -> shown++
-                    !retrying && panel + 1 < story.panels.size -> { panel++; shown = 1; picked = null; Sfx.play(Sfx.Sound.Swoosh) }
+                    !retrying && panel + 1 < story.panels.size -> { panel++; shown = 1; picked = null; Sfx.play(SoundId.SWOOSH) }
                     else -> nextRetry()
                 }
             }
@@ -650,7 +651,7 @@ private fun ChatBubble(key: String, line: StoryLine, me: String, tr: Translation
                 val visible = img.url in revealed
                 Box(Modifier.width(230.dp).clip(RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
                     StoryImageView(img, 170.dp, if (visible) Modifier else Modifier.blur(22.dp), fill = true,
-                        onClick = { if (visible) onImage(img) else { revealed.add(img.url); Sfx.play(Sfx.Sound.Coin) } })
+                        onClick = { if (visible) onImage(img) else { revealed.add(img.url); Sfx.play(SoundId.COIN) } })
                     if (!visible) Text("👀 tap to see", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }

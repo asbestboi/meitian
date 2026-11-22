@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -174,7 +175,7 @@ fun Confetti(trigger: Int, sound: Boolean = true) {
     val colors = listOf(Color(0xFFF53326), Color(0xFFFFC726), Color(0xFF29C266), Color(0xFF3370FF), Color(0xFFFF338C))
     LaunchedEffect(trigger) {
         if (trigger == 0) return@LaunchedEffect
-        if (sound) Sfx.play(Sfx.Sound.Win)
+        if (sound) Sfx.play(SoundId.WIN)
         pieces.clear()
         repeat(90) {
             pieces += P(Random.nextFloat() * 0.4f + 0.3f, Random.nextFloat() * 760 - 380, -(Random.nextFloat() * 550 + 350),
@@ -200,17 +201,13 @@ fun Confetti(trigger: Int, sound: Boolean = true) {
 // ---------- player card ----------
 
 @Composable
-fun PlayerCardView(card: PlayerCard, compact: Boolean = false, coins: Int? = null) {
+fun PlayerCardView(card: PlayerCard, compact: Boolean = false, coins: Int? = null, picture: @Composable () -> Unit) {
     Box {
         Row(
             Modifier.fillMaxWidth().block(com.asbestboi.meitian.data.Catalog.frame(card.frame)).padding(if (compact) 14.dp else 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier.size(if (compact) 54.dp else 74.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f))
-                    .border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) { Text(card.avatarSymbol, fontSize = if (compact) 30.sp else 44.sp) }
+            Box(Modifier.border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape), contentAlignment = Alignment.Center) { picture() }
             HSpacer(14.dp)
             Column(Modifier.weight(1f)) {
                 Text(card.name, color = Color.White, style = street(if (compact) 20.sp else 26.sp), maxLines = 1)
@@ -287,7 +284,7 @@ fun SwipeDeck(words: List<CoreWord>, onFinish: () -> Unit) {
 
     fun commit(known: Boolean) {
         val w = queue.firstOrNull() ?: return
-        Sfx.play(Sfx.Sound.Swoosh)
+        Sfx.play(SoundId.SWOOSH)
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         scope.launch {
             dx.animateTo(if (known) width * 1.4f else -width * 1.4f, spring(stiffness = Spring.StiffnessMediumLow))
@@ -428,9 +425,9 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
         if (right) {
             solved++
             if (q.id !in retries) correct++
-            Sfx.play(Sfx.Sound.Correct)
+            Sfx.play(SoundId.CORRECT)
         } else {
-            Sfx.play(Sfx.Sound.Wrong)
+            Sfx.play(SoundId.WRONG)
             if (useHearts) {
                 hearts = loseHeart(hearts.toUInt()).toInt()
                 // asked again at the end until it's right

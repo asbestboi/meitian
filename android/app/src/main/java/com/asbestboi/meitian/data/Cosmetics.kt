@@ -5,14 +5,13 @@ import androidx.compose.ui.graphics.Color
 import org.json.JSONObject
 
 enum class CosmeticKind(val label: String) {
-    Avatar("Avatars"), Frame("Frames"), Title("Titles"), Effect("Hits"), Aura("Auras"), Sticker("Stickers")
+    Frame("Frames"), Title("Titles"), Effect("Hits"), Aura("Auras"), Sticker("Stickers")
 }
 
 data class Cosmetic(val id: String, val kind: CosmeticKind, val name: String, val symbol: String, val price: Int, val swear: Boolean = false)
 
 /** Same ids as the iOS app. */
 object Catalog {
-    private fun a(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Avatar, name, s, p, sw)
     private fun f(id: String, name: String, p: Int) = Cosmetic(id, CosmeticKind.Frame, name, "", p)
     private fun t(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Title, name, s, p, sw)
     private fun e(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Effect, name, s, p, sw)
@@ -20,13 +19,6 @@ object Catalog {
     private fun st(id: String, name: String, s: String, p: Int, sw: Boolean = false) = Cosmetic(id, CosmeticKind.Sticker, name, s, p, sw)
 
     val all = listOf(
-        a("av.chick", "Chick", "🐣", 0), a("av.panda", "Panda", "🐼", 60), a("av.cat", "Lucky Cat", "🐱", 60),
-        a("av.frog", "Frog", "🐸", 80), a("av.monkey", "Monkey King", "🐵", 100), a("av.tiger", "Tiger", "🐯", 120),
-        a("av.fox", "Fox", "🦊", 120), a("av.dumpling", "Dumpling", "🥟", 150), a("av.boba", "Bubble Tea", "🧋", 150),
-        a("av.lantern", "Lantern", "🏮", 200), a("av.unicorn", "Qilin", "🦄", 250), a("av.dragon", "Dragon", "🐲", 300),
-        a("av.skull", "Skull", "💀", 140), a("av.gorilla", "Gorilla", "🦍", 160), a("av.rat", "Street Rat", "🐀", 90),
-        a("av.oni", "Oni Mask", "👹", 220), a("av.alien", "Alien", "👽", 180), a("av.robot", "Robot", "🤖", 180),
-        a("av.cool", "Too Cool", "😎", 110), a("av.angry", "Rage", "🤬", 120, true),
         f("fr.lantern", "Lantern", 0), f("fr.jade", "Jade", 80), f("fr.ocean", "Ocean", 80), f("fr.royal", "Royal", 120),
         f("fr.ink", "Ink", 150), f("fr.sakura", "Sakura", 150), f("fr.gold", "Imperial Gold", 200), f("fr.galaxy", "Galaxy", 400),
         f("fr.concrete", "Concrete", 90), f("fr.acid", "Acid", 160), f("fr.graffiti", "Graffiti", 220), f("fr.neon", "Neon Night", 260),
@@ -77,7 +69,8 @@ object Catalog {
     }
 }
 
-/** What the opponent sees. Same JSON shape as the iOS PlayerCard. */
+/** What the other players see. Same JSON shape as the iOS PlayerCard (cards from apps up to 1.12 also carry an
+ *  `avatar`, which is ignored: profile pictures replaced them). */
 data class PlayerCard(
     val id: String,
     val name: String,
@@ -85,7 +78,6 @@ data class PlayerCard(
     val wordsLearned: Int,
     val wins: Int,
     val losses: Int,
-    val avatar: String,
     val frame: String,
     val title: String,
     val effect: String,
@@ -94,21 +86,20 @@ data class PlayerCard(
     val aura: String? = null,
 ) {
     val swearsOn get() = swears ?: false
-    val avatarSymbol get() = Catalog[avatar]?.symbol ?: "🐣"
     val effectSymbol get() = Catalog[effect]?.symbol ?: "💥"
     val titleItem get() = Catalog[title]
     val stickerSymbol get() = sticker?.let { Catalog[it]?.symbol }?.takeIf { it.isNotEmpty() }
 
     fun json() = JSONObject().apply {
         put("id", id); put("name", name); put("level", level); put("wordsLearned", wordsLearned); put("wins", wins)
-        put("losses", losses); put("avatar", avatar); put("frame", frame); put("title", title); put("effect", effect)
+        put("losses", losses); put("frame", frame); put("title", title); put("effect", effect)
         put("sticker", sticker ?: "st.none"); put("swears", swearsOn); put("aura", aura ?: "au.none")
     }
 
     companion object {
         fun from(o: JSONObject) = PlayerCard(
             o.getString("id"), o.optString("name", "Player"), o.optInt("level", 1), o.optInt("wordsLearned"),
-            o.optInt("wins"), o.optInt("losses"), o.optString("avatar", "av.chick"), o.optString("frame", "fr.lantern"),
+            o.optInt("wins"), o.optInt("losses"), o.optString("frame", "fr.lantern"),
             o.optString("title", "ti.newbie"), o.optString("effect", "fx.boom"), o.optString("sticker", "st.none"),
             o.optBoolean("swears", false), o.optString("aura", "au.none"),
         )

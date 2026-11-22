@@ -16,13 +16,18 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import uniffi.meitian_core.Leaderboard
-import uniffi.meitian_core.OnlineEvent
+import uniffi.meitian_core.BattleMode
+import uniffi.meitian_core.QueueEvent
+import uniffi.meitian_core.modeInfo
+import uniffi.meitian_core.nicknameFrom
+import uniffi.meitian_core.onlineParseParty
+import uniffi.meitian_core.queueEvent
+import uniffi.meitian_core.queuePath
 import uniffi.meitian_core.OnlineException
 import uniffi.meitian_core.OnlineFriends
 import uniffi.meitian_core.OnlineInbox
 import uniffi.meitian_core.OnlineProfile
 import uniffi.meitian_core.onlineCheck
-import uniffi.meitian_core.onlineEvent
 import uniffi.meitian_core.onlineParseAccount
 import uniffi.meitian_core.onlineParseFriends
 import uniffi.meitian_core.onlineParseInbox
@@ -136,7 +141,7 @@ object Online {
             .put("level", app.currentLevel)
             .put("streak", app.streak)
             .put("xpTotal", app.xp)
-            .put("cosmetics", JSONObject().put("avatar", card.avatar).put("aura", card.aura ?: "au.none").put("fx", card.effect).put("title", card.title))
+            .put("cosmetics", JSONObject().put("aura", card.aura ?: "au.none").put("fx", card.effect).put("title", card.title))
         runCatching { profile = onlineParseProfile(request("PUT", "/v1/me", body)) }
     }
 
@@ -185,8 +190,20 @@ object Online {
     suspend fun accept(id: String) { request("POST", "/v1/friends/$id/accept") }
     suspend fun unfriend(id: String) { request("DELETE", "/v1/friends/$id") }
 
-    suspend fun challenge(friendId: String, mode: Mode): String =
-        JSONObject(request("POST", "/v1/challenge", JSONObject().put("friendId", friendId).put("mode", mode.name))).getString("room")
+    suspend fun challenge(friendId: String, mode: BattleMode): String =
+        JSONObject(request("POST", "/v1/challenge", JSONObject().put("friendId", friendId).put("mode", modeInfo(mode).wire))).getString("room")
+
+    // ----- parties -----
+
+    /** Opens a private party and returns its code. */
+    suspend fun createParty(swears: Boolean): String = onlineParseParty(request("POST", "/v1/party", JSONObject().put("swears", swears)))
+    suspend fun inviteToParty(code: String, friendId: String) { request("POST", "/v1/party/$code/invite", JSONObject().put("friendId", friendId)) }
+
+    /** Is the server reachable? (Battles need internet; lessons don't.) */
+    suspend fun reachable(): Boolean = runCatching { request("GET", "/", auth = false) }.isSuccess
+
+    /** Creates the online profile from the learner's name, if there isn't one yet. */
+    suspend fun ensureAccount(name: String) { if (!signedIn) register(nicknameFrom(name)) }
 
     suspend fun decline(room: String) { request("POST", "/v1/challenge/$room/decline") }
 
@@ -203,18 +220,18 @@ object Online {
     private fun wsUrl(path: String) = baseUrl.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + path
 
     /**
-     * Opens a socket and hands every message (as an [OnlineEvent]) and the close/failure to the callbacks on
-     * OkHttp's thread. `closed(byServer)` is false when the network dropped.
+     * Opens a socket and hands every message and the close/failure to the callbacks on OkHttp's thread.
+     * A refused upgrade closes with 4000 + the HTTP status, a lost connection with 1006.
      */
-    fun socket(path: String, onEvent: (OnlineEvent) -> Unit, closed: (code: Int) -> Unit): WebSocket {
+    fun socket(path: String, onText: (String) -> Unit, closed: (code: Int) -> Unit): WebSocket {
         val req = Request.Builder().url(wsUrl(path)).header("Authorization", "Bearer ${token ?: ""}").build()
         return http.newWebSocket(req, object : WebSocketListener() {
-            override fun onMessage(webSocket: WebSocket, text: String) = onEvent(onlineEvent(text))
+            override fun onMessage(webSocket: WebSocket, text: String) = onText(text)
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null); closed(code) }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = closed(response?.code?.let { 4000 + it } ?: 1006)
         })
     }
 
-    fun queue(mode: Mode, swears: Boolean, onEvent: (OnlineEvent) -> Unit, closed: (Int) -> Unit) =
-        socket("/v1/queue?mode=${mode.name}&swears=${if (swears) 1 else 0}", onEvent, closed)
+    fun queue(mode: BattleMode, group: Boolean, swears: Boolean, onEvent: (QueueEvent) -> Unit, closed: (Int) -> Unit) =
+        socket(queuePath(mode, group, swears), { onEvent(queueEvent(it)) }, closed)
 }

@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -319,10 +320,10 @@ fun SwearSprint(close: () -> Unit) {
 
     LaunchedEffect(phase) {
         when (phase) {
-            2 -> { for (n in 3 downTo 1) { count = n; Sfx.play(Sfx.Sound.Tick); delay(700) }; phase = 3 }
+            2 -> { for (n in 3 downTo 1) { count = n; Sfx.play(SoundId.TICK); delay(700) }; phase = 3 }
             3 -> {
                 score = 0; combo = 0; bestCombo = 0; correct = 0; answered = 0; newBest = false
-                endsAt = System.currentTimeMillis() + 60_000; next(); Sfx.play(Sfx.Sound.Go)
+                endsAt = System.currentTimeMillis() + 60_000; next(); Sfx.play(SoundId.GO)
                 while (System.currentTimeMillis() < endsAt) { now = System.currentTimeMillis(); delay(100) }
                 if (score > best) { best = score; prefs.edit().putInt("sprintBest", score).apply(); newBest = true }
                 app.addXP(correct * 3)
@@ -380,8 +381,8 @@ fun SwearSprint(close: () -> Unit) {
                             if (o.id == question.word.id) {
                                 correct++; combo++; bestCombo = maxOf(bestCombo, combo)
                                 score += 10 * sprintMultiplier(combo.toUInt()).toInt()
-                                Sfx.play(if (combo % 3 == 0) Sfx.Sound.Coin else Sfx.Sound.Correct)
-                            } else { combo = 0; reveal = true; Sfx.play(Sfx.Sound.Wrong) }
+                                Sfx.play(if (combo % 3 == 0) SoundId.COIN else SoundId.CORRECT)
+                            } else { combo = 0; reveal = true; Sfx.play(SoundId.WRONG) }
                         }
                     }
                     Spacer(Modifier.weight(1f))

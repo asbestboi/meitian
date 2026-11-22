@@ -1,5 +1,6 @@
 package com.asbestboi.meitian.ui
 
+import uniffi.meitian_core.SoundId
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +63,7 @@ fun QuestCard() {
                 Text("🪙 $price", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp,
                     color = if (affordable) Street.c.text else Street.c.secondary,
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(Sky.copy(alpha = if (affordable) 0.25f else 0.08f))
-                        .clickable(enabled = affordable) { if (app.buyFreeze()) Sfx.play(Sfx.Sound.Coin) }
+                        .clickable(enabled = affordable) { if (app.buyFreeze()) Sfx.play(SoundId.PURCHASE) }
                         .padding(horizontal = 12.dp, vertical = 7.dp))
             }
         }
@@ -89,7 +90,7 @@ private fun QuestRow(q: QuestStatus) {
         if (q.done && !claimed) {
             Text("+${q.quest.reward}", fontWeight = FontWeight.ExtraBold, color = Color.Black,
                 modifier = Modifier.clip(RoundedCornerShape(50)).background(Street.c.gold)
-                    .clickable { if (app.claimQuest(q) > 0) Sfx.play(Sfx.Sound.Coin) }.padding(horizontal = 12.dp, vertical = 8.dp))
+                    .clickable { if (app.claimQuest(q) > 0) Sfx.play(SoundId.COIN) }.padding(horizontal = 12.dp, vertical = 8.dp))
         } else {
             Text(if (claimed) "✓" else "${q.progress}/${q.quest.target}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
         }
