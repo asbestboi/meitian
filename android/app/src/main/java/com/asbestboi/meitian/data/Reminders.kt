@@ -49,6 +49,7 @@ object Snapshot {
 /** Daily reminder: an inexact repeating alarm that posts a notification unless today's practice is done. */
 object Reminders {
     private const val CHANNEL = "daily"
+    private const val SPIN_CHANNEL = "spin"
 
     private fun intent(c: Context) = PendingIntent.getBroadcast(
         c, 0, Intent(c, ReminderReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -65,6 +66,42 @@ object Reminders {
 
     fun cancel(c: Context) {
         c.getSystemService(AlarmManager::class.java).cancel(intent(c))
+    }
+
+    // ----- the next slot machine spin -----
+
+    private fun spinIntent(c: Context) = PendingIntent.getBroadcast(
+        c, 2, Intent(c, SpinReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun spinPrefs(c: Context) = c.getSharedPreferences("spin", Context.MODE_PRIVATE)
+
+    fun scheduleSpin(c: Context, at: Long) {
+        spinPrefs(c).edit().putLong("at", at).apply()
+        c.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC_WAKEUP, at, spinIntent(c))
+    }
+
+    fun cancelSpin(c: Context) {
+        spinPrefs(c).edit().remove("at").apply()
+        c.getSystemService(AlarmManager::class.java).cancel(spinIntent(c))
+    }
+
+    /** After a reboot. */
+    fun restoreSpin(c: Context) {
+        val at = spinPrefs(c).getLong("at", 0)
+        if (at > System.currentTimeMillis()) scheduleSpin(c, at)
+    }
+
+    fun notifySpin(c: Context) {
+        spinPrefs(c).edit().remove("at").apply()
+        if (!canNotify(c)) return
+        val nm = c.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(SPIN_CHANNEL, "Daily spin", NotificationManager.IMPORTANCE_DEFAULT))
+        val open = PendingIntent.getActivity(c, 3, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE)
+        nm.notify(2, android.app.Notification.Builder(c, SPIN_CHANNEL)
+            .setSmallIcon(R.drawable.ic_notify).setContentTitle("🎰 转一转！").setContentText("Your free daily spin is ready.")
+            .setContentIntent(open).setAutoCancel(true).build())
     }
 
     fun canNotify(c: Context) = Build.VERSION.SDK_INT < 33 ||
@@ -97,10 +134,15 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) = Reminders.notify(context)
 }
 
+class SpinReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) = Reminders.notifySpin(context)
+}
+
 /** Alarms don't survive a reboot: set the reminder again. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        Reminders.restoreSpin(context)
         val s = Snapshot.read(context) ?: return
         if (s.reminderOn) Reminders.schedule(context, s.hour, s.minute)
     }

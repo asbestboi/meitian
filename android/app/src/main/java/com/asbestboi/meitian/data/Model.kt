@@ -11,7 +11,13 @@ import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.meitian_core.CoreWord
-import uniffi.meitian_core.Friend
+import uniffi.meitian_core.Sentence
+import uniffi.meitian_core.SlotPrize
+import uniffi.meitian_core.SpinResult
+import uniffi.meitian_core.sentenceById
+import uniffi.meitian_core.spinSentenceXp
+import uniffi.meitian_core.spinSlots
+import uniffi.meitian_core.spinWaitMs
 import uniffi.meitian_core.LessonPath
 import uniffi.meitian_core.PathUnit
 import uniffi.meitian_core.Milestone
@@ -133,6 +139,7 @@ data class Card(val box: Int = 1, val dueDay: Long, val correct: Int = 0, val wr
     val mastered get() = srsIsMastered(box.toUByte())
 }
 
+/** A friend challenge done before 1.13 (they were replaced by the slot machine). Kept so old days still count. */
 data class ChallengeLog(val wordId: String, val friend: String, val mood: Int?, val note: String, val at: Long)
 
 data class DayLog(
@@ -141,7 +148,6 @@ data class DayLog(
     val reviewed: Int = 0,
     val xp: Int = 0,
     val challenge: ChallengeLog? = null,
-    /** The other friend type's challenge on the same day (bonus). */
     val bonus: ChallengeLog? = null,
     /** Extra lessons finished after the day's words. */
     val lessons: Int = 0,
@@ -157,7 +163,6 @@ data class DayLog(
     val allQuestsBonus: Boolean = false,
 ) {
     val active get() = learnedDone || reviewed > 0 || challenge != null
-    fun challengeFor(friend: String): ChallengeLog? = listOfNotNull(challenge, bonus).firstOrNull { it.friend == friend }
 }
 
 data class Profile(
@@ -166,7 +171,6 @@ data class Profile(
     val confirmedLevel: Int = 0,
     val dailyGoal: Int = 5,
     val onboarded: Boolean = false,
-    val friend: String = "chinese",
     /** Set once levels started needing a level-up test (older saves get their finished levels confirmed). */
     val levelTests: Boolean = true,
     /** Streak freezes held, and the days they covered (day numbers). */
@@ -182,6 +186,19 @@ data class Profile(
     val pathSentences: List<String> = emptyList(),
     /** Highest arena tier already revealed (0 = a save from before arenas). */
     val arenaSeen: Int = 1,
+    /** Notification when the next spin is ready. */
+    val spinReminder: Boolean = false,
+)
+
+/** The daily slot machine. */
+data class Slots(
+    val spins: Int = 0,
+    val lastSpin: Long = 0,
+    /** When the server allows the next spin (0 = it hasn't said). */
+    val serverNext: Long = 0,
+    /** The sentence of the day, until the next spin. */
+    val sentenceId: Long? = null,
+    val sentenceDone: Boolean = false,
 )
 
 data class Settings(
@@ -242,6 +259,8 @@ class AppState(private val context: Context) {
     var freezeNotice by mutableStateOf<Int?>(null)
     /** A short message shown over everything for a moment. */
     var toast by mutableStateOf<String?>(null)
+    var slots by mutableStateOf(Slots())
+        private set
     /** An arena the learner just reached, waiting for its reveal. */
     var arenaReveal by mutableStateOf<ArenaTheme?>(null)
 
@@ -352,6 +371,54 @@ class AppState(private val context: Context) {
     var today: DayLog
         get() = days[todayKey] ?: DayLog()
         set(v) { days[todayKey] = v }
+
+    // ----- daily slot machine -----
+
+    /** Milliseconds until the next spin (0 = ready). */
+    val spinWait: Long get() = spinWaitMs(slots.lastSpin, slots.serverNext, System.currentTimeMillis())
+
+    /** The pinned sentence, if its pack is loaded. */
+    val slotSentence: Sentence? get() = slots.sentenceId?.let { id -> ContentSync.generation; sentenceById(id.toULong(), knownList) }
+
+    /** Spins: the prize is decided, paid and saved at once. Null when it isn't time yet (the server has the last word). */
+    suspend fun spin(): SpinResult? {
+        refreshDay()
+        if (spinWait > 0) return null
+        val server = Online.spin(slots.spins)
+        val now = System.currentTimeMillis()
+        if (server != null && !server.allowed) {
+            slots = slots.copy(serverNext = now + server.waitMs, spins = maxOf(slots.spins, server.spins.toInt()))
+            save()
+            return null
+        }
+        val count = server?.spins?.toInt() ?: (slots.spins + 1)
+        val free = Catalog.all.filter { it.price > 0 && it.id !in arena.owned && (settings.swears || !it.swear) }.map { it.id }
+        val result = spinSlots(todayKey, arena.playerId, count.toUInt(), free, knownList)
+        when (val prize = result.prize) {
+            is SlotPrize.Coins -> arena = arena.copy(coins = arena.coins + prize.amount.toInt())
+            is SlotPrize.Cosmetic -> arena = arena.copy(owned = arena.owned + prize.id)
+            is SlotPrize.Sentence -> {}
+        }
+        slots = Slots(count, now, if (server != null) now + server.waitMs else 0, (result.prize as? SlotPrize.Sentence)?.sentence?.id?.toLong())
+        save()
+        if (profile.spinReminder) Reminders.scheduleSpin(context, now + spinWait)
+        return result
+    }
+
+    /** The sentence of the day is done: XP once. Returns what it paid. */
+    fun finishSlotSentence(): Int {
+        if (slots.sentenceDone) return 0
+        slots = slots.copy(sentenceDone = true)
+        val gained = spinSentenceXp().toInt()
+        addXP(gained)
+        return gained
+    }
+
+    fun setSpinReminder(on: Boolean) {
+        profile = profile.copy(spinReminder = on)
+        if (on && spinWait > 0) Reminders.scheduleSpin(context, System.currentTimeMillis() + spinWait) else Reminders.cancelSpin(context)
+        save()
+    }
 
     // ----- known and new words -----
 
@@ -553,24 +620,6 @@ class AppState(private val context: Context) {
         save()
     }
 
-    fun completeChallenge(word: CoreWord, friend: Friend, mood: Int?, note: String) {
-        val kind = if (friend == Friend.CHINESE) "chinese" else "nonChinese"
-        val log = ChallengeLog(word.id, kind, mood, note, System.currentTimeMillis())
-        val t = today
-        today = if (t.challenge == null || t.challenge.friend == kind) {
-            val gained = if (t.challenge == null) 50 else 0
-            xp += gained
-            t.copy(challenge = log, xp = t.xp + gained)
-        } else {
-            // second challenge of the day, with the other kind of friend
-            val gained = if (t.bonus == null) 30 else 0
-            xp += gained
-            t.copy(bonus = log, xp = t.xp + gained)
-        }
-        checkMilestones()
-        save()
-    }
-
     // ----- stats -----
 
     private val activeDays get() = days.filter { it.value.active }.keys.mapNotNull { dayNumber(it) }
@@ -654,8 +703,8 @@ class AppState(private val context: Context) {
     fun resetAll() {
         val id = arena.playerId
         profile = Profile(); settings = settings.copy(swears = false); arena = Arena(playerId = id); xp = 0
-        cards.clear(); days.clear(); seen = emptySet(); milestoneQueue.clear(); freezeNotice = null
-        Reminders.cancel(context)
+        cards.clear(); days.clear(); seen = emptySet(); slots = slots.copy(sentenceId = null, sentenceDone = false); milestoneQueue.clear(); freezeNotice = null
+        Reminders.cancel(context); Reminders.cancelSpin(context)
         // progress kept outside the save: story history (ui.StoryProgress) and the sprint best
         context.getSharedPreferences("stories", Context.MODE_PRIVATE).edit().clear().apply()
         prefs.edit().remove("sprintBest").apply()
@@ -669,13 +718,16 @@ class AppState(private val context: Context) {
         o.put("xp", xp)
         o.put("profile", JSONObject().apply {
             put("name", profile.name); put("claimed", profile.claimedLevel); put("confirmed", profile.confirmedLevel)
-            put("goal", profile.dailyGoal); put("onboarded", profile.onboarded); put("friend", profile.friend)
+            put("goal", profile.dailyGoal); put("onboarded", profile.onboarded)
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
             put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
             put("pathSt", JSONArray(profile.pathStories)); put("pathSe", JSONArray(profile.pathSentences))
-            put("arenaSeen", profile.arenaSeen)
+            put("arenaSeen", profile.arenaSeen); put("spinRem", profile.spinReminder)
         })
         o.put("seen", JSONArray(seen.toList()))
+        o.put("slots", JSONObject().apply {
+            put("n", slots.spins); put("last", slots.lastSpin); put("next", slots.serverNext); put("sid", slots.sentenceId ?: -1L); put("sdone", slots.sentenceDone)
+        })
         o.put("settings", JSONObject().apply {
             val s = settings
             put("pinyin", s.showPinyin); put("tones", s.toneColors); put("swears", s.swears); put("sounds", s.sounds)
@@ -755,12 +807,15 @@ class AppState(private val context: Context) {
             xp = o.optInt("xp")
             o.optJSONObject("profile")?.let { p ->
                 profile = Profile(p.optString("name"), p.optInt("claimed"), p.optInt("confirmed"), p.optInt("goal", 5),
-                    p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"),
+                    p.optBoolean("onboarded"), p.optBoolean("levelTests"),
                     p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList(),
                     p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0),
                     p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     p.optJSONArray("pathSe")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
-                    p.optInt("arenaSeen", 0))
+                    p.optInt("arenaSeen", 0), p.optBoolean("spinRem"))
+            }
+            o.optJSONObject("slots")?.let { x ->
+                slots = Slots(x.optInt("n"), x.optLong("last"), x.optLong("next"), x.optLong("sid", -1).takeIf { it >= 0 }, x.optBoolean("sdone"))
             }
             o.optJSONArray("seen")?.let { a -> seen = (0 until a.length()).map { a.getString(it) }.toSet() }
             o.optJSONObject("settings")?.let { s ->

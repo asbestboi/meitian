@@ -67,7 +67,6 @@ fun PracticeScreen() {
     val due = app.dueWords.size
     val weak = app.weakWords(12)
     val sentenceCount = ContentSync.stats.sentences.toInt()
-    val challengeDone = app.today.challenge != null
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { ScreenTitle("Practice") }
@@ -93,8 +92,6 @@ fun PracticeScreen() {
                     nav.show { PracticeSession(PracticeMode.Speaking) { nav.close() } } })
                 add(ModeTile("🔀", "speed mix", "everything, fast", learned.isNotEmpty()) {
                     nav.show { PracticeSession(PracticeMode.Mixed) { nav.close() } } })
-                add(ModeTile(if (challengeDone) "🏆" else "🗣️", "friend challenge", if (challengeDone) "done today ✓" else "use a word for real", true) {
-                    nav.show { Column(Modifier.fillMaxSize()) { Row(Modifier.padding(16.dp)) { CloseButton { nav.close() } }; ChallengeScreen() } } })
                 if (app.settings.swears) add(ModeTile("🤬", "swear sprint", "60 s rapid fire · 18+", true) {
                     nav.show { SwearSprint { nav.close() } } })
             }

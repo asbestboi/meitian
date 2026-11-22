@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
@@ -172,7 +173,12 @@ fun Tabs() {
                 ) {
                     val scale by androidx.compose.animation.core.animateFloatAsState(if (tab == i) 1.18f else 1f,
                         androidx.compose.animation.core.spring(dampingRatio = 0.5f), label = "tab")
-                    Text(icon, fontSize = 21.sp, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
+                    Box {
+                        Text(icon, fontSize = 21.sp, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
+                        // a free spin is waiting
+                        if (i == 0 && tab != 0 && LocalApp.current.spinWait <= 0) Box(Modifier.align(Alignment.TopEnd)
+                            .size(9.dp).background(Street.c.red, androidx.compose.foundation.shape.CircleShape))
+                    }
                     Text(label.lowercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         color = if (tab == i) Street.c.text else Street.c.secondary)
                 }

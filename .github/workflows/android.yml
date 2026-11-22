@@ -4,7 +4,7 @@ name: Android
 
 on:
   push:
-    branches: [main]
+    branches: [main, v1.13]
     tags: ["v*"]
   workflow_dispatch:
 

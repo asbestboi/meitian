@@ -35,7 +35,7 @@ struct StatsView: View {
                     }
                     HStack(spacing: 12) {
                         tile("\(store.cards.count)", "Words learned", "book.fill", Theme.jade)
-                        tile("\(store.challengeHistory.count)", "Challenges", "person.2.fill", Theme.plum)
+                        tile("\(store.slots.spins)", "Daily spins", "dice.fill", Theme.plum)
                     }
                     calendar
                     levels
@@ -395,6 +395,20 @@ struct StatsView: View {
         }
     }
 
+    private func updateSpinReminder(_ on: Bool) {
+        store.profile.spinReminder = on
+        store.save()
+        guard on else { Reminders.cancelSpin(); return }
+        Task { @MainActor in
+            if await Reminders.allow() {
+                Reminders.scheduleSpin(afterMs: store.spinWait)
+            } else {
+                store.profile.spinReminder = false
+                store.save()
+            }
+        }
+    }
+
     private var settings: some View {
         @Bindable var store = store
         return VStack(spacing: 0) {
@@ -425,6 +439,11 @@ struct StatsView: View {
                     .onChange(of: reminderTime) { _, _ in updateReminder(true) }
             }
             Divider().padding(.leading, 16)
+            Toggle(isOn: Binding(get: { store.profile.spinReminder ?? false }, set: { updateSpinReminder($0) })) {
+                Label("Spin reminder", systemImage: "bell.badge.fill")
+            }
+            .padding(16)
+            Divider().padding(.leading, 16)
             Button { retake = true } label: {
                 Label("Retake placement quiz", systemImage: "checkmark.seal.fill")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -451,7 +470,7 @@ struct StatsView: View {
                     arena.reset()
                 }
             } message: {
-                Text("Your words, streak, XP, challenges, story history, coins and cosmetics will be deleted. This can't be undone.")
+                Text("Your words, streak, XP, story history, coins and cosmetics will be deleted. This can't be undone.")
             }
         }
         .font(.rounded(.body))

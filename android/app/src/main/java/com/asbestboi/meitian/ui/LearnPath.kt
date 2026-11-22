@@ -131,6 +131,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         TopBar { nav.show { GoalsScreen { nav.close() } } }
+        SlotCard()
         Box(Modifier.weight(1f)) {
             ArenaBackground(app.arenaTheme, strength = 0.42f, scroll = { listState.firstVisibleItemIndex * 120f + listState.firstVisibleItemScrollOffset })
             LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {

@@ -68,6 +68,8 @@ struct MainTabs: View {
         TabView(selection: $tab) {
             TodayView(goToPractice: { tab = 1 })
                 .tabItem { Label("Learn", systemImage: "map.fill") }
+                // a free spin is waiting
+                .badge(tab != 0 && store.spinWait <= 0 ? Text("🎰") : nil)
                 .tag(0)
             PracticeView()
                 .tabItem { Label("Practice", systemImage: "rectangle.stack.fill") }

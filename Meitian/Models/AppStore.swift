@@ -21,19 +21,25 @@ struct CardState: Codable, Hashable {
     var mastered: Bool { srsIsMastered(boxLevel: UInt8(clamping: box)) }
 }
 
-enum FriendKind: String, Codable, CaseIterable, Identifiable {
-    case chinese, nonChinese
-    var id: String { rawValue }
-    var label: String { self == .chinese ? "Chinese friend" : "Non‑Chinese friend" }
-    var emoji: String { self == .chinese ? "🐼" : "🌍" }
-}
-
+/// A friend challenge done before 1.13 (they were replaced by the slot machine). Kept so old days still count.
 struct ChallengeLog: Codable, Hashable {
     var wordId: String
-    var friend: FriendKind
-    var mood: Int? // 0 = tough, 1 = good, 2 = amazing
+    var friend: String
+    var mood: Int?
     var note: String = ""
     var completedAt: Date
+}
+
+/// The daily slot machine.
+struct Slots: Codable, Hashable {
+    var spins = 0
+    /// Milliseconds since 1970; 0 = never.
+    var lastSpin: Int64 = 0
+    /// When the server allows the next spin (0 = it hasn't said).
+    var serverNext: Int64 = 0
+    /// The sentence of the day, until the next spin.
+    var sentenceId: UInt64?
+    var sentenceDone = false
 }
 
 struct DayLog: Codable, Hashable {
@@ -42,7 +48,6 @@ struct DayLog: Codable, Hashable {
     var reviewed = 0
     var xp = 0
     var challenge: ChallengeLog?
-    /// The other friend type's challenge on the same day (bonus).
     var bonusChallenge: ChallengeLog?
     /// Extra lessons finished after the day's words (optional so older saves still decode).
     var lessons: Int?
@@ -57,13 +62,6 @@ struct DayLog: Codable, Hashable {
     var claimed: [String]?
     var allQuestsBonus: Bool?
 
-    /// The day's challenge log for one friend type.
-    func challenge(for friend: FriendKind) -> ChallengeLog? {
-        if challenge?.friend == friend { return challenge }
-        if bonusChallenge?.friend == friend { return bonusChallenge }
-        return nil
-    }
-
     var active: Bool { learnedDone || reviewed > 0 || challenge != nil }
 }
 
@@ -76,7 +74,6 @@ struct Profile: Codable, Hashable {
     var reminderOn = false
     var reminderHour = 19
     var reminderMinute = 0
-    var preferredFriend: FriendKind = .chinese
     /// Set once levels started needing a level-up test (older saves get their finished levels confirmed).
     var levelTests: Bool? = true
     /// Streak freezes held, and the days they covered (day numbers).
@@ -88,6 +85,8 @@ struct Profile: Codable, Hashable {
     var pathSentences: [String]?
     /// Highest arena tier already revealed (nil: a save from before arenas).
     var arenaSeen: Int? = 1
+    /// Notification when the next spin is ready.
+    var spinReminder: Bool?
 }
 
 private struct SaveFile: Codable {
@@ -97,6 +96,7 @@ private struct SaveFile: Codable {
     var xp: Int
     /// Optional so older saves still decode.
     var seen: [String]?
+    var slots: Slots?
 }
 
 @Observable
@@ -107,6 +107,7 @@ final class AppStore {
     var xp = 0
     /// Words shown (tagged as new) but not learned yet.
     private(set) var seen: Set<String> = []
+    private(set) var slots = Slots()
     /// Milestones reached by the last XP gain, waiting to be celebrated.
     var milestoneQueue: [Milestone] = []
     /// Set when freezes just saved the streak (shown once on Today).
@@ -165,6 +166,7 @@ final class AppStore {
         days = file.days
         xp = file.xp
         seen = Set(file.seen ?? [])
+        slots = file.slots ?? Slots()
         migrateToLevelTests()
     }
 
@@ -181,7 +183,7 @@ final class AppStore {
     }
 
     func save() {
-        let file = SaveFile(profile: profile, cards: cards, days: days, xp: xp, seen: seen.sorted())
+        let file = SaveFile(profile: profile, cards: cards, days: days, xp: xp, seen: seen.sorted(), slots: slots)
         if let data = try? JSONEncoder().encode(file) {
             try? data.write(to: url, options: .atomic)
         }
@@ -193,6 +195,9 @@ final class AppStore {
         days = [:]
         xp = 0
         seen = []
+        slots.sentenceId = nil
+        slots.sentenceDone = false
+        Reminders.cancelSpin()
         milestoneQueue.removeAll()
         freezeNotice = nil
         // progress kept outside the save file
@@ -285,6 +290,55 @@ final class AppStore {
     var today: DayLog {
         get { days[todayKey] ?? DayLog() }
         set { days[todayKey] = newValue }
+    }
+
+    // MARK: daily slot machine
+
+    private static var nowMs: Int64 { Int64(Date.now.timeIntervalSince1970 * 1000) }
+
+    /// Milliseconds until the next spin (0 = ready).
+    var spinWait: Int64 { spinWaitMs(lastSpinMs: slots.lastSpin, serverNextMs: slots.serverNext, nowMs: Self.nowMs) }
+
+    /// The pinned sentence, if its pack is loaded.
+    var slotSentence: Sentence? { slots.sentenceId.flatMap { sentenceById(id: $0, knownWordIds: known) } }
+
+    /// Spins: the prize is decided, paid and saved at once. Nil when it isn't time yet (the server has the last word).
+    @MainActor
+    func spin(arena: ArenaStore) async -> SpinResult? {
+        refreshDay()
+        guard spinWait <= 0 else { return nil }
+        let server = await OnlineService.shared.spin(count: slots.spins)
+        let now = Self.nowMs
+        if let server, !server.allowed {
+            slots.serverNext = now + server.waitMs
+            slots.spins = max(slots.spins, Int(server.spins))
+            save()
+            return nil
+        }
+        let count = server.map { Int($0.spins) } ?? slots.spins + 1
+        let free = Catalog.all.filter { $0.price > 0 && !arena.owned.contains($0.id) && (Prefs.swearsOn || !$0.swear) }.map(\.id)
+        let result = spinSlots(dayKey: todayKey, playerId: arena.playerId, spinCount: UInt32(clamping: count),
+                               cosmeticIds: free, knownWordIds: known)
+        var sentence: UInt64?
+        switch result.prize {
+        case .coins(let amount, _): arena.coins += Int(amount)
+        case .cosmetic(let id): arena.owned.insert(id)
+        case .sentence(let s): sentence = s.id
+        }
+        arena.save()
+        slots = Slots(spins: count, lastSpin: now, serverNext: server.map { now + $0.waitMs } ?? 0, sentenceId: sentence)
+        save()
+        if profile.spinReminder == true { Reminders.scheduleSpin(afterMs: spinWait) }
+        return result
+    }
+
+    /// The sentence of the day is done: XP once. Returns what it paid.
+    func finishSlotSentence() -> Int {
+        guard !slots.sentenceDone else { return 0 }
+        slots.sentenceDone = true
+        let gained = Int(spinSentenceXp())
+        addXP(gained)
+        return gained
     }
 
     // MARK: known and new words
@@ -540,37 +594,6 @@ final class AppStore {
             checkMilestones()
             save()
         }
-    }
-
-    // MARK: challenge
-
-    func completeChallenge(word: Word, friend: FriendKind, mood: Int?, note: String) {
-        var t = today
-        let log = ChallengeLog(wordId: word.id, friend: friend, mood: mood, note: note, completedAt: .now)
-        if t.challenge == nil || t.challenge?.friend == friend {
-            if t.challenge == nil { t.xp += 50; xp += 50 }
-            t.challenge = log
-        } else {
-            // second challenge of the day, with the other kind of friend
-            if t.bonusChallenge == nil { t.xp += 30; xp += 30 }
-            t.bonusChallenge = log
-        }
-        today = t
-        checkMilestones()
-        save()
-    }
-
-    struct DatedChallenge: Identifiable {
-        let day: String
-        let log: ChallengeLog
-        var id: String { "\(day)-\(log.friend.rawValue)" }
-    }
-
-    var challengeHistory: [DatedChallenge] {
-        days.flatMap { entry in
-            [entry.value.challenge, entry.value.bonusChallenge].compactMap { $0 }.map { DatedChallenge(day: entry.key, log: $0) }
-        }
-        .sorted { ($0.day, $0.log.completedAt) > ($1.day, $1.log.completedAt) }
     }
 
     // MARK: stats

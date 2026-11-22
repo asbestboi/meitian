@@ -1,26 +1,5 @@
 import Foundation
 
-/// A daily speaking challenge built around one word and one friend.
-struct Challenge {
-    let word: Word
-    let friend: FriendKind
-    let title: String
-    let mission: String
-    let steps: [String]
-    let bonus: String
-
-    /// Stable number for a given day, so the challenge doesn't reshuffle on every launch.
-    static func seed(_ key: String) -> Int { Int(daySeed(dayKey: key)) }
-
-    /// Built by the shared Rust core, so both platforms give the same challenge on the same day.
-    static func make(dayKey: String, words: [Word], friend: FriendKind) -> Challenge? {
-        guard let c = dailyChallenge(dayKey: dayKey, words: words.map(\.core),
-                                     friend: friend == .chinese ? .chinese : .nonChinese) else { return nil }
-        return Challenge(word: Word(c.word), friend: friend, title: c.title, mission: c.mission,
-                         steps: c.steps, bonus: c.bonus)
-    }
-}
-
 /// One multiple-choice question.
 struct QuizQuestion: Identifiable {
     enum Kind { case hanziToMeaning, meaningToHanzi, listenToHanzi, speak }

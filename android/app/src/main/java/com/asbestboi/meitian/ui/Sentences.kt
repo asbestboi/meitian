@@ -381,7 +381,7 @@ private fun ExerciseView(ex: Exercise, onResult: (Boolean) -> Unit, onNext: () -
 }
 
 @Composable
-private fun Tile(text: String, used: Boolean = false, isNew: Boolean = false, onClick: () -> Unit) {
+internal fun Tile(text: String, used: Boolean = false, isNew: Boolean = false, onClick: () -> Unit) {
     Text(
         text, fontSize = 22.sp, color = if (used) Color.Transparent else Street.c.text,
         modifier = Modifier.clip(RoundedCornerShape(12.dp))

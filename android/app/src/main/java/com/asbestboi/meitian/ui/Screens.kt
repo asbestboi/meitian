@@ -50,9 +50,6 @@ import com.asbestboi.meitian.data.Question
 import com.asbestboi.meitian.data.Words
 import com.asbestboi.meitian.data.lvl
 import uniffi.meitian_core.CoreWord
-import uniffi.meitian_core.Friend
-import uniffi.meitian_core.dailyChallenge
-import uniffi.meitian_core.phraseOfTheDay
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -117,94 +114,6 @@ fun LearnSession(words: List<CoreWord>, close: () -> Unit) {
     }
 }
 
-// ---------- Challenge ----------
-
-@Composable
-fun ChallengeScreen() {
-    val app = LocalApp.current
-    val friendIsChinese = app.profile.friend == "chinese"
-    val pool = app.today.newWordIds.mapNotNull { Words[it] }.ifEmpty { app.learnedWords }
-    val c = dailyChallenge(app.todayKey, pool, if (friendIsChinese) Friend.CHINESE else Friend.NON_CHINESE)
-    val checked = remember(app.todayKey, friendIsChinese) { mutableStateListOf<Int>() }
-    var mood by remember { mutableStateOf<Int?>(null) }
-    var note by remember { mutableStateOf("") }
-    var confetti by remember { mutableIntStateOf(0) }
-    val log = app.today.challengeFor(if (friendIsChinese) "chinese" else "nonChinese")
-
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            ScreenTitle("Challenge")
-            Row(Modifier.fillMaxWidth().card().padding(5.dp)) {
-                listOf(true to "🐼 Chinese friend", false to "🌍 Non‑Chinese friend").forEach { (chinese, label) ->
-                    val on = friendIsChinese == chinese
-                    Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) Street.c.red else Color.Transparent)
-                        .clickable { app.profile = app.profile.copy(friend = if (chinese) "chinese" else "nonChinese"); app.save() }
-                        .padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                        Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (on) Color.White else Street.c.text)
-                    }
-                }
-            }
-            if (c == null) {
-                Text("Learn today's words first, then come back for your challenge.", color = Street.c.secondary)
-            } else if (log != null) {
-                Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("🏆", fontSize = 80.sp)
-                    Text("challenge complete!", style = street(30.sp), color = Street.c.text)
-                    Text("You used ${Words[log.wordId]?.hanzi ?: c.word.hanzi} with a friend today. 你真棒！(nǐ zhēn bàng)", color = Street.c.secondary, textAlign = TextAlign.Center)
-                    if (log.note.isNotBlank()) Text("“${log.note}”", modifier = Modifier.fillMaxWidth().card().padding(14.dp), color = Street.c.text)
-                    Text("New challenge tomorrow. 明天见！(míngtiān jiàn)", fontWeight = FontWeight.Bold, color = Street.c.text)
-                }
-            } else {
-                Row(Modifier.fillMaxWidth().block(Street.level(c.word.lvl)).padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("today's word", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
-                        Text(c.word.hanzi, fontSize = 50.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("${c.word.pinyin} · ${c.word.meaning}", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                    SpeakButton(c.word.hanzi, 54.dp, Color.White)
-                }
-                Pill(c.title, Street.c.red)
-                Text(c.mission, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Street.c.text)
-                Column(Modifier.fillMaxWidth().card().padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("your sentence", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Street.c.secondary, modifier = Modifier.weight(1f))
-                        Text("🐢 Slow", fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.clickable { com.asbestboi.meitian.data.Speaker.say(c.word.example, true) }.padding(6.dp))
-                        SpeakButton(c.word.example, 36.dp, Street.c.jade)
-                    }
-                    RubyText(c.word.example, c.word.examplePinyin, 25.sp, FontWeight.SemiBold, alwaysShow = true)
-                    Text(c.word.exampleMeaning, color = Street.c.secondary)
-                }
-                Column(Modifier.fillMaxWidth().card().padding(8.dp)) {
-                    c.steps.forEachIndexed { i, s ->
-                        Row(Modifier.fillMaxWidth().clickable { if (i in checked) checked.remove(i) else checked.add(i) }.padding(10.dp)) {
-                            Text(if (i in checked) "✅" else "⬜", fontSize = 20.sp); HSpacer(10.dp)
-                            Text(s, color = if (i in checked) Street.c.secondary else Street.c.text, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-                Text("⭐ ${c.bonus}", color = Street.c.gold, fontWeight = FontWeight.Bold)
-                if (checked.size == c.steps.size) {
-                    Text("how did it go?", style = street(20.sp), color = Street.c.text)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        listOf("😅" to "Tough", "🙂" to "Good", "🤩" to "Amazing").forEachIndexed { i, (e, l) ->
-                            Column(Modifier.weight(1f).streetCard(if (mood == i) Street.c.gold.copy(alpha = 0.3f) else Street.c.card, Street.c.ink, shadow = 3.dp)
-                                .clickable { mood = i }.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(e, fontSize = 30.sp); Text(l, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Street.c.text)
-                            }
-                        }
-                    }
-                    OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), placeholder = { Text("What did they say? Anything new?") })
-                    BigButton("I did it! +50 XP", brush = Street.gold()) {
-                        app.completeChallenge(c.word, if (friendIsChinese) Friend.CHINESE else Friend.NON_CHINESE, mood, note); confetti++
-                    }
-                } else Text("Tick off the steps as you go. 你可以的！(nǐ kěyǐ de)", fontSize = 13.sp, color = Street.c.secondary)
-            }
-            Gap(24.dp)
-        }
-        Confetti(confetti)
-    }
-}
-
 // ---------- Progress & settings ----------
 
 @Composable
@@ -220,6 +129,8 @@ fun ProgressScreen() {
     // Android 13+: ask before the first reminder can show
     val notifyPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setReminder(granted) }
+    val spinPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setSpinReminder(granted) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (!settingsOpen) {
@@ -249,7 +160,7 @@ fun ProgressScreen() {
             StatBox("${app.streak}", "Day streak", Street.c.red, Modifier.weight(1f)); StatBox("${app.bestStreak}", "Best streak", Street.c.gold, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatBox("${app.cards.size}", "Words learned", Street.c.jade, Modifier.weight(1f)); StatBox("${app.days.values.count { it.challenge != null }}", "Challenges", Street.c.plum, Modifier.weight(1f))
+            StatBox("${app.cards.size}", "Words learned", Street.c.jade, Modifier.weight(1f)); StatBox("${app.slots.spins}", "Spins", Street.c.plum, Modifier.weight(1f))
         }
         // activity calendar (15 weeks)
         Column(Modifier.fillMaxWidth().card().padding(14.dp)) {
@@ -349,6 +260,10 @@ fun ProgressScreen() {
                         android.app.TimePickerDialog(context, { _, h, m -> app.setReminder(true, h, m) },
                             app.profile.reminderHour, app.profile.reminderMinute, true).show()
                     })
+            }
+            ToggleRow("Spin reminder", "A nudge when your free daily spin is ready", app.profile.spinReminder) { on ->
+                if (on && !com.asbestboi.meitian.data.Reminders.canNotify(context) && android.os.Build.VERSION.SDK_INT >= 33) spinPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                else app.setSpinReminder(on)
             }
             Text("✅ Retake placement quiz", fontWeight = FontWeight.Bold, color = Street.c.text,
                 modifier = Modifier.clickable { nav.show { OnboardingScreen(retakeOnly = true) { nav.close() } } })

@@ -38,11 +38,11 @@ enum Reminders {
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         guard granted else { return false }
-        center.removeAllPendingNotificationRequests()
+        removeDaily()
 
         let lines = [
             ("你好\(name.isEmpty ? "" : "，\(name)")! 👋", "Your new words are waiting. Five minutes, let's go!"),
-            ("今天的挑战 🎯", "Today's friend challenge is ready. Who will you talk to?"),
+            ("今天的任务 🎯", "Today's quests are ready. Grab some coins!"),
             ("加油！🔥", "Keep your streak alive. Your words miss you."),
         ]
         for (i, line) in lines.enumerated() {
@@ -65,7 +65,30 @@ enum Reminders {
         return true
     }
 
-    static func cancel() {
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+    private static func removeDaily() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: (1...7).map { "daily-\($0)" })
+    }
+
+    static func cancel() { removeDaily() }
+
+    // MARK: the next slot machine spin
+
+    /// Asks for permission if needed; returns whether notifications are allowed.
+    static func allow() async -> Bool {
+        (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+    }
+
+    static func scheduleSpin(afterMs: Int64) {
+        guard afterMs > 1000 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "🎰 转一转！"
+        content.body = "Your free daily spin is ready."
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Double(afterMs) / 1000, repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "spin", content: content, trigger: trigger))
+    }
+
+    static func cancelSpin() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["spin"])
     }
 }

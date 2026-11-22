@@ -95,7 +95,7 @@ struct OnboardingFlow: View {
             Spacer()
             HStack(spacing: 18) {
                 feature("sparkles", "Daily words", Theme.gold)
-                feature("person.2.fill", "Friend challenges", Theme.jade)
+                feature("flag.2.crossed.fill", "Battles", Theme.jade)
                 feature("flame.fill", "Streaks", Theme.red)
             }
             .opacity(wave ? 1 : 0)

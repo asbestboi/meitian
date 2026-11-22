@@ -10,7 +10,6 @@ struct PracticeView: View {
     @State private var selected: Word?
     @State private var sprint = false
     @State private var sentences = false
-    @State private var challenge = false
     @State private var showLibrary = false
     @AppStorage(Prefs.swears) private var swears = false
     @AppStorage(Prefs.listening) private var listeningOn = true
@@ -47,10 +46,6 @@ struct PracticeView: View {
         .fullScreenCover(isPresented: $sprint) {
             SwearSprintView().environment(store)
         }
-        .sheet(isPresented: $challenge) {
-            ChallengeView().environment(store)
-                .presentationCornerRadius(32)
-        }
         .onChange(of: swears) { _, on in if !on && levelFilter == WordBank.streetLevel { levelFilter = 0 } }
         .sheet(item: $selected) { w in
             WordDetail(word: w)
@@ -72,7 +67,6 @@ struct PracticeView: View {
         let hasWords = !store.learnedWords.isEmpty
         let weak = store.weakWords(limit: 12)
         let sentenceCount = Int(content.stats.sentences)
-        let challengeDone = store.today.challenge != nil
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             modeTile("⚡", "weak words", weak.count >= 4 ? "\(weak.count) to fix" : "none yet", enabled: weak.count >= 4) {
                 session = .weak
@@ -83,8 +77,6 @@ struct PracticeView: View {
             modeTile("🎧", "listening", "10 questions", enabled: hasWords && listeningOn) { session = .listening }
             modeTile("🎙️", "speaking", "10 questions", enabled: hasWords && speakingOn) { session = .speaking }
             modeTile("🔀", "speed mix", "everything, fast", enabled: hasWords) { session = .mixed }
-            modeTile(challengeDone ? "🏆" : store.profile.preferredFriend.emoji, "friend challenge",
-                     challengeDone ? "done today ✓" : "use a word for real", enabled: true) { challenge = true }
             if swears {
                 modeTile("🤬", "swear sprint", "60 s rapid fire · 18+", enabled: true) { sprint = true }
             }

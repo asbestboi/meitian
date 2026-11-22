@@ -52,7 +52,12 @@ struct TodayView: View {
                 }
             }
             .background(ArenaBackground(theme: store.arenaTheme, strength: 0.42, scroll: scroll).ignoresSafeArea())
-            .safeAreaInset(edge: .top, spacing: 0) { topBar }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    topBar
+                    SlotCard().background(Theme.background.opacity(0.94))
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) { startBar(next) }
             .toolbar(.hidden, for: .navigationBar)
         }
