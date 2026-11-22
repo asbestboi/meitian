@@ -1,6 +1,6 @@
 //! Graded illustrated stories (Duolingo-style), downloaded as the "stories" content pack.
 
-use crate::wechat::render_wechat;
+use crate::wechat::keep_wechat;
 use std::sync::{OnceLock, RwLock};
 
 use serde::Deserialize;
@@ -188,8 +188,8 @@ fn tokens(t: Vec<(String, String)>, zh: &str, py: &str) -> Vec<Token> {
     } else {
         t.into_iter()
             .map(|(text, pinyin)| Token {
-                // WeChat emoji codes ("[捂脸]") become the emoji itself
-                text: render_wechat(&text),
+                // WeChat emoji codes ("[捂脸]") stay: the apps draw them
+                text: keep_wechat(&text),
                 pinyin,
                 word_id: None,
                 is_new: false,
@@ -202,10 +202,10 @@ fn line(l: RawLine) -> StoryLine {
     StoryLine {
         speaker: l.who,
         image: l.image.map(image),
-        tokens: tokens(l.t, &render_wechat(&l.zh), &render_wechat(&l.py)),
-        zh: render_wechat(&l.zh),
-        pinyin: render_wechat(&l.py),
-        en: render_wechat(&l.en),
+        tokens: tokens(l.t, &keep_wechat(&l.zh), &keep_wechat(&l.py)),
+        zh: keep_wechat(&l.zh),
+        pinyin: keep_wechat(&l.py),
+        en: keep_wechat(&l.en),
     }
 }
 
@@ -270,10 +270,10 @@ pub(crate) fn load_stories(json: &str) -> Result<u32, ContentError> {
                                 .unwrap_or_default()
                                 .into_iter()
                                 .map(|o| ReplyOption {
-                                    tokens: tokens(o.t, &render_wechat(&o.zh), &render_wechat(&o.py)),
-                                    zh: render_wechat(&o.zh),
-                                    pinyin: render_wechat(&o.py),
-                                    en: render_wechat(&o.en),
+                                    tokens: tokens(o.t, &keep_wechat(&o.zh), &keep_wechat(&o.py)),
+                                    zh: keep_wechat(&o.zh),
+                                    pinyin: keep_wechat(&o.py),
+                                    en: keep_wechat(&o.en),
                                     correct: o.ok,
                                     reaction: o.then.map(line),
                                 })
@@ -297,11 +297,13 @@ pub(crate) fn load_stories(json: &str) -> Result<u32, ContentError> {
     stories.sort_by(|a, b| (a.level, &a.id).cmp(&(b.level, &b.id)));
     let n = stories.len() as u32;
     *store().write().unwrap_or_else(|e| e.into_inner()) = stories;
+    VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(n)
 }
 
 pub(crate) fn clear_stories() {
     store().write().unwrap_or_else(|e| e.into_inner()).clear();
+    VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub(crate) fn story_count() -> u32 {
@@ -500,6 +502,54 @@ fn lesson_fit(story: &Story, known: &IdSet, recent: &IdSet, upcoming: &IdSet) ->
         })
         .sum()
 }
+
+/// A story to read again when every unlocked one of both kinds has been read: the one read longest ago. `read` is
+/// ordered, oldest first. `None` when nothing is unlocked.
+#[uniffi::export]
+pub fn reread_story(day_key: String, read: Vec<String>, known_word_ids: Vec<String>) -> Option<Story> {
+    shelf(&day_key, &id_set(known_word_ids))
+        .into_iter()
+        .filter(|s| s.unlocked)
+        .map(|s| s.story)
+        .min_by_key(|s| read.iter().position(|r| *r == s.id).map_or(0, |i| i + 1))
+}
+
+/// For the lesson planner: what every undated story needs of `level` (its unlearned words, as ids, in reading order)
+/// for a learner who knows `known`, and how many words of harder levels it has.
+pub(crate) fn story_needs(level: u8, known: &IdSet) -> Vec<(String, Vec<String>, usize)> {
+    let b = bank();
+    let all = store().read().unwrap_or_else(|e| e.into_inner());
+    all.iter()
+        .filter(|s| s.date.is_empty())
+        .map(|s| {
+            let mut seen = std::collections::HashSet::new();
+            let (mut need, mut harder) = (vec![], 0);
+            for t in tokens_of(s) {
+                let mut t = t.clone();
+                t.word_id = if t.pinyin.is_empty() { None } else { b.by_hanzi.get(&t.text).cloned() };
+                if !is_new(&t, known) {
+                    continue;
+                }
+                let id = t.word_id.unwrap_or_default();
+                if seen.insert(id.clone()) {
+                    if b.by_id.get(&id).is_some_and(|w| w.level == level) {
+                        need.push(id);
+                    } else {
+                        harder += 1;
+                    }
+                }
+            }
+            (s.id.clone(), need, harder)
+        })
+        .collect()
+}
+
+/// Bumped whenever a story pack is loaded (the planner caches what it computed from it).
+pub(crate) fn story_version() -> u64 {
+    VERSION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Mix the order of every reply choice with a fresh seed (call it each time a story opens), so the
 /// fitting reply moves around between reads and is never in the same spot twice in a row.

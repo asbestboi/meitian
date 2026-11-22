@@ -270,21 +270,37 @@ fn synth_hit(key: &str) -> Samples {
     }
 }
 
-/// A little headroom, clipped, 16-bit little-endian.
-fn pcm(s: Samples) -> Vec<u8> {
-    s.into_iter().flat_map(|v| (((v * 0.7).clamp(-1.0, 1.0) * i16::MAX as f64).round() as i16).to_le_bytes()).collect()
+/// How loud a sound should feel: interface clicks stay softer than rewards and hits.
+fn loudness(id: SoundId) -> f64 {
+    use SoundId::*;
+    match id {
+        Tap | TabSwitch | SheetOpen | SheetClose | ReelTick => 0.45,
+        ToggleOn | ToggleOff | Swoosh | Tick | MicOn | MicOff | NewWord => 0.65,
+        _ => 1.0,
+    }
+}
+
+/// Brings a sound up to the level of the spoken voice: the peak to full scale, then a soft limiter lifts the quiet
+/// parts (text-to-speech is heavily compressed, plain tones would sound faint next to it). 16-bit little-endian.
+fn pcm(s: Samples, level: f64) -> Vec<u8> {
+    const DRIVE: f64 = 2.6;
+    let peak = s.iter().fold(1e-9f64, |m, v| m.max(v.abs()));
+    let top = DRIVE.tanh();
+    s.into_iter()
+        .flat_map(|v| ((((v / peak * DRIVE).tanh() / top * 0.97 * level) * i16::MAX as f64).round() as i16).to_le_bytes())
+        .collect()
 }
 
 /// 16-bit little-endian mono PCM at 44.1 kHz.
 #[uniffi::export]
 pub fn sound_pcm(id: SoundId) -> Vec<u8> {
-    pcm(synth(id))
+    pcm(synth(id), loudness(id))
 }
 
 /// The sound of a hit effect cosmetic, by its `EffectSpec.sound`.
 #[uniffi::export]
 pub fn hit_sound_pcm(key: String) -> Vec<u8> {
-    pcm(synth_hit(&key))
+    pcm(synth_hit(&key), 1.0)
 }
 
 #[uniffi::export]
@@ -309,18 +325,34 @@ mod tests {
             let b = sound_pcm(id);
             let secs = b.len() as f64 / 2.0 / SAMPLE_RATE as f64;
             assert!(b.len() % 2 == 0 && (0.02..2.5).contains(&secs), "{id:?} lasts {secs}");
-            assert!(loud(&b) > 1000, "{id:?} can be heard");
+            assert!(loud(&b) > 13_000, "{id:?} can be heard");
             assert_eq!(b, sound_pcm(id), "{id:?} is always the same");
         }
+    }
+
+    /// Loudness of the loudest tenth of a second, 0–1.
+    fn rms(bytes: &[u8]) -> f64 {
+        let v: Vec<f64> = bytes.chunks(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f64 / 32768.0).collect();
+        v.chunks((SAMPLE_RATE / 10) as usize).map(|c| (c.iter().map(|x| x * x).sum::<f64>() / c.len() as f64).sqrt()).fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn as_loud_as_speech() {
+        // recorded speech sits around 0.1–0.2
+        use SoundId::*;
+        for id in [Correct, Wrong, HeartLost, Coin, Win, Lose, LevelUp, Jackpot, Countdown, Crit, Ko, Victory] {
+            assert!(rms(&sound_pcm(id)) > 0.18, "{id:?}: {}", rms(&sound_pcm(id)));
+        }
+        assert!(rms(&sound_pcm(Tap)) < rms(&sound_pcm(Correct)), "taps stay in the background");
     }
 
     #[test]
     fn every_hit_effect_sounds_different() {
         let mut seen = std::collections::HashSet::new();
         for id in crate::effects::HIT_EFFECTS {
-            let key = crate::effects::effect_spec(id.to_string()).sound;
+            let key = crate::effects::hit_info(id.to_string()).sound;
             let b = hit_sound_pcm(key.clone());
-            assert!(loud(&b) > 1000, "{id}");
+            assert!(loud(&b) > 30_000, "{id}");
             assert!(seen.insert(b), "{id} shares its sound ({key})");
         }
         assert_eq!(hit_sound_pcm("nope".into()), hit_sound_pcm("boom".into()));
