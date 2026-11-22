@@ -188,6 +188,8 @@ data class Profile(
     val arenaSeen: Int = 1,
     /** Notification when the next spin is ready. */
     val spinReminder: Boolean = false,
+    /** Notification when somebody invites the learner to a battle. */
+    val inviteNotify: Boolean = true,
 )
 
 /** The daily slot machine. */
@@ -444,9 +446,15 @@ class AppState(private val context: Context) {
         save()
     }
 
+    /** The level's words in the order they're taught: learned ones first, then the order that opens a story per unit. */
+    val pathWords: List<CoreWord> by derivedStateOf {
+        ContentSync.generation
+        uniffi.meitian_core.pathWords(currentLevel.coerceIn(0, 255).toUByte(), profile.dailyGoal.coerceAtLeast(1).toUInt(), cards.keys.toList()).mapNotNull { Words[it] }
+    }
+
     /** What the next lesson will teach (stories like to preview it). */
     val upcomingIds: List<String>
-        get() = Words.level(currentLevel).filter { cards[it.id] == null }.take(profile.dailyGoal).map { it.id }
+        get() = pathWords.filter { cards[it.id] == null }.take(profile.dailyGoal).map { it.id }
 
     // ----- words of the day -----
 
@@ -481,7 +489,7 @@ class AppState(private val context: Context) {
     fun todaysWords(): List<CoreWord> {
         if (today.newWordIds.isNotEmpty()) return today.newWordIds.mapNotNull { Words[it] }
         // only from the current level: the next one opens with the level-up test
-        val picked = Words.level(currentLevel).filter { cards[it.id] == null }.take(profile.dailyGoal).toMutableList()
+        val picked = pathWords.filter { cards[it.id] == null }.take(profile.dailyGoal).toMutableList()
         if (settings.swears) Words.swears.firstOrNull { cards[it.id] == null }?.let { picked += it }
         if (picked.isEmpty()) picked += cards.entries.sortedBy { it.value.box }.take(profile.dailyGoal).mapNotNull { Words[it.key] }
         today = today.copy(newWordIds = picked.map { it.id })
@@ -493,7 +501,7 @@ class AppState(private val context: Context) {
      *  Empty until today's words are learned, or when everything has been learned. */
     fun nextLessonWords(): List<CoreWord> {
         if (!today.learnedDone) return emptyList()
-        return Words.level(currentLevel).filter { cards[it.id] == null }.take(profile.dailyGoal)
+        return pathWords.filter { cards[it.id] == null }.take(profile.dailyGoal)
     }
 
     /** Where the learner is on their current HSK level's path of lessons. */
@@ -538,7 +546,7 @@ class AppState(private val context: Context) {
     fun unitWordIds(unit: Int? = null): List<String> {
         val size = profile.dailyGoal.coerceAtLeast(1)
         val perUnit = uniffi.meitian_core.pathUnitSize().toInt()
-        val all = Words.level(currentLevel)
+        val all = pathWords
         val doneLessons = learnedCount(currentLevel) / size
         val u = unit ?: maxOf(1, (doneLessons + perUnit - 1) / perUnit)
         val start = (u - 1) * perUnit * size
@@ -548,7 +556,7 @@ class AppState(private val context: Context) {
 
     fun lessonWords(lesson: Int): List<CoreWord> {
         val size = profile.dailyGoal.coerceAtLeast(1)
-        val all = Words.level(currentLevel)
+        val all = pathWords
         val start = (lesson - 1) * size
         if (start < 0 || start >= all.size) return emptyList()
         return all.subList(start, minOf(start + size, all.size))
@@ -722,7 +730,7 @@ class AppState(private val context: Context) {
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
             put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
             put("pathSt", JSONArray(profile.pathStories)); put("pathSe", JSONArray(profile.pathSentences))
-            put("arenaSeen", profile.arenaSeen); put("spinRem", profile.spinReminder)
+            put("arenaSeen", profile.arenaSeen); put("spinRem", profile.spinReminder); put("inv", profile.inviteNotify)
         })
         o.put("seen", JSONArray(seen.toList()))
         o.put("slots", JSONObject().apply {
@@ -812,7 +820,7 @@ class AppState(private val context: Context) {
                     p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0),
                     p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     p.optJSONArray("pathSe")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
-                    p.optInt("arenaSeen", 0), p.optBoolean("spinRem"))
+                    p.optInt("arenaSeen", 0), p.optBoolean("spinRem"), p.optBoolean("inv", true))
             }
             o.optJSONObject("slots")?.let { x ->
                 slots = Slots(x.optInt("n"), x.optLong("last"), x.optLong("next"), x.optLong("sid", -1).takeIf { it >= 0 }, x.optBoolean("sdone"))

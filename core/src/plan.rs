@@ -9,6 +9,9 @@ use crate::stories::{story_needs, story_version, STORY_MAX_NEW_WORDS};
 use crate::vocab::{id_set, IdSet};
 use crate::words::bank;
 
+/// How far down the list of common words a unit may look for words to fill it up with.
+const FILL_WINDOW: usize = 150;
+
 /// The whole level in teaching order, as if nothing of it was learned yet.
 fn plan(level: u8, unit: usize) -> Vec<String> {
     let (base, below): (Vec<String>, IdSet) = {
@@ -46,14 +49,13 @@ fn plan(level: u8, unit: usize) -> Vec<String> {
             words = missing;
         }
         taught.extend(words.iter().cloned());
-        for w in &base {
-            if words.len() >= room {
-                break;
-            }
-            if taught.insert(w.clone()) {
-                words.push(w.clone());
-            }
-        }
+        // fill up with common words, but leave the ones other stories wait for to those stories' own units
+        let wanted: HashSet<&String> = stories.iter().flat_map(|(_, need, _)| need).collect();
+        let next: Vec<&String> = base.iter().filter(|w| !taught.contains(*w)).take(FILL_WINDOW.max(room)).collect();
+        let (keep, free): (Vec<&String>, Vec<&String>) = next.into_iter().partition(|w| wanted.contains(*w));
+        let fill: Vec<String> = free.into_iter().chain(keep).take(room - words.len()).cloned().collect();
+        taught.extend(fill.iter().cloned());
+        words.extend(fill);
         words.sort_by_key(|w| rank.get(w).copied().unwrap_or(usize::MAX));
         out.extend(words);
         // stories that just became readable don't need a unit of their own

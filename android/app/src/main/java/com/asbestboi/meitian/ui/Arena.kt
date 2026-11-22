@@ -56,6 +56,7 @@ import com.asbestboi.meitian.data.Cosmetic
 import com.asbestboi.meitian.data.CosmeticKind
 import com.asbestboi.meitian.data.Sfx
 import kotlinx.coroutines.delay
+import uniffi.meitian_core.ServerState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -65,17 +66,17 @@ fun ArenaScreen() {
     val context = LocalContext.current
     val a = app.arena
     // battles need internet; ask the server whether it can be reached (null = still checking)
-    var online by remember { mutableStateOf<Boolean?>(null) }
+    var online by remember { mutableStateOf<ServerState?>(null) }
     var retry by remember { mutableIntStateOf(0) }
-    LaunchedEffect(retry) { Online.init(context); online = null; online = Online.reachable() }
+    LaunchedEffect(retry) { Online.init(context); online = null; online = Online.state() }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ScreenTitle("Arena")
         PlayerCardView(app.myCard(), coins = a.coins, picture = { MyPicture(74.dp) })
-        ArenaBadge(app.arenaTheme)
-        if (online == false) Column(Modifier.fillMaxWidth().card().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("📡", fontSize = 48.sp)
-            Text("battles need internet", style = street(22.sp), color = Street.c.text)
-            Text("Lessons, stories and reviews work offline. Come back here when you're connected.", color = Street.c.secondary, textAlign = TextAlign.Center)
+        Box(Modifier.clickable { nav.show { ArenaRoad { nav.close() } } }) { ArenaBadge(app.arenaTheme) }
+        if (online == ServerState.OFFLINE || online == ServerState.OUTDATED) Column(Modifier.fillMaxWidth().card().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(if (online == ServerState.OUTDATED) "🛠️" else "📡", fontSize = 48.sp)
+            Text(if (online == ServerState.OUTDATED) "the battle server is being updated" else "battles need internet", style = street(22.sp), color = Street.c.text)
+            Text(if (online == ServerState.OUTDATED) "It doesn't know this version's battles yet. Come back in a little while." else "Lessons, stories and reviews work offline. Come back here when you're connected.", color = Street.c.secondary, textAlign = TextAlign.Center)
             BigButton("try again") { retry++ }
         } else {
             Row(Modifier.fillMaxWidth().block(Street.sky()).clickable { nav.show { OnlineHub { nav.close() } } }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -129,6 +129,8 @@ fun ProgressScreen() {
     // Android 13+: ask before the first reminder can show
     val notifyPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setReminder(granted) }
+    val invitePermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
     val spinPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setSpinReminder(granted) }
 
@@ -264,6 +266,10 @@ fun ProgressScreen() {
             ToggleRow("Spin reminder", "A nudge when your free daily spin is ready", app.profile.spinReminder) { on ->
                 if (on && !com.asbestboi.meitian.data.Reminders.canNotify(context) && android.os.Build.VERSION.SDK_INT >= 33) spinPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                 else app.setSpinReminder(on)
+            }
+            ToggleRow("Battle invitations", "A notification when a friend invites you to a battle", app.profile.inviteNotify) { on ->
+                app.profile = app.profile.copy(inviteNotify = on); app.save()
+                if (on && !com.asbestboi.meitian.data.Reminders.canNotify(context) && android.os.Build.VERSION.SDK_INT >= 33) invitePermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
             Text("✅ Retake placement quiz", fontWeight = FontWeight.Bold, color = Street.c.text,
                 modifier = Modifier.clickable { nav.show { OnboardingScreen(retakeOnly = true) { nav.close() } } })

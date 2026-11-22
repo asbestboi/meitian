@@ -82,3 +82,5 @@ fun rememberPicturePicker(name: String? = null, onDone: () -> Unit = {}): Pictur
     }
     return PicturePicker(busy, note) { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
 }
+
+fun hexColor(hex: String): Color = runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color.White)

@@ -43,7 +43,11 @@ import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.data.AppState
 import com.asbestboi.meitian.data.ContentSync
 import com.asbestboi.meitian.data.Online
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.asbestboi.meitian.data.Invites
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.asbestboi.meitian.data.Sfx
 import com.asbestboi.meitian.data.Speaker
@@ -66,6 +70,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         app = AppState(this)
         Speaker.init(this)
+        Online.init(applicationContext)
+        Invites.opened = intent?.getStringExtra("invite")
+        // invitations to battles, while the app is open
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { runCatching { Invites.poll(applicationContext, foreground = true) }; delay(8_000) } }
+        }
         setContent {
             MeitianTheme {
                 CompositionLocalProvider(LocalApp provides app) { Root() }
@@ -81,6 +91,21 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch { ContentSync.refreshIfStale(applicationContext, level) }
             lifecycleScope.launch { Online.init(applicationContext); Online.sync(app); Online.refreshInbox() }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("invite")?.let { Invites.opened = it }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Invites.foreground()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (::app.isInitialized) Invites.background(this, app.profile.inviteNotify)
     }
 
     override fun onPause() {
@@ -138,6 +163,23 @@ fun Root() {
             if (app.profile.onboarded && overlay.content == null && arena != null) {
                 BackHandler { app.arenaReveal = null }
                 com.asbestboi.meitian.ui.ArenaReveal(arena) { app.arenaReveal = null }
+            }
+            // tapped in a notification: join right away
+            val openedInvite = com.asbestboi.meitian.data.Invites.opened
+            androidx.compose.runtime.LaunchedEffect(openedInvite) {
+                if (openedInvite == null || !app.profile.onboarded) return@LaunchedEffect
+                Online.refreshInbox()
+                val c = Online.inbox?.challenges?.firstOrNull { it.room == openedInvite }
+                com.asbestboi.meitian.data.Invites.opened = null
+                com.asbestboi.meitian.data.Invites.banner = null
+                if (c != null) overlay.show { com.asbestboi.meitian.ui.OnlineHub(joinNow = c) { overlay.close() } }
+                else app.toast = "That invitation isn't open any more."
+            }
+            com.asbestboi.meitian.data.Invites.banner?.let { c ->
+                com.asbestboi.meitian.ui.InviteBanner(c, Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing)) { accept ->
+                    com.asbestboi.meitian.data.Invites.banner = null
+                    if (accept) overlay.show { com.asbestboi.meitian.ui.OnlineHub(joinNow = c) { overlay.close() } }
+                }
             }
             app.toast?.let { text ->
                 androidx.compose.runtime.LaunchedEffect(text) { Sfx.play(SoundId.COIN); kotlinx.coroutines.delay(4_500); app.toast = null }

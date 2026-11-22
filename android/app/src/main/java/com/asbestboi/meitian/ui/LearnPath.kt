@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,7 +48,9 @@ import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.LocalApp
 import com.asbestboi.meitian.LocalNav
 import kotlinx.coroutines.delay
+import uniffi.meitian_core.ArenaStopState
 import uniffi.meitian_core.PathNode
+import uniffi.meitian_core.arenaRoad
 import uniffi.meitian_core.PathNodeKind
 import uniffi.meitian_core.PathNodeState
 import uniffi.meitian_core.PathUnit
@@ -74,9 +77,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
     }
 
     fun openStory(unit: Int, done: Boolean) {
-        val chat = unit % 2 == 0
-        val s = StoryProgress.next(ctx, chat, app, unit)
-            ?: StoryProgress.next(ctx, !chat, app, unit)
+        val s = pathStory(ctx, app, unit)
         when {
             s != null -> {
                 prefetchStory(ctx, s)
@@ -130,10 +131,10 @@ fun LearnScreen(goToPractice: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        TopBar { nav.show { GoalsScreen { nav.close() } } }
+        TopBar(openArenas = { nav.show { ArenaRoad { nav.close() } } }) { nav.show { GoalsScreen { nav.close() } } }
         SlotCard()
         Box(Modifier.weight(1f)) {
-            ArenaBackground(app.arenaTheme, strength = 0.42f, scroll = { listState.firstVisibleItemIndex * 120f + listState.firstVisibleItemScrollOffset })
+            ArenaBackground(app.arenaTheme, strength = 0.92f, scroll = { listState.firstVisibleItemIndex * 120f + listState.firstVisibleItemScrollOffset })
             LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
                 app.freezeNotice?.let { saved ->
                     item {
@@ -156,9 +157,13 @@ fun LearnScreen(goToPractice: () -> Unit) {
                         }
                     }
                 }
-                item {
-                    Text("HSK ${app.currentLevel + 1} unlocks after the test ✦", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                        color = Street.c.secondary, modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                // what's ahead: every arena up to the gates of hell
+                val ahead = arenaRoad(app.currentLevel.coerceIn(0, 255).toUByte(), 1u).filter { it.state == ArenaStopState.LOCKED }
+                items(ahead.size, key = { "arena-${ahead[it].theme.id}" }) { i ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▼", fontSize = 22.sp, color = Color.White, modifier = Modifier.padding(vertical = 10.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f)).padding(horizontal = 12.dp, vertical = 4.dp))
+                        ArenaPanel(ahead[i], Modifier.fillMaxWidth().height(340.dp).clickable { nav.show { ArenaRoad { nav.close() } } })
+                    }
                 }
             }
         }
@@ -190,15 +195,15 @@ fun LearnScreen(goToPractice: () -> Unit) {
 }
 
 @Composable
-private fun TopBar(openGoals: () -> Unit) {
+private fun TopBar(openArenas: () -> Unit, openGoals: () -> Unit) {
     val app = LocalApp.current
     val quests = app.quests
     val claimable = quests.count { it.done && !app.isClaimed(it.quest) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val lc = Street.levelColor(app.currentLevel)
-        Text("HSK ${app.currentLevel}", fontWeight = FontWeight.ExtraBold, color = lc,
-            modifier = Modifier.clip(RoundedCornerShape(50)).background(lc.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 8.dp))
+        Text("${app.arenaTheme.emoji} HSK ${app.currentLevel}", fontWeight = FontWeight.ExtraBold, color = lc,
+            modifier = Modifier.clip(RoundedCornerShape(50)).background(lc.copy(alpha = 0.16f)).clickable(onClickLabel = "See every arena", onClick = openArenas).padding(horizontal = 12.dp, vertical = 8.dp))
         Spacer(Modifier.weight(1f))
         Chip("🔥 ${app.streak}") {}
         Chip("⚡ ${app.today.xp.coerceAtLeast(0)}", onClick = openGoals)
@@ -228,6 +233,18 @@ private fun UnitHeader(unit: PathUnit, level: Int) {
     }
 }
 
+/** "START" over the next stop, with a tail pointing down at it. */
+@Composable
+private fun StartBubble(text: String, color: Color, modifier: Modifier) {
+    Column(modifier.padding(bottom = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White,
+            modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(color).padding(horizontal = 16.dp, vertical = 8.dp))
+        androidx.compose.foundation.Canvas(Modifier.size(18.dp, 9.dp)) {
+            drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(0f, 0f); lineTo(size.width, 0f); lineTo(size.width / 2, size.height); close() }, color)
+        }
+    }
+}
+
 /** One stop on the path: a chunky round button with a darker base. */
 @Composable
 private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: () -> Unit) {
@@ -235,7 +252,7 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
     val size = if (lesson) 72.dp else 84.dp
     val locked = node.state == PathNodeState.LOCKED
     val color = when {
-        locked -> Street.c.secondary.copy(alpha = 0.22f)
+        locked -> lerp(Street.c.card, Street.c.secondary, 0.35f)
         node.kind == PathNodeKind.TEST -> Street.c.gold
         node.kind == PathNodeKind.STORY -> Street.c.pink
         node.kind == PathNodeKind.SENTENCES -> Street.c.sky
@@ -253,12 +270,7 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
     } else 1f
     Box(Modifier.fillMaxWidth().padding(vertical = if (lesson) 10.dp else 22.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.offset(x = (swing * 72).dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (node.next) {
-                Text(if (node.kind == PathNodeKind.TEST) "TEST" else "START", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = color,
-                    modifier = Modifier.offset(y = ((1 - pulse) * 40).dp).clip(RoundedCornerShape(50)).background(Street.c.card)
-                        .padding(horizontal = 12.dp, vertical = 6.dp))
-                Spacer(Modifier.size(8.dp))
-            }
+            if (node.next) StartBubble(if (node.kind == PathNodeKind.TEST) "TEST" else "START", color, Modifier.offset(y = ((1 - pulse) * 40).dp))
             Box(Modifier.size(size + 18.dp), contentAlignment = Alignment.Center) {
                 if (node.next) Box(Modifier.size(size + 18.dp).scale(pulse).border(6.dp, color.copy(alpha = 0.35f), CircleShape))
                 // darker base for depth
@@ -272,8 +284,8 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
                 PathNodeKind.TEST -> "level-up test"
                 PathNodeKind.SENTENCES -> "sentences · +${pathSentencesXp()} XP"
                 else -> "story"
-            }, fontSize = 12.sp,
-                fontWeight = FontWeight.Bold, color = Street.c.secondary, modifier = Modifier.padding(top = 4.dp))
+            }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.text,
+                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(50)).background(Street.c.card.copy(alpha = 0.92f)).padding(horizontal = 10.dp, vertical = 3.dp))
         }
     }
 }

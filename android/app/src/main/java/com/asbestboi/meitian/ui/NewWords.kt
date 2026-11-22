@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -58,14 +59,15 @@ fun markedText(tokens: List<Token>): AnnotatedString {
     val lime = Street.c.lime.copy(alpha = 0.3f)
     return buildAnnotatedString {
         tokens.forEach { t ->
-            if (t.isNew) withStyle(SpanStyle(background = lime, textDecoration = TextDecoration.Underline)) { append(t.text) }
+            if (t.pinyin.isEmpty() && WeChat.image(t.text) != null) appendInlineContent(t.text, uniffi.meitian_core.wechatEmoji(t.text) ?: t.text)
+            else if (t.isNew) withStyle(SpanStyle(background = lime, textDecoration = TextDecoration.Underline)) { append(t.text) }
             else append(t.text)
         }
     }
 }
 
 /** What TalkBack reads for a line: "new word" before every new word. */
-fun List<Token>.spoken(): String = joinToString("") { if (it.isNew) " new word ${it.text} " else it.text }
+fun List<Token>.spoken(): String = joinToString("") { if (it.isNew) " new word ${it.text} " else uniffi.meitian_core.renderWechatText(it.text) }
 
 /** "NEW" pill for a word's first appearance on a flashcard or quiz card. */
 @Composable

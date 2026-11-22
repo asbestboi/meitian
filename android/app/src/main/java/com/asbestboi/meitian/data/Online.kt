@@ -35,6 +35,8 @@ import uniffi.meitian_core.onlineParseLeaderboard
 import uniffi.meitian_core.onlineParseProfile
 import uniffi.meitian_core.onlineParseSpin
 import uniffi.meitian_core.ServerSpin
+import uniffi.meitian_core.ServerState
+import uniffi.meitian_core.serverState
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -207,8 +209,8 @@ object Online {
     suspend fun createParty(swears: Boolean): String = onlineParseParty(request("POST", "/v1/party", JSONObject().put("swears", swears)))
     suspend fun inviteToParty(code: String, friendId: String) { request("POST", "/v1/party/$code/invite", JSONObject().put("friendId", friendId)) }
 
-    /** Is the server reachable? (Battles need internet; lessons don't.) */
-    suspend fun reachable(): Boolean = runCatching { request("GET", "/", auth = false) }.isSuccess
+    /** Can we battle? (Battles need internet and an up-to-date server; lessons don't.) */
+    suspend fun state(): ServerState = serverState(runCatching { request("GET", "/", auth = false) }.getOrNull())
 
     /** Creates the online profile from the learner's name, if there isn't one yet. */
     suspend fun ensureAccount(name: String) { if (!signedIn) register(nicknameFrom(name)) }

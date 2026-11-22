@@ -8,7 +8,8 @@ const MAX_AVATAR = 200 * 1024;
 /** Most XP one stats sync can add to the weekly board, and how often it may add any. */
 const MAX_XP_PER_SYNC = 1500;
 const XP_SYNC_GAP_MS = 30_000;
-const CHALLENGE_TTL_MS = 10 * 60_000;
+/** How long an invitation to a battle stays in a friend's inbox (phones in the background check every 15 minutes). */
+const CHALLENGE_TTL_MS = 30 * 60_000;
 const PARTY_TTL_MS = 12 * 3_600_000;
 /** One slot machine spin per rolling 24 hours. */
 const SPIN_GAP_MS = 24 * 3_600_000;
@@ -55,7 +56,8 @@ async function body<T>(req: Request): Promise<T> {
   }
 }
 
-route("GET", "/", async () => json({ name: "meitian", ok: true }));
+/** `v` is the battle protocol: 2 = rooms for 2–4, parties, the modes of 1.13. Apps check it before they connect. */
+route("GET", "/", async () => json({ name: "meitian", ok: true, v: 2 }));
 
 // MARK: accounts
 
@@ -513,6 +515,8 @@ route("GET", "/v1/rooms/:id", async (req, env, [id]) => {
   const players: string[] = !room ? [] : room.players ? JSON.parse(room.players) : [room.a, room.b];
   if (!room || !players.includes(me.id)) throw new HttpError(404, "no such room");
   if (room.status === "declined") throw new HttpError(410, "challenge declined");
+  // joining answers the invitation
+  await env.DB.prepare("UPDATE rooms SET challenge = 0 WHERE id = ? AND b = ? AND challenge = 1").bind(id, me.id).run();
   const rows = await profiles(env, players);
   return forwardSocket(req, env.ROOMS.get(env.ROOMS.idFromName(id)), {
     "x-player": me.id,

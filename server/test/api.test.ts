@@ -198,6 +198,43 @@ describe("friends, challenges, leaderboards", () => {
   });
 });
 
+describe("invitations", () => {
+  it("joining answers it, leaving takes it back, old ones expire", async () => {
+    expect((await call("GET", "/")).data.v).toBe(2);
+    const [a, b] = [await register("Inviter"), await register("Invited")];
+    await call("POST", "/v1/friends", a.token, { code: b.profile.friendCode });
+    await call("POST", "/v1/friends", b.token, { code: a.profile.friendCode });
+    const inbox = async () => (await call("GET", "/v1/inbox", b.token)).data.challenges;
+    const invite = async () => (await call("POST", "/v1/challenge", a.token, { friendId: b.profile.id, mode: "PinyinType" })).data.room;
+
+    // both end up in the room and see each other
+    const room = await invite();
+    expect(await inbox()).toHaveLength(1);
+    const host = await socket(`/v1/rooms/${room}`, a.token);
+    const first: any = await host.next((m: any) => m.t === "_room");
+    expect(first.host).toBe(a.profile.id);
+    expect(await inbox(), "the host being there doesn't answer it").toHaveLength(1);
+    const guest = await socket(`/v1/rooms/${room}`, b.token);
+    const second: any = await guest.next((m: any) => m.t === "_room");
+    expect(second.players.filter((p: any) => p.here)).toHaveLength(2);
+    expect(await host.next((m: any) => m.t === "_peer" && m.up)).toMatchObject({ id: b.profile.id });
+    expect(await inbox()).toHaveLength(0);
+    host.ws.close();
+    guest.ws.close();
+
+    // the host gave up waiting
+    const second_room = await invite();
+    await call("POST", `/v1/challenge/${second_room}/decline`, a.token);
+    expect(await inbox()).toHaveLength(0);
+
+    await invite();
+    await env.DB.prepare("UPDATE rooms SET created = created - ?").bind(29 * 60_000).run();
+    expect(await inbox(), "still there after 29 minutes").toHaveLength(1);
+    await env.DB.prepare("UPDATE rooms SET created = created - ?").bind(2 * 60_000).run();
+    expect(await inbox()).toHaveLength(0);
+  });
+});
+
 describe("live play", () => {
   it("quick match pairs two players and the room relays the battle; agreeing reports change ratings", async () => {
     const a = await register("Quick1");

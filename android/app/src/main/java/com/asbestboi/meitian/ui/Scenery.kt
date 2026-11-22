@@ -9,6 +9,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,10 +35,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -43,63 +54,54 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.meitian_core.ArenaTheme
 import uniffi.meitian_core.SoundId
-import uniffi.meitian_core.arenaLook
-import kotlin.math.PI
-import kotlin.random.Random
+import uniffi.meitian_core.ArenaStop
+import uniffi.meitian_core.ArenaStopState
+import uniffi.meitian_core.arenaFrame
+import uniffi.meitian_core.arenaRoad
+import uniffi.meitian_core.arenaScene
+import com.asbestboi.meitian.LocalApp
 
 /**
- * An arena's scenery (sky, three silhouettes, drifting particles), drawn from the core's numbers. [strength] fades it
- * into the paper colour so text on top stays readable; [scroll] (px) moves the silhouettes a little (parallax).
+ * An arena's scenery, drawn by the core: still layers that move a little with [scroll] (px, parallax) and a moving
+ * part on top. [strength] fades it into the paper colour so text on top stays readable.
  */
 @Composable
-fun ArenaBackground(theme: ArenaTheme, modifier: Modifier = Modifier, strength: Float = 0.55f, scroll: () -> Float = { 0f }) {
-    val look = remember(theme) { arenaLook(theme) }
+fun ArenaBackground(theme: ArenaTheme, modifier: Modifier = Modifier, strength: Float = 0.55f, live: Boolean = true, scroll: () -> Float = { 0f }) {
     val dark = isSystemInDarkTheme()
     val reduce = reduceMotion()
     val density = LocalDensity.current.density
     val paper = Street.c.paper
-    val sky = remember(look, dark) { (if (dark) look.skyDark else look.skyLight).map(::hexColor) }
-    val system = remember(theme.id) { ParticleSystem() }
+    val renderer = remember { OpsRenderer() }
     var frame by remember { mutableLongStateOf(0L) }
-    val size = remember { floatArrayOf(0f, 0f) }
-    if (!reduce) LaunchedEffect(theme) {
-        var last = withFrameNanos { it }
-        var debt = 0f
-        while (true) {
-            val now = withFrameNanos { it }
+    if (!reduce && live) LaunchedEffect(theme.id) {
+        var last = 0L
+        while (true) withFrameNanos { now ->
             // thirty frames a second is plenty for drifting petals
-            if (now - last < 30_000_000L) continue
-            val dt = ((now - last) / 1e9f).coerceAtMost(0.1f)
-            last = now
-            debt += look.particles.rate * dt
-            while (debt >= 1f && size[0] > 0f) {
-                debt -= 1f
-                val y = if (look.rising) size[1] * (0.75f + 0.25f * Random.nextFloat()) else -10f * density
-                system.burst(look.particles, Random.nextFloat() * size[0], y, (if (look.rising) -PI / 2 else PI / 2).toFloat(), 1, density)
-            }
-            system.step(dt, look.particles.gravity, density)
-            frame = now
+            if (now - last >= 30_000_000L) { last = now; frame = now }
         }
     }
-    Canvas(modifier.fillMaxSize().clipToBounds()) {
-        if (frame < 0L) return@Canvas   // reading frame redraws every tick
-        size[0] = this.size.width
-        size[1] = this.size.height
-        val w = this.size.width
-        val h = this.size.height
-        drawRect(Brush.verticalGradient(sky))
-        look.layers.forEach { layer ->
-            val shift = if (reduce) 0f else (scroll() * layer.parallax).coerceIn(-h * 0.12f, h * 0.12f)
-            val path = Path().apply {
-                moveTo(0f, h)
-                layer.heights.forEachIndexed { i, y -> lineTo(w * i / (layer.heights.size - 1), h - h * y + shift) }
-                lineTo(w, h)
-                close()
+    BoxWithConstraints(modifier.fillMaxSize().clipToBounds()) {
+        val w = constraints.maxWidth / density
+        val h = constraints.maxHeight / density
+        val layers = remember(theme.id, w, h, dark) { arenaScene(theme, w, h, dark) }
+        // the still layers have their own canvas, so the particles don't make them draw again
+        Canvas(Modifier.fillMaxSize()) {
+            val y = if (reduce) 0f else scroll()
+            drawIntoCanvas { c ->
+                layers.forEach { layer ->
+                    val shift = (y * layer.parallax).coerceIn(-size.height * 0.12f, size.height * 0.12f)
+                    c.nativeCanvas.save()
+                    c.nativeCanvas.translate(0f, -shift)
+                    renderer.draw(c.nativeCanvas, layer.ops, density)
+                    c.nativeCanvas.restore()
+                }
             }
-            drawPath(path, hexColor(if (dark) layer.colorDark else layer.colorLight))
         }
-        system.draw(this, look.particles)
-        if (strength < 1f) drawRect(paper.copy(alpha = 1f - strength))
+        Canvas(Modifier.fillMaxSize()) {
+            val ops = arenaFrame(theme, (frame / 1_000_000L).toULong(), w, h, dark)
+            drawIntoCanvas { renderer.draw(it.nativeCanvas, ops, density) }
+            if (strength < 1f) drawRect(paper.copy(alpha = 1f - strength))
+        }
     }
 }
 
@@ -145,6 +147,59 @@ fun ArenaReveal(theme: ArenaTheme, close: () -> Unit) {
             }
             Spacer(Modifier.weight(1f))
             BigButton("enter →", onClick = close)
+        }
+    }
+}
+
+/** One arena on the road: its scenery, name and what it takes to get there. */
+@Composable
+fun ArenaPanel(stop: ArenaStop, modifier: Modifier = Modifier, live: Boolean = true) {
+    val locked = stop.state == ArenaStopState.LOCKED
+    val here = stop.state == ArenaStopState.CURRENT
+    val shape = RoundedCornerShape(28.dp)
+    val theme = stop.theme
+    Box(
+        modifier.clip(shape).border(if (here) 4.dp else 0.dp, if (here) Street.c.lime else Color.Transparent, shape)
+            .semantics(mergeDescendants = true) { contentDescription = "Arena ${theme.tier}: ${theme.nameEn}. ${if (locked) "Locked, unlocks at HSK ${stop.level}" else if (here) "You are here" else "Conquered"}" },
+    ) {
+        ArenaBackground(theme, strength = 1f, live = live)
+        // locked arenas stay visible, just a little dimmed
+        if (locked) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)))
+        Box(Modifier.fillMaxWidth().height(150.dp).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)))))
+        Text(if (locked) "🔒" else if (here) "you are here" else "✓ conquered", fontSize = if (locked) 26.sp else 13.sp, fontWeight = FontWeight.ExtraBold,
+            color = if (here) Color.Black else Color.White,
+            modifier = Modifier.align(Alignment.TopEnd).padding(14.dp).clip(RoundedCornerShape(50))
+                .background(if (here) Street.c.lime else Color.Black.copy(alpha = 0.45f)).padding(horizontal = 12.dp, vertical = 6.dp))
+        Text("arena ${theme.tier}", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+            modifier = Modifier.align(Alignment.TopStart).padding(14.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 12.dp, vertical = 6.dp))
+        Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
+            Text("${theme.emoji} ${theme.nameZh}", fontSize = 30.sp, fontWeight = FontWeight.Black, color = Color.White)
+            Text("${theme.pinyin} · ${theme.nameEn}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.9f))
+            Text(if (locked) "HSK ${stop.level} · pass the HSK ${stop.level.toInt() - 1} test" else "HSK ${stop.level}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.8f))
+        }
+    }
+}
+
+/** Every arena, the last one at the top: climb from the meadow to the gates of hell. */
+@Composable
+fun ArenaRoad(close: () -> Unit) {
+    val app = LocalApp.current
+    val stops = remember(app.currentLevel) { arenaRoad(app.currentLevel.coerceIn(0, 255).toUByte(), 1u).reversed() }
+    val here = stops.indexOfFirst { it.state == ArenaStopState.CURRENT }.coerceAtLeast(0)
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = here)
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            CloseButton(close); HSpacer(12.dp)
+            Text("arena road", style = street(24.sp), color = Street.c.text)
+        }
+        LazyColumn(state = state, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(stops.size, key = { stops[it].theme.id }) { i ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // only what's on screen moves
+                    ArenaPanel(stops[i], Modifier.fillMaxWidth().height(400.dp))
+                    if (i < stops.size - 1) Text("▲", fontSize = 22.sp, color = if (stops[i].state == ArenaStopState.LOCKED) Street.c.secondary else Street.c.lime, modifier = Modifier.padding(vertical = 4.dp))
+                }
+            }
         }
     }
 }

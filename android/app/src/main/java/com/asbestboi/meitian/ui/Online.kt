@@ -68,19 +68,23 @@ import com.asbestboi.meitian.data.Sfx
 import uniffi.meitian_core.OnlineFriends
 import uniffi.meitian_core.OnlineProfile
 import uniffi.meitian_core.nicknameOk
+import uniffi.meitian_core.inviteText
+import uniffi.meitian_core.queueProblem
 
 /** What the online screen is showing on top of its tabs. */
 private sealed interface OnlineStage {
     data object Hub : OnlineStage
     data class Searching(val mode: BattleMode, val group: Boolean) : OnlineStage
-    data class Playing(val path: String, val mode: BattleMode?, val people: List<OnlineProfile>, val party: String? = null) : OnlineStage
+    data class Playing(val path: String, val mode: BattleMode?, val people: List<OnlineProfile>, val party: String? = null,
+                       /** Our own open invitation (its room), to take back if we leave before they come. */
+                       val invited: String? = null) : OnlineStage
 }
 
 enum class HubStart { Play, Party }
 
 /** Online play: quick matches and groups, parties with friends, leaderboards, your public profile. */
 @Composable
-fun OnlineHub(startAt: HubStart = HubStart.Play, close: () -> Unit) {
+fun OnlineHub(startAt: HubStart = HubStart.Play, joinNow: OnlineChallenge? = null, close: () -> Unit) {
     val app = LocalApp.current
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { Online.init(ctx); runCatching { Online.refreshMe() }; Online.sync(app, force = true) }
@@ -89,17 +93,24 @@ fun OnlineHub(startAt: HubStart = HubStart.Play, close: () -> Unit) {
         stage = if (c.party.isNotEmpty()) OnlineStage.Playing(partyPath(c.party, app.settings.swears), null, listOf(c.from), c.party)
         else OnlineStage.Playing("/v1/rooms/${c.room}", battleMode(c.mode) ?: BattleMode.DUEL, listOf(c.from))
     }
+    LaunchedEffect(joinNow?.room) { joinNow?.let(join) }
+    // ask once, so invitations can be shown while the app is closed
+    val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Online.signedIn) {
+        if (Online.signedIn && app.profile.inviteNotify && android.os.Build.VERSION.SDK_INT >= 33 && !com.asbestboi.meitian.data.Reminders.canNotify(ctx))
+            askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
     when (val s = stage) {
         is OnlineStage.Hub ->
             if (Online.profile == null && !Online.signedIn) OnlineSetup(close)
             else OnlineTabs(close, startAt,
                 play = { mode, group -> stage = OnlineStage.Searching(mode, group) }, join = join,
-                challenge = { room, mode, p -> stage = OnlineStage.Playing("/v1/rooms/$room", mode, listOf(p)) },
+                challenge = { room, mode, p -> stage = OnlineStage.Playing("/v1/rooms/$room", mode, listOf(p), invited = room) },
                 party = { code -> stage = OnlineStage.Playing(partyPath(code, app.settings.swears), null, emptyList(), code) })
         is OnlineStage.Searching -> QuickMatchSearch(s.mode, s.group, cancel = { stage = OnlineStage.Hub }) { room, people ->
             stage = OnlineStage.Playing("/v1/rooms/$room", s.mode, people)
         }
-        is OnlineStage.Playing -> BattleScreen(s.path, s.mode, s.party, s.people) { stage = OnlineStage.Hub }
+        is OnlineStage.Playing -> BattleScreen(s.path, s.mode, s.party, s.people, s.invited) { stage = OnlineStage.Hub }
     }
 }
 
@@ -285,6 +296,27 @@ private fun PartyTab(open: (String) -> Unit) {
         }
         error?.let { Text(it, color = Street.c.red, fontWeight = FontWeight.Bold) }
         Gap(30.dp)
+    }
+}
+
+/** Drops in from the top, wherever the learner is. */
+@Composable
+fun InviteBanner(c: OnlineChallenge, modifier: Modifier = Modifier, answer: (Boolean) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val text = inviteText(c)
+    LaunchedEffect(c.room) { delay(20_000); answer(false) }   // it stays in the inbox
+    Column(modifier.padding(12.dp).fillMaxWidth().block(Street.pink()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Avatar(c.from); HSpacer(10.dp)
+            Column(Modifier.weight(1f)) {
+                Text(text.title, color = Color.White, fontWeight = FontWeight.ExtraBold)
+                Text(text.body.substringBefore(". Tap"), color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            BigButton(if (c.party.isNotEmpty()) "join" else "accept", Modifier.weight(1f), brush = Street.jade()) { answer(true) }
+            BigButton("no thanks", Modifier.weight(1f)) { scope.launch { runCatching { Online.decline(c.room) }; Online.refreshInbox(); answer(false) } }
+        }
     }
 }
 
@@ -499,7 +531,7 @@ private fun QuickMatchSearch(mode: BattleMode, group: Boolean, cancel: () -> Uni
                 if (e is QueueEvent.Matched) { done = true; Sfx.play(SoundId.GO); found(e.room, e.opponents) }
             }
         }) { code ->
-            main.post { if (!done && code != 1000) problem = "Lost the connection to the server." }
+            main.post { if (!done && code != 1000) problem = queueProblem((if (code in 4400..4599) code - 4000 else 0).toUShort()) }
         }
         onDispose { done = true; ws.close(1000, "cancel") }
     }
@@ -507,9 +539,9 @@ private fun QuickMatchSearch(mode: BattleMode, group: Boolean, cancel: () -> Uni
     val pulse by rememberInfiniteTransition(label = "search").animateFloat(0.85f, 1.15f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulse")
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
         Box(Modifier.size(150.dp).scale(if (reduceMotion()) 1f else pulse).clip(CircleShape).background(info.brush()), contentAlignment = Alignment.Center) { Text(info.emoji, fontSize = 60.sp) }
-        Text(problem ?: if (group) "looking for a group… $waiting/4" else "looking for an opponent…", style = street(24.sp), color = Street.c.text, textAlign = TextAlign.Center)
+        Text(if (problem != null) "can't search right now" else if (group) "looking for a group… $waiting/4" else "looking for an opponent…", style = street(24.sp), color = Street.c.text, textAlign = TextAlign.Center)
         Text(when {
-            problem != null -> "Check your internet and try again."
+            problem != null -> problem.orEmpty()
             group && info.minPlayers < 4u -> "${info.title} · ${seconds}s. Starts with three if nobody else shows up."
             group -> "${info.title} · ${seconds}s. This one needs four players."
             else -> "${info.title} · ${seconds}s. The search widens the longer you wait."

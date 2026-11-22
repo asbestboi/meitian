@@ -76,6 +76,7 @@ import uniffi.meitian_core.StoryImage
 import uniffi.meitian_core.StoryLine
 import uniffi.meitian_core.StoryQuestion
 import uniffi.meitian_core.nextStory
+import uniffi.meitian_core.rereadStory
 import uniffi.meitian_core.shuffleStoryReplies
 import com.asbestboi.meitian.data.AppState
 import uniffi.meitian_core.shelfStories
@@ -137,6 +138,14 @@ object StoryProgress {
     }
 }
 
+/** What the story stop of a unit plays: something unread that fits the unit (odd units a picture story, even units a
+ *  chat, the other kind if there's none), else the story read longest ago. Null when nothing is unlocked. */
+fun pathStory(c: Context, app: AppState, unit: Int): Story? {
+    val chat = unit % 2 == 0
+    return StoryProgress.next(c, chat, app, unit) ?: StoryProgress.next(c, !chat, app, unit)
+        ?: rereadStory(app.todayKey, StoryProgress.read(c), app.knownList)
+}
+
 /** Story picture. Panels show the whole image (fit) over a blurred filled copy; cards fill and crop. */
 @Composable
 fun StoryImageView(image: StoryImage?, height: Dp, modifier: Modifier = Modifier, fill: Boolean = false, onClick: (() -> Unit)? = null) {
@@ -189,20 +198,14 @@ fun FullScreenImage(image: StoryImage, close: () -> Unit) {
 }
 
 @Composable
-private fun StoryCard(story: Story, done: Boolean, missing: Int = 0, onClick: () -> Unit = {}) {
-    val locked = missing > 0
+private fun StoryCard(story: Story, done: Boolean, onClick: () -> Unit = {}) {
     Column(
-        Modifier.width(200.dp).card().clickable(enabled = !locked, onClick = onClick).alpha(if (locked) 0.55f else 1f),
+        Modifier.width(200.dp).card().clickable(onClick = onClick),
     ) {
         Box {
             StoryImageView(story.cover, 130.dp, fill = true)
             Text(story.emoji, fontSize = 24.sp, modifier = Modifier.padding(8.dp))
             if (done) Text("✅", fontSize = 20.sp, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
-            if (locked) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("🔒", fontSize = 30.sp)
-                Text(learnMore(missing), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 8.dp, vertical = 3.dp))
-            }
             if (story.style == "chat" || story.date.isNotEmpty()) Text(if (story.style == "chat") "💬 chat" else "daily",
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White,
                 modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(50))
@@ -218,8 +221,8 @@ private fun StoryCard(story: Story, done: Boolean, missing: Int = 0, onClick: ()
 
 private fun learnMore(missing: Int) = "learn $missing more word${if (missing == 1) "" else "s"} to unlock"
 
-/** Practice tab: a mystery "next story" (no cover, no title — a surprise), the stories that unlock next, and the
- *  history of stories already read, which can be revisited (no XP the second time). */
+/** Practice tab: a mystery "next story" (no cover, no title — a surprise) and the history of stories already read,
+ *  which can be revisited (no XP the second time). Nothing of a locked story is shown. */
 @Composable
 fun StoryHub(chats: Boolean = false) {
     val app = LocalApp.current
@@ -256,12 +259,6 @@ fun StoryHub(chats: Boolean = false) {
             Text(if (soonest != null) "${learnMore(soonest)} the next ${if (chats) "chat" else "story"} ✦"
                 else if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
                 color = Street.c.secondary, modifier = Modifier.fillMaxWidth().card().padding(16.dp))
-        }
-        if (locked.isNotEmpty()) {
-            Text("coming up", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(locked, key = { it.story.id }) { StoryCard(it.story, done = false, missing = it.missingWords.toInt()) }
-            }
         }
         if (history.isNotEmpty()) {
             Text("history", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
@@ -492,10 +489,10 @@ private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, on
                             .clickable(enabled = !tried && !typing && !dead) { sendReply(i) }
                             .semantics { contentDescription = option.tokens.spoken() }
                             .alpha(if (tried) 0.5f else 1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
-                            Text(markedText(option.tokens), fontSize = 18.sp, color = Street.c.text,
+                            Text(markedText(option.tokens), fontSize = 18.sp, color = Street.c.text, inlineContent = remember(option.zh) { WeChat.inline(option.zh, 18.sp) },
                                 textDecoration = if (tried) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
                             Text(option.pinyin, fontSize = 12.sp, color = Street.c.secondary)
-                            if (key in tr.shown) Text(option.en, fontSize = 12.sp, color = Street.c.secondary)
+                            if (key in tr.shown) ChatText(option.en, 12.sp, Street.c.secondary)
                         }
                     }
                 }
@@ -546,7 +543,7 @@ private fun Bubble(key: String, line: StoryLine, tr: Translations) = Translatabl
             Box(Modifier.weight(1f)) { TokenSentence(line.tokens, 22.sp) }
             SpeakButton(line.zh, 32.dp, Street.c.sky)
         }
-        if (key in tr.shown) Text(line.en, fontSize = 14.sp, color = Street.c.secondary)
+        if (key in tr.shown) ChatText(line.en, 14.sp, Street.c.secondary)
     }
 }
 
@@ -637,7 +634,7 @@ private fun ChatBubble(key: String, line: StoryLine, me: String, tr: Translation
         Translatable(key, tr, Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 TokenSentence(line.tokens, 13.sp, center = true)
-                if (key in tr.shown) Text(line.en, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Street.c.secondary)
+                if (key in tr.shown) ChatText(line.en, 12.sp, Street.c.secondary, FontWeight.SemiBold)
             }
         }
         return
@@ -663,7 +660,7 @@ private fun ChatBubble(key: String, line: StoryLine, me: String, tr: Translation
                         HSpacer(6.dp)
                         SpeakButton(line.zh, 28.dp, Street.c.sky)
                     }
-                    if (key in tr.shown) Text(line.en, fontSize = 12.sp, color = Street.c.secondary)
+                    if (key in tr.shown) ChatText(line.en, 12.sp, Street.c.secondary)
                 } }
             }
         }

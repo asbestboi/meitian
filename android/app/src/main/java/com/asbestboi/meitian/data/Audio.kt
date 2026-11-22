@@ -15,7 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import uniffi.meitian_core.SoundId
-import uniffi.meitian_core.effectSpec
+import uniffi.meitian_core.hitInfo
 import uniffi.meitian_core.hitSoundPcm
 import uniffi.meitian_core.soundPcm
 import uniffi.meitian_core.soundSampleRate
@@ -44,7 +44,9 @@ object Speaker {
         val spoken = uniffi.meitian_core.speakable(text)
         if (spoken.isEmpty()) return
         t.setSpeechRate(if (slow) 0.6f else 0.9f)
-        t.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "say")
+        // a touch below full, so the voice and the sound effects sit at the same level
+        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.85f) }
+        t.speak(spoken, TextToSpeech.QUEUE_FLUSH, params, "say")
     }
 }
 
@@ -59,7 +61,7 @@ object Sfx {
     fun play(sound: SoundId) = play(sound) { soundPcm(sound) }
 
     /** The impact of a hit effect cosmetic. */
-    fun playHit(effectId: String) = effectSpec(effectId).sound.let { key -> play(key) { hitSoundPcm(key) } }
+    fun playHit(effectId: String) = hitInfo(effectId).sound.let { key -> play(key) { hitSoundPcm(key) } }
 
     private fun play(key: Any, render: () -> ByteArray) {
         if (!enabled || volume <= 0f) return
@@ -76,7 +78,7 @@ object Sfx {
                     .setBufferSizeInBytes(pcm.size)
                     .build()
                 track.write(pcm, 0, pcm.size)
-                track.setVolume(level)
+                track.setVolume((level * 1.25f).coerceAtMost(1f))   // 80 %, the default, is full scale
                 track.play()
                 Thread.sleep((pcm.size / 2 * 1000L / rate) + 60)
                 track.release()

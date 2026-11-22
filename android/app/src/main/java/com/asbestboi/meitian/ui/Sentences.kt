@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -114,6 +115,8 @@ fun TokenSentence(
                     Text(gapFill ?: "＿".repeat(t.text.length.coerceAtLeast(1)), fontSize = size, fontWeight = FontWeight.SemiBold,
                         color = if (gapFill == null) Street.c.secondary else Street.c.jade,
                         modifier = Modifier.background(Street.c.gold.copy(alpha = if (gapFill == null) 0.18f else 0f), RoundedCornerShape(6.dp)).padding(horizontal = 4.dp))
+                } else if (t.pinyin.isEmpty() && WeChat.image(t.text) != null) {
+                    WeChat.Picture(t.text, Modifier.requiredSize(with(androidx.compose.ui.platform.LocalDensity.current) { (size * 1.3f).toDp() }))
                 } else {
                     Text(t.text, fontSize = size, color = Street.c.text,
                         textDecoration = if (t.wordId != null && !t.isNew) TextDecoration.Underline else null,

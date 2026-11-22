@@ -210,6 +210,54 @@ pub fn online_parse_inbox(json: String) -> Result<OnlineInbox, OnlineError> {
     Ok(OnlineInbox { requests: i.requests, challenges: i.challenges.into_iter().map(Into::into).collect() })
 }
 
+/// The battle protocol this app speaks.
+const SERVER_PROTOCOL: u64 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ServerState {
+    Offline,
+    /// The server speaks an older protocol: battles would hang, so they wait until it's updated.
+    Outdated,
+    Ready,
+}
+
+/// From the answer to `GET /` (None: no answer).
+#[uniffi::export]
+pub fn server_state(answer: Option<String>) -> ServerState {
+    let Some(v) = answer.and_then(|a| serde_json::from_str::<serde_json::Value>(&a).ok()) else {
+        return ServerState::Offline;
+    };
+    match v["v"].as_u64() {
+        Some(v) if v >= SERVER_PROTOCOL => ServerState::Ready,
+        _ => ServerState::Outdated,
+    }
+}
+
+/// What a notification (or banner) about an invitation says.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct InviteText {
+    pub title: String,
+    pub body: String,
+}
+
+#[uniffi::export]
+pub fn invite_text(invite: OnlineChallenge) -> InviteText {
+    let who = &invite.from.nickname;
+    if !invite.party.is_empty() {
+        return InviteText { title: format!("🎉 {who} 邀请你！"), body: format!("{who} invites you to a party. Tap to join.") };
+    }
+    let (emoji, mode) = crate::game::battle_mode(invite.mode.clone())
+        .map(crate::game::mode_info)
+        .map_or(("⚔️".to_string(), "battle".to_string()), |m| (m.emoji, m.title));
+    InviteText { title: format!("{emoji} {who} 向你挑战！"), body: format!("{who} challenges you: {mode}. Tap to play.") }
+}
+
+/// The invitations nobody has told the learner about yet (`told` = rooms already announced).
+#[uniffi::export]
+pub fn new_invites(inbox: OnlineInbox, told: Vec<String>) -> Vec<OnlineChallenge> {
+    inbox.challenges.into_iter().filter(|c| !told.contains(&c.room)).collect()
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct LeaderEntry {
     pub rank: u32,
@@ -254,6 +302,19 @@ pub enum QueueEvent {
 
 pub(crate) fn profile_from(v: &Value) -> Option<OnlineProfile> {
     v.is_object().then(|| serde_json::from_value::<RawProfile>(v.clone()).ok()).flatten().map(OnlineProfile::from)
+}
+
+/// Why quick match stopped. `status` is the HTTP status when the server refused, 0 for a lost connection.
+#[uniffi::export]
+pub fn queue_problem(status: u16) -> String {
+    match status {
+        400 | 404 => "The battle server doesn't know this game yet: it needs its update. Try Duel, or come back later.",
+        401 => "Sign in again to battle.",
+        429 => "Too many tries. Wait a moment.",
+        0 => "Lost the connection to the server. Check your internet and try again.",
+        _ => "The battle server has a problem right now. Try again in a bit.",
+    }
+    .into()
 }
 
 #[uniffi::export]
@@ -332,6 +393,25 @@ mod tests {
     const P: &str = r#"{"id":"u1","nickname":"小明","tag":"1234","level":2,"streak":5,"xpTotal":900,"xpWeek":40,
       "rating":1016,"wins":1,"losses":0,"cosmetics":{"avatar":"av.panda","aura":"au.fire"},
       "avatar":"/v1/avatars/u1/2","online":true,"friendCode":"ABC234"}"#;
+
+    #[test]
+    fn invitations() {
+        assert_eq!(server_state(None), ServerState::Offline);
+        assert_eq!(server_state(Some("<html>".into())), ServerState::Offline);
+        assert_eq!(server_state(Some(r#"{"name":"meitian","ok":true}"#.into())), ServerState::Outdated);
+        assert_eq!(server_state(Some(r#"{"name":"meitian","ok":true,"v":2}"#.into())), ServerState::Ready);
+        let inbox = online_parse_inbox(format!(
+            r#"{{"requests":0,"challenges":[{{"room":"r1","mode":"PinyinType","from":{P}}},{{"room":"r2","mode":"Party","party":"ABCDEF","from":{P}}}]}}"#
+        ))
+        .unwrap();
+        let fresh = new_invites(inbox.clone(), vec!["r1".into()]);
+        assert_eq!(fresh.iter().map(|c| c.room.as_str()).collect::<Vec<_>>(), vec!["r2"]);
+        assert!(new_invites(inbox.clone(), vec!["r1".into(), "r2".into()]).is_empty(), "told once");
+        let t = invite_text(inbox.challenges[0].clone());
+        assert!(t.title.contains("小明") && t.body.contains("Pinyin"), "{t:?}");
+        assert!(invite_text(inbox.challenges[1].clone()).body.contains("party"));
+        assert!(queue_problem(400).contains("update") && queue_problem(0).contains("internet"));
+    }
 
     #[test]
     fn profiles_and_lists() {

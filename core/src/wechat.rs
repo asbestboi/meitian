@@ -282,6 +282,12 @@ pub fn render_wechat(text: &str) -> String {
     out
 }
 
+/// `render_wechat` for the apps: what screen readers say.
+#[uniffi::export]
+pub fn render_wechat_text(text: String) -> String {
+    render_wechat(&text)
+}
+
 fn is_emoji(c: char) -> bool {
     let u = c as u32;
     (0x1F000..=0x1FAFF).contains(&u)

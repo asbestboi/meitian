@@ -87,7 +87,7 @@ fun ModeInfo.brush(): Brush = Brush.linearGradient(colors.map(::hexColor))
 
 /** A battle in a server room, from joining to the result. [partyCode] is shown in a party's lobby. */
 @Composable
-fun BattleScreen(path: String, auto: BattleMode?, partyCode: String? = null, waitingFor: List<OnlineProfile> = emptyList(), close: () -> Unit) {
+fun BattleScreen(path: String, auto: BattleMode?, partyCode: String? = null, waitingFor: List<OnlineProfile> = emptyList(), invited: String? = null, close: () -> Unit) {
     val app = LocalApp.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -103,18 +103,24 @@ fun BattleScreen(path: String, auto: BattleMode?, partyCode: String? = null, wai
         val window = (context as? ComponentActivity)?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         session.open()
+        com.asbestboi.meitian.data.Invites.busy = true
         onDispose {
+            com.asbestboi.meitian.data.Invites.busy = false
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             session.leave()
         }
     }
     LaunchedEffect(v.phase) { if (v.phase == BattlePhase.FINISHED && v.result?.outcome == Outcome.WIN) confetti++ }
     LaunchedEffect(session.hit?.tick) { if (session.hit != null) haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
-    val leave = { session.leave(); scope.launch { Online.sync(app, force = true) }; close() }
+    val leave = {
+        // gave up before they came: take the invitation back
+        if (invited != null && (v.phase == BattlePhase.WAITING || v.phase == BattlePhase.LOBBY)) takeBack(invited)
+        session.leave(); scope.launch { Online.sync(app, force = true) }; close()
+    }
     androidx.activity.compose.BackHandler { leave() }
 
     Box(Modifier.fillMaxSize().offset { shake.offset(density) }) {
-        ArenaBackground(app.arenaTheme, strength = 0.5f)
+        ArenaBackground(app.arenaTheme, strength = 0.62f)
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CloseButton { leave() }
@@ -154,6 +160,10 @@ fun BattleScreen(path: String, auto: BattleMode?, partyCode: String? = null, wai
         if (v.paused) Paused(v, leave)
         Confetti(confetti, sound = false)
     }
+}
+
+private fun takeBack(room: String) {
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch { runCatching { Online.decline(room) } }
 }
 
 @Composable
@@ -204,7 +214,7 @@ private fun ColumnScope.DuoLobby(session: BattleSession, v: BattleView, waitingF
     val card = opp?.playerCard
     if (opp == null || card == null) {
         Connecting(listOfNotNull(opp?.profile).ifEmpty { waitingFor })
-        Text("waiting for them to join…", color = Street.c.secondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Text("they got your invitation ✉️ it stays open for 30 minutes. The battle starts as soon as they accept.", color = Street.c.secondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         return
     }
     PlayerCardView(session.me, compact = true, picture = { MyPicture(54.dp) })
