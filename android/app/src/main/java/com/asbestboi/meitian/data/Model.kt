@@ -17,7 +17,11 @@ import uniffi.meitian_core.SpinResult
 import uniffi.meitian_core.sentenceById
 import uniffi.meitian_core.spinSentenceXp
 import uniffi.meitian_core.spinSlots
-import uniffi.meitian_core.spinWaitMs
+import uniffi.meitian_core.spinsLeft
+import uniffi.meitian_core.levelPath
+import uniffi.meitian_core.reservedStories
+import uniffi.meitian_core.storyLesson
+import uniffi.meitian_core.unitStory
 import uniffi.meitian_core.LessonPath
 import uniffi.meitian_core.PathUnit
 import uniffi.meitian_core.Milestone
@@ -186,19 +190,17 @@ data class Profile(
     val pathSentences: List<String> = emptyList(),
     /** Highest arena tier already revealed (0 = a save from before arenas). */
     val arenaSeen: Int = 1,
-    /** Notification when the next spin is ready. */
-    val spinReminder: Boolean = false,
     /** Notification when somebody invites the learner to a battle. */
     val inviteNotify: Boolean = true,
 )
 
-/** The daily slot machine. */
+/** The slot machine. */
 data class Slots(
+    /** Spins ever made (seeds the next prize). */
     val spins: Int = 0,
-    val lastSpin: Long = 0,
-    /** When the server allows the next spin (0 = it hasn't said). */
-    val serverNext: Long = 0,
-    /** The sentence of the day, until the next spin. */
+    /** How many of the finished units' spins were used. */
+    val used: Int = 0,
+    /** The won sentence, until another one is won. */
     val sentenceId: Long? = null,
     val sentenceDone: Boolean = false,
 )
@@ -283,7 +285,7 @@ class AppState(private val context: Context) {
     /** The scenery for where the learner is. */
     val arenaTheme: ArenaTheme
         get() {
-            val size = profile.dailyGoal.coerceAtLeast(1) * uniffi.meitian_core.pathUnitSize().toInt()
+            val size = profile.dailyGoal.coerceAtLeast(1) * uniffi.meitian_core.pathUnitSize(profile.dailyGoal.coerceAtLeast(1).toUInt()).toInt()
             return arenaFor(currentLevel.coerceIn(0, 255).toUByte(), (learnedCount(currentLevel) / size + 1).toUInt())
         }
 
@@ -374,52 +376,39 @@ class AppState(private val context: Context) {
         get() = days[todayKey] ?: DayLog()
         set(v) { days[todayKey] = v }
 
-    // ----- daily slot machine -----
+    // ----- slot machine: a spin for every finished unit -----
 
-    /** Milliseconds until the next spin (0 = ready). */
-    val spinWait: Long get() = spinWaitMs(slots.lastSpin, slots.serverNext, System.currentTimeMillis())
+    /** Spins waiting (they stack up). */
+    val spinsLeft: Int get() = spinsLeft(profile.pathStories, slots.used.toUInt()).toInt()
 
-    /** The pinned sentence, if its pack is loaded. */
+    /** The won sentence, if its pack is loaded. */
     val slotSentence: Sentence? get() = slots.sentenceId?.let { id -> ContentSync.generation; sentenceById(id.toULong(), knownList) }
 
-    /** Spins: the prize is decided, paid and saved at once. Null when it isn't time yet (the server has the last word). */
-    suspend fun spin(): SpinResult? {
-        refreshDay()
-        if (spinWait > 0) return null
-        val server = Online.spin(slots.spins)
-        val now = System.currentTimeMillis()
-        if (server != null && !server.allowed) {
-            slots = slots.copy(serverNext = now + server.waitMs, spins = maxOf(slots.spins, server.spins.toInt()))
-            save()
-            return null
-        }
-        val count = server?.spins?.toInt() ?: (slots.spins + 1)
+    /** Spins: the prize is decided, paid and saved at once. Null when there's no spin left. */
+    fun spin(): SpinResult? {
+        if (spinsLeft <= 0) return null
         val free = Catalog.all.filter { it.price > 0 && it.id !in arena.owned && (settings.swears || !it.swear) }.map { it.id }
-        val result = spinSlots(todayKey, arena.playerId, count.toUInt(), free, knownList)
+        val waiting = slots.sentenceId != null && !slots.sentenceDone
+        val result = spinSlots(arena.playerId, (slots.spins + 1).toUInt(), free, knownList, waiting)
+        val sentence = (result.prize as? SlotPrize.Sentence)?.sentence?.id?.toLong()
         when (val prize = result.prize) {
             is SlotPrize.Coins -> arena = arena.copy(coins = arena.coins + prize.amount.toInt())
             is SlotPrize.Cosmetic -> arena = arena.copy(owned = arena.owned + prize.id)
             is SlotPrize.Sentence -> {}
         }
-        slots = Slots(count, now, if (server != null) now + server.waitMs else 0, (result.prize as? SlotPrize.Sentence)?.sentence?.id?.toLong())
+        slots = slots.copy(spins = slots.spins + 1, used = slots.used + 1)
+        if (sentence != null) slots = slots.copy(sentenceId = sentence, sentenceDone = false)
         save()
-        if (profile.spinReminder) Reminders.scheduleSpin(context, now + spinWait)
         return result
     }
 
-    /** The sentence of the day is done: XP once. Returns what it paid. */
+    /** The won sentence is done: XP once. Returns what it paid. */
     fun finishSlotSentence(): Int {
         if (slots.sentenceDone) return 0
         slots = slots.copy(sentenceDone = true)
         val gained = spinSentenceXp().toInt()
         addXP(gained)
         return gained
-    }
-
-    fun setSpinReminder(on: Boolean) {
-        profile = profile.copy(spinReminder = on)
-        if (on && spinWait > 0) Reminders.scheduleSpin(context, System.currentTimeMillis() + spinWait) else Reminders.cancelSpin(context)
-        save()
     }
 
     // ----- known and new words -----
@@ -510,17 +499,33 @@ class AppState(private val context: Context) {
 
     // ---- learning path ----
 
-    /** The current level's map: units of lessons, a story checkpoint after each unit, the test at the end. */
-    val learnPath: List<PathUnit>
-        get() {
-            val level = currentLevel
-            fun done(keys: List<String>) = keys.mapNotNull { key ->
-                val p = key.split("-")
-                if (p.size == 2 && p[0].toIntOrNull() == level) p[1].toUIntOrNull() else null
-            }
-            return uniffi.meitian_core.learnPath(learnedCount(level).toUInt(), Words.level(level).size.toUInt(),
-                profile.dailyGoal.coerceAtLeast(1).toUInt(), done(profile.pathStories), done(profile.pathSentences))
-        }
+    private fun unitsDone(keys: List<String>) = keys.mapNotNull { key ->
+        val p = key.split("-")
+        if (p.size == 2 && p[0].toIntOrNull() == currentLevel) p[1].toUIntOrNull() else null
+    }
+
+    private val lessonSize get() = profile.dailyGoal.coerceAtLeast(1).toUInt()
+    private val levelByte get() = currentLevel.coerceIn(0, 255).toUByte()
+
+    /** The current level's map: units of lessons, sentences and a story (pictures, SMS, pictures, SMS…), the test at the end. */
+    val learnPath: List<PathUnit> by derivedStateOf {
+        ContentSync.generation
+        levelPath(levelByte, lessonSize, cards.keys.toList(), profile.confirmedLevel.coerceIn(0, 255).toUByte(),
+            unitsDone(profile.pathStories), unitsDone(profile.pathSentences))
+    }
+
+    /** The id of the story at the end of a unit ("" when there are none). */
+    fun unitStoryId(unit: Int): String = unitStory(levelByte, lessonSize, unit.toUInt())
+
+    /** Stories kept for the units that aren't finished yet. */
+    val reservedStories: List<String> get() = reservedStories(levelByte, lessonSize, 1u).let { all ->
+        val done = unitsDone(profile.pathStories).toSet()
+        all.filterIndexed { i, _ -> (i + 1).toUInt() !in done }
+    }
+
+    /** The lesson that brings a locked story closer (empty: its words are learned). */
+    fun lessonForStory(id: String): List<CoreWord> =
+        storyLesson(id, levelByte, lessonSize, cards.keys.toList(), profile.confirmedLevel.coerceIn(0, 255).toUByte()).mapNotNull { Words[it] }
 
     /** A story checkpoint is finished: +20 XP once (nothing when its lines were translated). */
     fun finishPathStory(unit: Int, translations: Int = 0) {
@@ -528,6 +533,8 @@ class AppState(private val context: Context) {
         if (key in profile.pathStories) return
         profile = profile.copy(pathStories = profile.pathStories + key)
         addXP(storyXp(20u, translations.toUInt()).toInt())
+        Sfx.play(SoundId.STREAK)
+        toast = "Unit $unit finished: +1 spin 🎰"
     }
 
     /** A sentence node is finished. Returns the XP it paid (only the first time). */
@@ -545,7 +552,7 @@ class AppState(private val context: Context) {
     /** Word ids of one unit on the current path (default: the unit of the last finished lesson), to pick fitting stories. */
     fun unitWordIds(unit: Int? = null): List<String> {
         val size = profile.dailyGoal.coerceAtLeast(1)
-        val perUnit = uniffi.meitian_core.pathUnitSize().toInt()
+        val perUnit = uniffi.meitian_core.pathUnitSize(size.toUInt()).toInt()
         val all = pathWords
         val doneLessons = learnedCount(currentLevel) / size
         val u = unit ?: maxOf(1, (doneLessons + perUnit - 1) / perUnit)
@@ -711,8 +718,8 @@ class AppState(private val context: Context) {
     fun resetAll() {
         val id = arena.playerId
         profile = Profile(); settings = settings.copy(swears = false); arena = Arena(playerId = id); xp = 0
-        cards.clear(); days.clear(); seen = emptySet(); slots = slots.copy(sentenceId = null, sentenceDone = false); milestoneQueue.clear(); freezeNotice = null
-        Reminders.cancel(context); Reminders.cancelSpin(context)
+        cards.clear(); days.clear(); seen = emptySet(); slots = slots.copy(used = 0, sentenceId = null, sentenceDone = false); milestoneQueue.clear(); freezeNotice = null
+        Reminders.cancel(context)
         // progress kept outside the save: story history (ui.StoryProgress) and the sprint best
         context.getSharedPreferences("stories", Context.MODE_PRIVATE).edit().clear().apply()
         prefs.edit().remove("sprintBest").apply()
@@ -730,11 +737,11 @@ class AppState(private val context: Context) {
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
             put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
             put("pathSt", JSONArray(profile.pathStories)); put("pathSe", JSONArray(profile.pathSentences))
-            put("arenaSeen", profile.arenaSeen); put("spinRem", profile.spinReminder); put("inv", profile.inviteNotify)
+            put("arenaSeen", profile.arenaSeen); put("inv", profile.inviteNotify)
         })
         o.put("seen", JSONArray(seen.toList()))
         o.put("slots", JSONObject().apply {
-            put("n", slots.spins); put("last", slots.lastSpin); put("next", slots.serverNext); put("sid", slots.sentenceId ?: -1L); put("sdone", slots.sentenceDone)
+            put("n", slots.spins); put("used", slots.used); put("sid", slots.sentenceId ?: -1L); put("sdone", slots.sentenceDone)
         })
         o.put("settings", JSONObject().apply {
             val s = settings
@@ -820,10 +827,10 @@ class AppState(private val context: Context) {
                     p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0),
                     p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     p.optJSONArray("pathSe")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
-                    p.optInt("arenaSeen", 0), p.optBoolean("spinRem"), p.optBoolean("inv", true))
+                    p.optInt("arenaSeen", 0), p.optBoolean("inv", true))
             }
             o.optJSONObject("slots")?.let { x ->
-                slots = Slots(x.optInt("n"), x.optLong("last"), x.optLong("next"), x.optLong("sid", -1).takeIf { it >= 0 }, x.optBoolean("sdone"))
+                slots = Slots(x.optInt("n"), x.optInt("used"), x.optLong("sid", -1).takeIf { it >= 0 }, x.optBoolean("sdone"))
             }
             o.optJSONArray("seen")?.let { a -> seen = (0 until a.length()).map { a.getString(it) }.toSet() }
             o.optJSONObject("settings")?.let { s ->

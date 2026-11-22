@@ -131,8 +131,6 @@ fun ProgressScreen() {
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setReminder(granted) }
     val invitePermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
-    val spinPermission = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> app.setSpinReminder(granted) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (!settingsOpen) {
@@ -262,10 +260,6 @@ fun ProgressScreen() {
                         android.app.TimePickerDialog(context, { _, h, m -> app.setReminder(true, h, m) },
                             app.profile.reminderHour, app.profile.reminderMinute, true).show()
                     })
-            }
-            ToggleRow("Spin reminder", "A nudge when your free daily spin is ready", app.profile.spinReminder) { on ->
-                if (on && !com.asbestboi.meitian.data.Reminders.canNotify(context) && android.os.Build.VERSION.SDK_INT >= 33) spinPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                else app.setSpinReminder(on)
             }
             ToggleRow("Battle invitations", "A notification when a friend invites you to a battle", app.profile.inviteNotify) { on ->
                 app.profile = app.profile.copy(inviteNotify = on); app.save()

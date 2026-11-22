@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -82,6 +84,7 @@ import uniffi.meitian_core.Outcome
 import uniffi.meitian_core.arenaFor
 import uniffi.meitian_core.modeInfo
 import uniffi.meitian_core.modesFor
+import uniffi.meitian_core.sayAfterRound
 
 fun ModeInfo.brush(): Brush = Brush.linearGradient(colors.map(::hexColor))
 
@@ -247,10 +250,13 @@ private fun ColumnScope.GroupLobby(session: BattleSession, v: BattleView, code: 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (i in 0 until 4) {
             val p = v.players.getOrNull(i)
-            Column(Modifier.weight(1f).card().padding(8.dp).alpha(if (p == null || p.here) 1f else 0.4f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.weight(1f).card().then(p?.playerCard?.let { Modifier.border(3.dp, com.asbestboi.meitian.data.Catalog.frame(it.frame), RoundedCornerShape(20.dp)) } ?: Modifier).padding(8.dp).alpha(if (p == null || p.here) 1f else 0.4f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (p != null) {
-                    BattlePicture(p, 52.dp)
-                    Text(p.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
+                    Box {
+                        DressedPicture(p, 52.dp)
+                        p.playerCard?.stickerSymbol?.let { Text(it, fontSize = 22.sp, modifier = Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-8).dp).rotate(14f)) }
+                    }
+                    BattleName(p, p.name, 12.sp)
                     Text(if (p.id == v.host) "host 👑" else arenaFor(p.level, 1u).emoji + " HSK ${p.level}", fontSize = 11.sp, color = Street.c.secondary, maxLines = 1)
                 } else {
                     Box(Modifier.size(52.dp).clip(CircleShape).background(Street.c.secondary.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) { Text("＋", color = Street.c.secondary) }
@@ -387,15 +393,15 @@ private fun Modifier.spot(id: String, spots: MutableMap<String, Offset>): Modifi
 @Composable
 private fun PlayerBar(p: BattlePlayer, mode: BattleMode, v: BattleView, spots: MutableMap<String, Offset>, mine: Boolean = false) {
     val hp by animateFloatAsState(p.hp.toFloat(), label = "hp")
-    Row(Modifier.fillMaxWidth().spot(p.id, spots).card().padding(10.dp).alpha(if (p.out) 0.5f else 1f), verticalAlignment = Alignment.CenterVertically) {
-        Box(contentAlignment = Alignment.Center) {
-            Aura(p.playerCard?.aura, 22f, Modifier.size(72.dp))
-            BattlePicture(p, 44.dp)
-        }
-        HSpacer(8.dp)
+    Dressed(p, Modifier.fillMaxWidth().spot(p.id, spots).alpha(if (p.out) 0.5f else 1f)) { Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        DressedPicture(p, 44.dp)
+        HSpacer(10.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (mine) "you" else p.name, fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.weight(1f), maxLines = 1)
+                Column(Modifier.weight(1f)) {
+                    BattleName(p, if (mine) "${p.name} (you)" else p.name, 16.sp)
+                    p.playerCard?.titleItem?.let { TitledText("${it.symbol} · ${it.name}", it.id, 11.sp, weight = FontWeight.Bold) }
+                }
                 if (mode == BattleMode.TEAM2V2) Pill("team ${if (p.team == 0u) "🔴" else "🔵"}", Street.c.secondary)
                 HSpacer(6.dp)
                 Text(score(p, mode, v), fontWeight = FontWeight.ExtraBold, color = if (mode.hasHp && p.hp <= 30u) Street.c.red else Street.c.text)
@@ -403,23 +409,48 @@ private fun PlayerBar(p: BattlePlayer, mode: BattleMode, v: BattleView, spots: M
             if (mode.hasHp) LinearProgressIndicator(progress = { hp / 100f }, modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                 color = if (p.hp <= 30u) Street.c.red else if (mine) Street.c.jade else Street.c.sky)
         }
+    } }
+}
+
+/** A player's equipped frame around their bar, and their sticker slapped on its corner. */
+@Composable
+private fun Dressed(p: BattlePlayer, modifier: Modifier, content: @Composable () -> Unit) {
+    val card = p.playerCard
+    val shape = RoundedCornerShape(22.dp)
+    Box(modifier) {
+        Box(Modifier.clip(shape).background(Street.c.card).border(5.dp, com.asbestboi.meitian.data.Catalog.frame(card?.frame ?: "fr.lantern"), shape)) { content() }
+        card?.stickerSymbol?.let { Text(it, fontSize = 28.sp, modifier = Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-12).dp).rotate(14f)) }
     }
 }
+
+/** A player's picture with their aura around it. */
+@Composable
+private fun DressedPicture(p: BattlePlayer, size: androidx.compose.ui.unit.Dp) {
+    Box(contentAlignment = Alignment.Center) {
+        Aura(p.playerCard?.aura, size.value / 2f, Modifier.requiredSize(size * 1.9f))
+        BattlePicture(p, size)
+    }
+}
+
+/** A player's name in their title's colours. */
+@Composable
+private fun BattleName(p: BattlePlayer, text: String, size: androidx.compose.ui.unit.TextUnit, modifier: Modifier = Modifier) =
+    TitledText(text, p.playerCard?.title ?: p.profile?.cosmeticTitle.orEmpty(), size, modifier)
 
 /** Narrow card: one of several opponents. */
 @Composable
 private fun PlayerChip(p: BattlePlayer, mode: BattleMode, v: BattleView, spots: MutableMap<String, Offset>, modifier: Modifier) {
     val hp by animateFloatAsState(p.hp.toFloat(), label = "hp")
-    Column(modifier.spot(p.id, spots).card().padding(8.dp).alpha(if (p.out || !p.here) 0.45f else 1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Dressed(p, modifier.spot(p.id, spots).alpha(if (p.out || !p.here) 0.45f else 1f)) { Column(Modifier.fillMaxWidth().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box {
-            BattlePicture(p, 40.dp)
+            DressedPicture(p, 40.dp)
             if (mode == BattleMode.TEAM2V2) Text(if (p.team == 0u) "🔴" else "🔵", fontSize = 12.sp, modifier = Modifier.align(Alignment.BottomEnd))
             if (p.answered && v.phase == BattlePhase.PLAYING) Text("💬", fontSize = 12.sp, modifier = Modifier.align(Alignment.TopEnd))
         }
-        Text(p.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
+        BattleName(p, p.name, 12.sp)
         Text(if (p.out) "out" else score(p, mode, v), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (p.out) Street.c.red else Street.c.text)
         if (mode.hasHp) LinearProgressIndicator(progress = { hp / 100f }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), color = if (p.hp <= 30u) Street.c.red else Street.c.sky)
-    }
+    } }
 }
 
 private fun score(p: BattlePlayer, mode: BattleMode, v: BattleView) = when {
@@ -453,6 +484,8 @@ fun QuestionPanel(q: BattleQuestion, v: BattleView, answer: (BattleAnswer) -> Un
     val app = LocalApp.current
     val open = v.phase == BattlePhase.PLAYING && !v.answered && !v.locked
     LaunchedEffect(v.index, q.say) { if (q.say.isNotEmpty() && v.phase == BattlePhase.PLAYING) Speaker.say(q.say) }
+    // the finished sentence, once the round is over
+    LaunchedEffect(v.index, v.phase) { if (v.phase == BattlePhase.ROUND_RESULT) sayAfterRound(q).let { if (it.isNotEmpty()) Speaker.say(it) } }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.fillMaxWidth().heightIn(min = 96.dp).card().padding(12.dp), contentAlignment = Alignment.Center) {
             when (q.ask) {
@@ -461,7 +494,11 @@ fun QuestionPanel(q: BattleQuestion, v: BattleView, answer: (BattleAnswer) -> Un
                     Text(if (q.ask == BattleAsk.TONE) "which tone? “${q.prompt}”" else "listen and tap it", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
                 }
                 BattleAsk.MEANING -> RubyText(q.prompt, q.promptPinyin, if (q.prompt.length > 3) 42.sp else 54.sp, FontWeight.SemiBold, center = true)
-                BattleAsk.PINYIN -> Text(q.prompt, fontSize = if (q.prompt.length > 3) 42.sp else 58.sp, fontWeight = FontWeight.SemiBold, color = Street.c.text)
+                BattleAsk.PINYIN -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(q.prompt, fontSize = if (q.prompt.length > 3) 42.sp else 58.sp, fontWeight = FontWeight.SemiBold, color = Street.c.text)
+                    HSpacer(14.dp)
+                    SpeakButton(q.prompt, 48.dp, Street.c.jade)
+                }
                 else -> Text("“${q.prompt}”", style = street(if (q.prompt.length > 24) 20.sp else 28.sp), color = Street.c.text, textAlign = TextAlign.Center)
             }
         }
@@ -473,7 +510,7 @@ fun QuestionPanel(q: BattleQuestion, v: BattleView, answer: (BattleAnswer) -> Un
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Street.c.secondary.copy(alpha = 0.4f)))
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    q.tiles.forEachIndexed { i, t -> BattleTile(t, i in built) { if (open && i !in built) built.add(i) } }
+                    q.tiles.forEachIndexed { i, t -> BattleTile(t, i in built) { if (open && i !in built) { Speaker.say(t); built.add(i) } } }
                 }
                 BigButton("check", brush = Street.jade(), enabled = open && built.size == q.tiles.size) { answer(BattleAnswer.Tiles(built.map { q.tiles[it] })) }
             }
@@ -545,8 +582,9 @@ private fun ColumnScope.Results(session: BattleSession, v: BattleView, leave: ()
         v.players.sortedBy { it.place }.forEach { p ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${p.place}", style = street(20.sp), color = Street.c.secondary, modifier = Modifier.padding(end = 10.dp))
-                BattlePicture(p, 36.dp); HSpacer(10.dp)
-                Text(if (p.id == v.me) "you" else p.name, fontWeight = FontWeight.Bold, color = Street.c.text, modifier = Modifier.weight(1f), maxLines = 1)
+                DressedPicture(p, 36.dp); HSpacer(10.dp)
+                BattleName(p, if (p.id == v.me) "${p.name} (you)" else p.name, 16.sp, Modifier.weight(1f))
+                p.playerCard?.stickerSymbol?.let { Text(it, fontSize = 20.sp); HSpacer(8.dp) }
                 v.mode?.let { Text(score(p, it, v), fontWeight = FontWeight.Bold, color = Street.c.secondary) }
             }
         }

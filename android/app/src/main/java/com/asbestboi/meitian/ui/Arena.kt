@@ -143,11 +143,14 @@ fun ShopScreen(close: () -> Unit) {
     val app = LocalApp.current
     var kind by remember { mutableStateOf(CosmeticKind.Frame) }
     var confetti by remember { mutableIntStateOf(0) }
-    var demoEffect by remember { mutableStateOf("fx.boom") }
+    // what's being looked at (tapping never buys) and what's about to be bought
+    var preview by remember { mutableStateOf<Cosmetic?>(null) }
+    var buying by remember { mutableStateOf<Cosmetic?>(null) }
     var demoTick by remember { mutableIntStateOf(0) }
     val shake = remember { Shake() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val shown = { k: CosmeticKind -> preview?.takeIf { it.kind == k }?.id ?: app.equipped(k) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -157,16 +160,17 @@ fun ShopScreen(close: () -> Unit) {
             if (kind == CosmeticKind.Effect) {
                 // hit preview stage: tap any hit to see it fly
                 Box(Modifier.fillMaxWidth().height(150.dp).offset { shake.offset(density) }.clip(RoundedCornerShape(24.dp))
-                    .background(Street.night()).clickable { demoTick++ }) {
+                    .background(Street.night()).clickable { demoTick++; scope.launch { delay(380); Sfx.playHit(shown(CosmeticKind.Effect)) } }) {
                     MyPicture(48.dp, Modifier.align(Alignment.CenterStart).offset(x = 24.dp))
                     Text("🎯", fontSize = 40.sp, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp))
-                    HitEffect(demoEffect, demoTick, androidx.compose.ui.geometry.Offset(0.14f, 0.55f), androidx.compose.ui.geometry.Offset(0.86f, 0.5f), damage = 22) {
+                    HitEffect(shown(CosmeticKind.Effect), demoTick, androidx.compose.ui.geometry.Offset(0.14f, 0.55f), androidx.compose.ui.geometry.Offset(0.86f, 0.5f), damage = 22) {
                         scope.launch { shake.hit(it) }
                     }
-                    Text("tap a hit to try it", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
+                    Text("tap a hit to try it, it's free", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
                 }
             } else {
-                PlayerCardView(app.myCard().copy(frame = app.arena.frame, title = app.arena.title, sticker = app.arena.sticker, aura = app.arena.aura), compact = true, picture = { MyPicture(54.dp) })
+                PlayerCardView(app.myCard().copy(frame = shown(CosmeticKind.Frame), title = shown(CosmeticKind.Title), sticker = shown(CosmeticKind.Sticker), aura = shown(CosmeticKind.Aura)),
+                    compact = true, picture = { MyPicture(54.dp) })
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CosmeticKind.entries.forEach { k ->
@@ -176,41 +180,76 @@ fun ShopScreen(close: () -> Unit) {
             }
             LazyVerticalGrid(GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(Catalog.items(kind, app.settings.swears), key = { it.id }) { item ->
-                    ShopTile(item, onTap = { if (item.kind == CosmeticKind.Effect) { demoEffect = item.id; demoTick++; scope.launch { delay(380); Sfx.playHit(item.id) } } }) { confetti++ }
+                    ShopTile(item, selected = preview?.id == item.id, onTap = {
+                        preview = item
+                        if (item.kind == CosmeticKind.Effect) { demoTick++; scope.launch { delay(380); Sfx.playHit(item.id) } } else Sfx.play(SoundId.TAP)
+                    }, onEquip = { app.equip(item); preview = null; Sfx.play(SoundId.TOGGLE_ON) }, onBuy = { preview = item; buying = item })
                 }
             }
         }
         Confetti(confetti, sound = false)
+        buying?.let { item ->
+            ConfirmPurchase(item, no = { buying = null }) {
+                buying = null
+                if (app.buy(item)) { confetti++; preview = null; Sfx.play(SoundId.PURCHASE) } else Sfx.play(SoundId.WRONG)
+            }
+        }
+    }
+}
+
+/** "Buy it?" Nothing is bought without this. */
+@Composable
+private fun ConfirmPurchase(item: Cosmetic, no: () -> Unit, yes: () -> Unit) {
+    val app = LocalApp.current
+    val after = app.arena.coins - item.price
+    androidx.compose.ui.window.Dialog(onDismissRequest = no) {
+        Column(Modifier.fillMaxWidth().card().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ItemPreview(item)
+            Text("buy ${item.name}?", style = street(24.sp), color = Street.c.text, textAlign = TextAlign.Center)
+            Text(if (after >= 0) "🪙 ${item.price} · you'll have $after left" else "🪙 ${item.price} · you need ${-after} more coins", fontWeight = FontWeight.Bold,
+                color = if (after >= 0) Street.c.secondary else Street.c.red)
+            BigButton("buy for 🪙 ${item.price}", brush = Street.gold(), enabled = after >= 0, onClick = yes)
+            Text("not now", color = Street.c.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = no).padding(8.dp))
+        }
     }
 }
 
 @Composable
-private fun ShopTile(item: Cosmetic, onTap: () -> Unit = {}, bought: () -> Unit) {
+private fun ItemPreview(item: Cosmetic) {
+    Box(Modifier.height(66.dp), contentAlignment = Alignment.Center) {
+        when (item.kind) {
+            CosmeticKind.Frame -> Box(Modifier.size(96.dp, 56.dp).clip(RoundedCornerShape(12.dp)).background(Catalog.frame(item.id)).border(2.dp, Street.c.ink, RoundedCornerShape(12.dp)))
+            CosmeticKind.Title -> TitledText(item.symbol, item.id, 24.sp)
+            CosmeticKind.Aura -> Box(Modifier.size(110.dp, 66.dp), contentAlignment = Alignment.Center) {
+                Aura(item.id, 22f, Modifier.fillMaxSize())
+                if (item.symbol.isEmpty()) Text("🚫", fontSize = 34.sp) else MyPicture(38.dp)
+            }
+            CosmeticKind.Sticker -> if (item.symbol.isEmpty()) Text("🚫", fontSize = 32.sp) else Text(item.symbol, fontSize = 40.sp, modifier = Modifier.rotate(-8f))
+            else -> Text(item.symbol, fontSize = 44.sp)
+        }
+    }
+}
+
+@Composable
+private fun ShopTile(item: Cosmetic, selected: Boolean, onTap: () -> Unit, onEquip: () -> Unit, onBuy: () -> Unit) {
     val app = LocalApp.current
     val owned = item.id in app.arena.owned
     val equipped = app.equipped(item.kind) == item.id
     val affordable = app.arena.coins >= item.price
     Column(
-        Modifier.fillMaxWidth().streetCard(Street.c.card, if (equipped) Street.c.jade else Street.c.ink, shadow = 4.dp).clickable {
-            onTap()
-            if (owned) app.equip(item) else if (app.buy(item)) { Sfx.play(SoundId.PURCHASE); bought() } else Sfx.play(SoundId.WRONG)
-        }.padding(14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.fillMaxWidth().streetCard(Street.c.card, if (equipped) Street.c.jade else if (selected) Street.c.sky else Street.c.ink, shadow = 4.dp)
+            .clickable(onClickLabel = "Preview", onClick = onTap).padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Box(Modifier.height(66.dp), contentAlignment = Alignment.Center) {
-            when (item.kind) {
-                CosmeticKind.Frame -> Box(Modifier.size(96.dp, 56.dp).clip(RoundedCornerShape(12.dp)).background(Catalog.frame(item.id)).border(2.dp, Street.c.ink, RoundedCornerShape(12.dp)))
-                CosmeticKind.Title -> Text(item.symbol, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
-                CosmeticKind.Aura -> Box(Modifier.size(110.dp, 66.dp), contentAlignment = Alignment.Center) {
-                    Aura(item.id, 22f, Modifier.fillMaxSize())
-                    if (item.symbol.isEmpty()) Text("🚫", fontSize = 34.sp) else MyPicture(38.dp)
-                }
-                CosmeticKind.Sticker -> if (item.symbol.isEmpty()) Text("🚫", fontSize = 32.sp) else Text(item.symbol, fontSize = 40.sp, modifier = Modifier.rotate(-8f))
-                else -> Text(item.symbol, fontSize = 44.sp)
-            }
-        }
-        Text(item.name, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
-        Text(when { equipped -> "✓ EQUIPPED"; owned -> "EQUIP"; else -> "🪙 ${item.price}" }, fontWeight = FontWeight.Bold, fontSize = 12.sp,
-            color = when { equipped -> Street.c.jade; owned -> Street.c.sky; affordable -> Street.c.text; else -> Street.c.secondary })
+        ItemPreview(item)
+        if (item.kind == CosmeticKind.Title) TitledText(item.name, item.id, 14.sp) else Text(item.name, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
+        Text(when { equipped -> "✓ equipped"; owned -> "equip"; else -> "🪙 ${item.price}" }, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp,
+            color = when { equipped -> Street.c.jade; owned -> Color.White; affordable -> Color.Black; else -> Street.c.secondary },
+            modifier = Modifier.clip(RoundedCornerShape(50)).then(when {
+                equipped -> Modifier
+                owned -> Modifier.background(Street.c.sky).clickable(onClick = onEquip)
+                affordable -> Modifier.background(Street.gold()).clickable(onClickLabel = "Buy", onClick = onBuy)
+                else -> Modifier.background(Street.c.secondary.copy(alpha = 0.15f)).clickable(onClickLabel = "Buy", onClick = onBuy)
+            }).padding(horizontal = 18.dp, vertical = 8.dp))
     }
 }

@@ -218,7 +218,7 @@ fun Tabs() {
                     Box {
                         Text(icon, fontSize = 21.sp, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
                         // a free spin is waiting
-                        if (i == 0 && tab != 0 && LocalApp.current.spinWait <= 0) Box(Modifier.align(Alignment.TopEnd)
+                        if (i == 0 && tab != 0 && LocalApp.current.spinsLeft > 0) Box(Modifier.align(Alignment.TopEnd)
                             .size(9.dp).background(Street.c.red, androidx.compose.foundation.shape.CircleShape))
                     }
                     Text(label.lowercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold,

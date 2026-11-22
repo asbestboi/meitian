@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -207,11 +208,16 @@ fun PlayerCardView(card: PlayerCard, compact: Boolean = false, coins: Int? = nul
             Modifier.fillMaxWidth().block(com.asbestboi.meitian.data.Catalog.frame(card.frame)).padding(if (compact) 14.dp else 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape), contentAlignment = Alignment.Center) { picture() }
+            Box(contentAlignment = Alignment.Center) {
+                Aura(card.aura, if (compact) 28f else 40f, Modifier.requiredSize(if (compact) 110.dp else 160.dp))
+                Box(Modifier.border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape), contentAlignment = Alignment.Center) { picture() }
+            }
             HSpacer(14.dp)
-            Column(Modifier.weight(1f)) {
-                Text(card.name, color = Color.White, style = street(if (compact) 20.sp else 26.sp), maxLines = 1)
-                card.titleItem?.let { Text("${it.symbol} · ${it.name}", color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(Modifier.namePlate()) {
+                    TitledText(card.name, card.title, if (compact) 19.sp else 24.sp, weight = FontWeight.Black)
+                    card.titleItem?.let { TitledText("${it.symbol} · ${it.name}", card.title, 13.sp) }
+                }
                 Text("HSK ${card.level} · ${card.wins}W ${card.losses}L", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             coins?.let {

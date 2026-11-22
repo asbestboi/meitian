@@ -76,7 +76,6 @@ import uniffi.meitian_core.StoryImage
 import uniffi.meitian_core.StoryLine
 import uniffi.meitian_core.StoryQuestion
 import uniffi.meitian_core.nextStory
-import uniffi.meitian_core.rereadStory
 import uniffi.meitian_core.shuffleStoryReplies
 import com.asbestboi.meitian.data.AppState
 import uniffi.meitian_core.shelfStories
@@ -129,22 +128,19 @@ object StoryProgress {
         val p = prefs(c)
         p.getString(key, null)?.let { id ->
             val s = storyById(id, known)
-            if (s != null && id !in readIds && p.getInt(key + "At", -1) == known.size && (s.style == "chat") == chat &&
+            if (s != null && id !in readIds && id !in app.reservedStories && p.getInt(key + "At", -1) == known.size && (s.style == "chat") == chat &&
                 (s.date.isEmpty() || s.date <= app.todayKey) && storyUnlocked(s, known)) return s
         }
-        val s = nextStory(chat, app.todayKey, readIds, known, app.unitWordIds(unit), app.upcomingIds, kotlin.random.Random.nextLong().toULong())
+        // the unfinished units' stories are kept for the path
+        val s = nextStory(chat, app.todayKey, readIds + app.reservedStories, known, app.unitWordIds(unit), app.upcomingIds, kotlin.random.Random.nextLong().toULong())
         p.edit().apply { if (s == null) remove(key) else putString(key, s.id).putInt(key + "At", known.size) }.apply()
         return s
     }
 }
 
-/** What the story stop of a unit plays: something unread that fits the unit (odd units a picture story, even units a
- *  chat, the other kind if there's none), else the story read longest ago. Null when nothing is unlocked. */
-fun pathStory(c: Context, app: AppState, unit: Int): Story? {
-    val chat = unit % 2 == 0
-    return StoryProgress.next(c, chat, app, unit) ?: StoryProgress.next(c, !chat, app, unit)
-        ?: rereadStory(app.todayKey, StoryProgress.read(c), app.knownList)
-}
+/** The story at the end of a unit: a picture story in odd units, an SMS chat in even ones. Null when there are none
+ *  (the stories aren't downloaded yet). */
+fun pathStory(app: AppState, unit: Int): Story? = storyById(app.unitStoryId(unit), app.knownList)
 
 /** Story picture. Panels show the whole image (fit) over a blurred filled copy; cards fill and crop. */
 @Composable
@@ -219,7 +215,7 @@ private fun StoryCard(story: Story, done: Boolean, onClick: () -> Unit = {}) {
     }
 }
 
-private fun learnMore(missing: Int) = "learn $missing more word${if (missing == 1) "" else "s"} to unlock"
+fun wordsToGo(missing: Int) = "$missing more word${if (missing == 1) "" else "s"} to go"
 
 /** Practice tab: a mystery "next story" (no cover, no title — a surprise) and the history of stories already read,
  *  which can be revisited (no XP the second time). Nothing of a locked story is shown. */
@@ -254,11 +250,24 @@ fun StoryHub(chats: Boolean = false) {
                 Text("→", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black,
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFC6FF3D)).padding(horizontal = 14.dp, vertical = 8.dp))
             }
-        } else {
-            val soonest = locked.firstOrNull()?.missingWords?.toInt()
-            Text(if (soonest != null) "${learnMore(soonest)} the next ${if (chats) "chat" else "story"} ✦"
-                else if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
+        } else if (locked.isEmpty()) {
+            Text(if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
                 color = Street.c.secondary, modifier = Modifier.fillMaxWidth().card().padding(16.dp))
+        }
+        // the next locked one, without giving anything about it away
+        locked.firstOrNull()?.let { s ->
+            Row(Modifier.fillMaxWidth().card().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("🔒", fontSize = 26.sp); HSpacer(12.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(if (chats) "next locked chat" else "next locked story", fontWeight = FontWeight.Bold, color = Street.c.text)
+                    Text(wordsToGo(s.missingWords.toInt()), fontSize = 12.sp, color = Street.c.secondary)
+                }
+                Text("learn words", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color.Black,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Street.lime()).clickable {
+                        val words = app.lessonForStory(s.story.id).ifEmpty { app.nextUpWords() }
+                        if (words.isNotEmpty()) nav.show { LearnSession(words) { nav.close() } }
+                    }.padding(horizontal = 14.dp, vertical = 10.dp))
+            }
         }
         if (history.isNotEmpty()) {
             Text("history", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)

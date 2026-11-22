@@ -213,7 +213,8 @@ private fun ProfileRow(p: OnlineProfile, trailing: String? = null, rank: Int? = 
         }
         HSpacer(12.dp)
         Column(Modifier.weight(1f)) {
-            Text("${p.nickname} #${p.tag}", fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
+            TitledText("${p.nickname} #${p.tag}", p.cosmeticTitle, 16.sp)
+            Catalog[p.cosmeticTitle]?.let { TitledText("${it.symbol} · ${it.name}", it.id, 11.sp, weight = FontWeight.Bold) }
             Text("HSK ${p.level} · 🔥 ${p.streak} · ${p.wins}–${p.losses}", fontSize = 12.sp, color = Street.c.secondary)
         }
         trailing?.let { Text(it, style = street(18.sp), color = Street.c.text) }

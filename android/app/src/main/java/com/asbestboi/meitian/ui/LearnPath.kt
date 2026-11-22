@@ -70,6 +70,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
     var hintTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(hintTick) { if (hintTick > 0) { delay(2200); hint = null } }
     fun show(text: String) { hint = text; hintTick++ }
+    var lockedStory by remember { mutableStateOf<Int?>(null) }
 
     fun start(words: List<uniffi.meitian_core.CoreWord>) {
         if (words.isEmpty()) return
@@ -77,7 +78,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
     }
 
     fun openStory(unit: Int, done: Boolean) {
-        val s = pathStory(ctx, app, unit)
+        val s = pathStory(app, unit)
         when {
             s != null -> {
                 prefetchStory(ctx, s)
@@ -91,6 +92,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
     }
 
     fun tap(node: PathNode) {
+        if (node.state == PathNodeState.LOCKED && node.kind == PathNodeKind.STORY) { lockedStory = node.unit.toInt(); return }
         if (node.state == PathNodeState.LOCKED) {
             show(when (node.kind) {
                 PathNodeKind.LESSON -> "finish the lessons before this one first"
@@ -109,6 +111,12 @@ fun LearnScreen(goToPractice: () -> Unit) {
                 nav.show { LevelTest(level, onPracticeWeak = goToPractice) { nav.close() } }
             } else show("you've reached the highest level 🐉")
         }
+    }
+
+    lockedStory?.let { unit ->
+        val sentences = units.firstOrNull { it.number.toInt() == unit }?.nodes?.lastOrNull { it.kind == PathNodeKind.SENTENCES }
+        LockedStory(unit, sentences?.takeIf { it.state == PathNodeState.OPEN }, close = { lockedStory = null }, learn = { lockedStory = null; start(it) },
+            openSentences = { lockedStory = null; tap(it) })
     }
 
     // flat list: unit headers and nodes, so the list can jump to "next up"
@@ -177,7 +185,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
                 val (title, sub) = when (n.kind) {
                     PathNodeKind.TEST -> "take the HSK ${app.currentLevel} test" to "pass with 80% to unlock HSK ${app.currentLevel + 1}"
                     PathNodeKind.SENTENCES -> "build sentences" to "+${pathSentencesXp()} XP · only words you know"
-                    PathNodeKind.STORY -> "read the unit ${n.unit} story" to "+20 XP"
+                    PathNodeKind.STORY -> (if (n.unit % 2u == 0u) "read the unit ${n.unit} chat" else "read the unit ${n.unit} story") to "+20 XP · +1 spin"
                     PathNodeKind.LESSON -> (if (app.today.learnedDone) "start lesson ${n.number}" else "learn today's words") to
                         "unit ${n.unit} · lesson ${n.number} · ${app.profile.dailyGoal} new words"
                 }
@@ -260,8 +268,8 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
     }
     val icon = when (node.kind) {
         PathNodeKind.LESSON -> if (node.state == PathNodeState.DONE) "✓" else if (locked) "🔒" else "★"
-        PathNodeKind.SENTENCES -> "💬"
-        PathNodeKind.STORY -> "📖"
+        PathNodeKind.SENTENCES -> "🧩"
+        PathNodeKind.STORY -> if (node.unit % 2u == 0u) "💬" else "📖"
         PathNodeKind.TEST -> "🏆"
     }
     val pulse = if (node.next) {
@@ -283,9 +291,33 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
             if (!lesson) Text(when (node.kind) {
                 PathNodeKind.TEST -> "level-up test"
                 PathNodeKind.SENTENCES -> "sentences · +${pathSentencesXp()} XP"
-                else -> "story"
+                else -> if (node.unit % 2u == 0u) "SMS · +1 spin 🎰" else "story · +1 spin 🎰"
             }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.text,
                 modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(50)).background(Street.c.card.copy(alpha = 0.92f)).padding(horizontal = 10.dp, vertical = 3.dp))
+        }
+    }
+}
+
+/** A unit's story that can't be read yet: what it takes, and the lesson (or sentences) to get there. */
+@Composable
+private fun LockedStory(unit: Int, sentences: PathNode?, close: () -> Unit, learn: (List<uniffi.meitian_core.CoreWord>) -> Unit, openSentences: (PathNode) -> Unit) {
+    val app = LocalApp.current
+    val chat = unit % 2 == 0
+    val id = app.unitStoryId(unit)
+    val words = app.lessonForStory(id)
+    val missing = uniffi.meitian_core.storyById(id, app.knownList)?.let { uniffi.meitian_core.storyMissingWords(it, app.knownList).toInt() } ?: 0
+    androidx.compose.ui.window.Dialog(onDismissRequest = close) {
+        Column(Modifier.fillMaxWidth().card().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(if (chat) "💬" else "📖", fontSize = 46.sp)
+            Text("unit $unit ${if (chat) "SMS" else "story"} 🔒", style = street(24.sp), color = Street.c.text)
+            Text(when {
+                missing > 0 -> "${wordsToGo(missing)} before you can read it."
+                sentences != null -> "You know its words. Build the unit's sentences and it opens."
+                else -> "You know its words. Finish the unit's lessons and sentences and it opens."
+            }, color = Street.c.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            if (missing == 0 && sentences != null) BigButton("build sentences", brush = Street.sky()) { openSentences(sentences) }
+            else BigButton("learn words", brush = Street.lime()) { learn(words.ifEmpty { app.nextUpWords() }) }
+            Text("not now", color = Street.c.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = close).padding(8.dp))
         }
     }
 }

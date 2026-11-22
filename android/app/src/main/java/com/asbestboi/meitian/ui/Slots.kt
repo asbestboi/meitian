@@ -33,7 +33,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +44,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -59,7 +57,6 @@ import com.asbestboi.meitian.LocalApp
 import com.asbestboi.meitian.LocalNav
 import com.asbestboi.meitian.data.Catalog
 import com.asbestboi.meitian.data.ContentSync
-import com.asbestboi.meitian.data.Online
 import com.asbestboi.meitian.data.Sfx
 import com.asbestboi.meitian.data.Speaker
 import kotlinx.coroutines.delay
@@ -71,26 +68,17 @@ import uniffi.meitian_core.SpinResult
 import uniffi.meitian_core.pinyinTypedOk
 import uniffi.meitian_core.shuffledTiles
 import uniffi.meitian_core.slotSymbols
-import uniffi.meitian_core.spinCountdown
 import uniffi.meitian_core.spinSentenceXp
 import uniffi.meitian_core.wordOrderCorrect
 
-/** Milliseconds until the next spin, counting down. */
-@Composable
-private fun spinWait(): Long {
-    val app = LocalApp.current
-    var wait by remember { mutableLongStateOf(app.spinWait) }
-    LaunchedEffect(app.slots) { while (true) { wait = app.spinWait; delay(1000) } }
-    return wait
-}
-
-/** Today: the daily spin and the sentence of the day, pinned above the path. */
+/** Today: the spins earned by finishing units and the won sentence, pinned above the path. */
 @Composable
 fun SlotCard() {
     val app = LocalApp.current
     val nav = LocalNav.current
-    val wait = spinWait()
-    val ready = wait <= 0
+    val left = app.spinsLeft
+    val ready = left > 0
+    val next = app.learnPath.firstOrNull { u -> u.nodes.any { it.kind == uniffi.meitian_core.PathNodeKind.STORY && it.state != uniffi.meitian_core.PathNodeState.DONE } }?.number
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).then(if (ready) Modifier.background(Street.gold()) else Modifier.background(Street.c.card))
@@ -99,13 +87,13 @@ fun SlotCard() {
         ) {
             Text("🎰", fontSize = 24.sp); HSpacer(10.dp)
             Column {
-                Text(if (ready) "your daily spin is ready!" else "next spin in", fontWeight = FontWeight.ExtraBold, fontSize = if (ready) 15.sp else 12.sp,
+                Text(if (left == 1) "you have a spin!" else if (ready) "you have $left spins!" else "next spin", fontWeight = FontWeight.ExtraBold, fontSize = if (ready) 15.sp else 12.sp,
                     color = if (ready) Color.Black else Street.c.secondary)
-                Text(if (ready) "free, once a day" else spinCountdown(wait), fontWeight = FontWeight.Bold, fontSize = if (ready) 12.sp else 15.sp,
+                Text(if (ready) "one for every finished unit" else if (next != null) "finish unit $next" else "finish a unit", fontWeight = FontWeight.Bold, fontSize = if (ready) 12.sp else 15.sp,
                     color = if (ready) Color.Black.copy(alpha = 0.7f) else Street.c.text)
             }
         }
-        // not on every tick of the countdown
+        // only when something changed
         val sentence = remember(app.slots.sentenceId, ContentSync.generation, app.knownList.size) { app.slotSentence }
         if (sentence != null) Row(
             Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(Street.c.card)
@@ -114,18 +102,17 @@ fun SlotCard() {
         ) {
             Text(if (app.slots.sentenceDone) "✅" else "📝", fontSize = 24.sp); HSpacer(10.dp)
             Column {
-                Text("sentence of the day", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.secondary, maxLines = 1)
+                Text("bonus sentence", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.secondary, maxLines = 1)
                 Text(if (app.slots.sentenceDone) sentence.zh else "hear, build, type · +${spinSentenceXp()} XP", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Street.c.text, maxLines = 1)
             }
         }
     }
 }
 
-/** The daily slot machine: one free spin every 24 hours. */
+/** The slot machine: a free spin for every finished unit, and spins stack up. */
 @Composable
 fun SlotMachine(close: () -> Unit) {
     val app = LocalApp.current
-    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val reduce = reduceMotion()
@@ -136,20 +123,18 @@ fun SlotMachine(close: () -> Unit) {
     val glow = remember { Animatable(1f) }
     var busy by remember { mutableStateOf(false) }
     var won by remember { mutableStateOf<SpinResult?>(null) }
-    var note by remember { mutableStateOf<String?>(null) }
     var confetti by remember { mutableIntStateOf(0) }
-    val wait = spinWait()
+    val left = app.spinsLeft
 
     fun spin() {
         if (busy) return
-        busy = true; note = null
+        busy = true; won = null
         scope.launch {
-            Online.init(ctx)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             launch { lever.animateTo(1f, tween(160)); lever.animateTo(0f, spring(dampingRatio = 0.4f)) }
             // the prize is decided and saved before the reels move
             val result = app.spin()
-            if (result == null) { note = "Not yet: one spin every 24 hours."; busy = false; return@launch }
+            if (result == null) { busy = false; return@launch }
             if (!reduce) {
                 val start = android.os.SystemClock.elapsedRealtime()
                 var stopped = 0
@@ -194,7 +179,7 @@ fun SlotMachine(close: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                CloseButton(close); Spacer(Modifier.weight(1f)); Text("daily spin", style = street(22.sp), color = Street.c.text); Spacer(Modifier.weight(1f)); Spacer(Modifier.size(40.dp))
+                CloseButton(close); Spacer(Modifier.weight(1f)); Text("lucky spin", style = street(22.sp), color = Street.c.text); Spacer(Modifier.weight(1f)); Spacer(Modifier.size(40.dp))
             }
             Spacer(Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -211,25 +196,26 @@ fun SlotMachine(close: () -> Unit) {
                     }
                 }
                 // the lever
-                Box(Modifier.padding(start = 10.dp).height(130.dp).size(28.dp, 130.dp).clickable(enabled = wait <= 0 && !busy) { spin() }.semantics { contentDescription = "Pull the lever" }) {
+                Box(Modifier.padding(start = 10.dp).height(130.dp).size(28.dp, 130.dp).clickable(enabled = left > 0 && !busy) { spin() }.semantics { contentDescription = "Pull the lever" }) {
                     Box(Modifier.align(Alignment.Center).size(8.dp, 110.dp).clip(RoundedCornerShape(50)).background(Street.c.secondary.copy(alpha = 0.4f)))
                     Box(Modifier.align(Alignment.TopCenter).graphicsLayer { translationY = lever.value * 80.dp.toPx() }.size(28.dp).clip(CircleShape).background(Street.c.red))
                 }
             }
             Spacer(Modifier.height(6.dp))
             won?.let { PrizeView(it.prize) }
-            note?.let { Text(it, fontWeight = FontWeight.Bold, color = Street.c.red) }
             Spacer(Modifier.weight(1f))
             when {
                 busy -> BigButton("…", enabled = false) {}
-                wait <= 0 -> BigButton("spin! 🎰", brush = Street.gold()) { spin() }
+                left > 0 -> {
+                    if (left > 1) Text("$left spins left", fontWeight = FontWeight.Bold, color = Street.c.secondary)
+                    BigButton(if (won == null) "spin! 🎰" else "spin again 🎰", brush = Street.gold()) { spin() }
+                }
                 else -> {
-                    Text("next spin in", fontWeight = FontWeight.Bold, color = Street.c.secondary)
-                    Text(spinCountdown(wait), style = street(34.sp), color = Street.c.text)
+                    Text("finish a unit to earn another spin", fontWeight = FontWeight.Bold, color = Street.c.secondary)
                     BigButton("Done", onClick = close)
                 }
             }
-            Text("Free once every 24 hours. Coins, cosmetics and sentences only.", fontSize = 12.sp, color = Street.c.secondary, textAlign = TextAlign.Center)
+            Text("A free spin for every finished unit; they stack up. Coins, cosmetics and sentences only.", fontSize = 12.sp, color = Street.c.secondary, textAlign = TextAlign.Center)
         }
         Confetti(confetti, sound = false)
     }
@@ -252,7 +238,7 @@ private fun ColumnScope.PrizeView(prize: SlotPrize) {
                 Pill(if (on) "equipped ✓" else "equip", if (on) Street.c.secondary else Street.c.jade, modifier = Modifier.clickable(enabled = !on) { app.equip(item) })
             }
             is SlotPrize.Sentence -> {
-                Text("sentence of the day 📝", fontWeight = FontWeight.Bold, color = Street.c.secondary)
+                Text("a bonus sentence 📝", fontWeight = FontWeight.Bold, color = Street.c.secondary)
                 TokenSentence(prize.sentence.tokens, 26.sp, center = true)
                 BigButton("learn it · +${spinSentenceXp()} XP", brush = Street.jade()) { nav.show { SentenceOfTheDay(prize.sentence) { nav.close() } } }
             }
@@ -285,7 +271,7 @@ fun SentenceOfTheDay(sentence: Sentence, close: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CloseButton(close); Spacer(Modifier.weight(1f)); Text("sentence of the day", style = street(20.sp), color = Street.c.text); Spacer(Modifier.weight(1f)); Spacer(Modifier.size(40.dp))
+                CloseButton(close); Spacer(Modifier.weight(1f)); Text("bonus sentence", style = street(20.sp), color = Street.c.text); Spacer(Modifier.weight(1f)); Spacer(Modifier.size(40.dp))
             }
             Text(listOf("1 · listen", "2 · build it", "3 · type the pinyin", "done! 完成了")[step], style = street(26.sp), color = Street.c.text)
             Column(Modifier.fillMaxWidth().card().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

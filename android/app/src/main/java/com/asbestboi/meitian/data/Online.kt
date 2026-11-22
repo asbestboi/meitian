@@ -33,8 +33,6 @@ import uniffi.meitian_core.onlineParseFriends
 import uniffi.meitian_core.onlineParseInbox
 import uniffi.meitian_core.onlineParseLeaderboard
 import uniffi.meitian_core.onlineParseProfile
-import uniffi.meitian_core.onlineParseSpin
-import uniffi.meitian_core.ServerSpin
 import uniffi.meitian_core.ServerState
 import uniffi.meitian_core.serverState
 import java.io.ByteArrayOutputStream
@@ -196,12 +194,6 @@ object Online {
 
     suspend fun challenge(friendId: String, mode: BattleMode): String =
         JSONObject(request("POST", "/v1/challenge", JSONObject().put("friendId", friendId).put("mode", modeInfo(mode).wire))).getString("room")
-
-    /** Records a slot machine spin; null when offline or signed out. */
-    suspend fun spin(count: Int): ServerSpin? {
-        if (!::prefs.isInitialized || !signedIn) return null
-        return runCatching { onlineParseSpin(request("POST", "/v1/spin", JSONObject().put("count", count))) }.getOrNull()
-    }
 
     // ----- parties -----
 
