@@ -235,6 +235,7 @@ struct OnboardingFlow: View {
                 allowPinyin: false,
                 onAnswer: { q, right in results.append((level: q.word.level, right: right)) },
                 shouldContinue: { _ in Placement.shouldContinue(results: results) },
+                tagNew: false,
                 onDone: { _ in
                     confirmed = Placement.confirmedLevel(results: results)
                     go(.result)
@@ -253,7 +254,7 @@ struct OnboardingFlow: View {
             Spacer()
             ProgressRing(progress: Double(confirmed) / 4, lineWidth: 16, gradient: [Theme.jade, Theme.gold, Theme.red]) {
                 VStack(spacing: 2) {
-                    Text(confirmed == 0 ? "🌱" : ["", "🐣", "🎋", "🐼", "🐉"][confirmed]).font(.system(size: 54))
+                    Text(confirmed == 0 ? "🌱" : ["", "🐣", "🎋", "🐼", "🐉", "🦅", "👑"][min(confirmed, 6)]).font(.system(size: 54))
                     Text(confirmed == 0 ? "Fresh start" : "HSK \(confirmed)")
                         .font(.rounded(.headline, weight: .heavy))
                 }

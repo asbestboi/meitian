@@ -326,7 +326,7 @@ struct StatsView: View {
         Toggle(isOn: $allLevels) {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Download every level", systemImage: "square.stack.3d.up.fill")
-                Text("Otherwise only the HSK levels around yours (saves space).")
+                Text("Otherwise only sentences for the HSK levels around yours (saves space).")
                     .font(.rounded(.caption)).foregroundStyle(.secondary)
             }
         }

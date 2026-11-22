@@ -36,11 +36,16 @@ struct TokenSentence: View {
         let pinyinVisible = (showPinyin || forcePinyin) && !t.pinyin.isEmpty && !isGap
         VStack(spacing: 1) {
             if showPinyin || forcePinyin {
-                Text(pinyinVisible ? t.pinyin : " ")
-                    .font(.system(size: max(size * 0.42, 11), weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
+                let font = Font.system(size: max(size * 0.42, 11), weight: .semibold, design: .rounded)
+                if t.isNew && pinyinVisible {
+                    PinyinText(pinyin: t.pinyin, font: font).lineLimit(1).fixedSize()
+                } else {
+                    Text(pinyinVisible ? t.pinyin : " ")
+                        .font(font)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
             if isGap {
                 Text(gapFill ?? String(repeating: "＿", count: max(t.text.count, 1)))
@@ -50,7 +55,8 @@ struct TokenSentence: View {
                     .background(Theme.gold.opacity(gapFill == nil ? 0.18 : 0), in: RoundedRectangle(cornerRadius: 6))
             } else {
                 Text(t.text).font(.hanzi(size, weight: .medium))
-                    .underline(t.wordId != nil, pattern: .dot, color: Color.secondary.opacity(0.5))
+                    .underline(t.wordId != nil && !t.isNew, pattern: .dot, color: Color.secondary.opacity(0.5))
+                    .modifier(NewWordMark(on: t.isNew))
             }
         }
         .contentShape(Rectangle())
@@ -63,7 +69,7 @@ struct TokenSentence: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(isGap ? "blank" : "\(t.text) \(t.pinyin)")
+        .accessibilityLabel(isGap ? "blank" : "\(t.isNew ? "new word, " : "")\(t.text) \(t.pinyin)")
     }
 }
 
@@ -146,10 +152,18 @@ struct ExampleSentences: View {
 
 // MARK: - Sentence lesson
 
-/// Ten sentence exercises: build the sentence, fill the gap, listen, translate, read pinyin.
+/// Sentence exercises: build the sentence, fill the gap, listen, translate, read pinyin. From a node on the
+/// learning path it's a lesson with hearts and only learned words; otherwise ten exercises of practice.
 struct SentenceSession: View {
+    var node: PathNode? = nil
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    /// Indices into `exercises`; with hearts, wrong answers are asked again at the end.
+    @State private var queue: [Int] = []
+    @State private var solved = 0
+    @State private var hearts = Int(lessonHearts())
+    @State private var failed = false
+    @State private var gained = 0
     @State private var exercises: [Exercise] = []
     @State private var index = 0
     @State private var picked: Int?
@@ -162,14 +176,16 @@ struct SentenceSession: View {
     @State private var rightTick = 0
     @State private var wrongTick = 0
 
-    private var ex: Exercise? { index < exercises.count ? exercises[index] : nil }
+    private var ex: Exercise? { index < queue.count ? exercises[queue[index]] : nil }
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(spacing: 16) {
                 header
-                if finished {
+                if failed {
+                    OutOfHeartsView(onRetry: start, onQuit: { dismiss() }).transition(.opacity)
+                } else if finished {
                     results.transition(.scale(scale: 0.9).combined(with: .opacity))
                 } else if let ex {
                     exerciseView(ex)
@@ -189,13 +205,30 @@ struct SentenceSession: View {
         .sensoryFeedback(.success, trigger: rightTick)
         .sensoryFeedback(.error, trigger: wrongTick)
         .onAppear {
-            if exercises.isEmpty {
-                exercises = sentenceLesson(maxLevel: UInt8(clamping: store.currentLevel),
-                                           knownWordIds: Array(store.cards.keys), count: 10,
-                                           seed: UInt64.random(in: 0...UInt64.max), canListen: Prefs.canListen)
-                autoplay()
-            }
+            if exercises.isEmpty { start() }
         }
+    }
+
+    /// (Re)starts from scratch. A node gives the same lesson again on a retry.
+    private func start() {
+        if let node {
+            exercises = sentenceNodeLesson(unit: node.unit, number: node.number, dayKey: store.todayKey,
+                                           knownWordIds: store.known, unitWordIds: store.unitWordIds(Int(node.unit)),
+                                           canListen: Prefs.canListen)
+        } else {
+            exercises = sentenceLesson(maxLevel: UInt8(clamping: store.currentLevel), knownWordIds: store.known, count: 10,
+                                       seed: UInt64.random(in: 0...UInt64.max), canListen: Prefs.canListen)
+        }
+        queue = Array(exercises.indices)
+        index = 0
+        picked = nil
+        built = []
+        result = nil
+        correct = 0
+        solved = 0
+        hearts = Int(lessonHearts())
+        withAnimation(Theme.spring) { failed = false }
+        presented()
     }
 
     private var header: some View {
@@ -208,9 +241,11 @@ struct SentenceSession: View {
             .buttonStyle(PressableStyle(scale: 0.9))
             .foregroundStyle(.primary)
             .accessibilityLabel("Close")
-            ProgressView(value: Double(index), total: Double(max(exercises.count, 1)))
+            let done = min(node != nil ? solved : index, max(exercises.count, 1))
+            ProgressView(value: Double(done), total: Double(max(exercises.count, 1)))
                 .tint(Theme.jade)
-                .animation(Theme.spring, value: index)
+                .animation(Theme.spring, value: done)
+            if node != nil { HeartsBar(hearts: hearts) }
         }
     }
 
@@ -317,11 +352,12 @@ struct SentenceSession: View {
     }
 
     private func wordOrder(_ ex: Exercise) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let newTexts = Set(ex.sentence.tokens.filter(\.isNew).map(\.text))
+        return VStack(alignment: .leading, spacing: 16) {
             // answer line
             FlowLayout(spacing: 8, lineSpacing: 10) {
                 ForEach(built, id: \.self) { i in
-                    tile(ex.tiles[i]) {
+                    tile(ex.tiles[i], isNew: newTexts.contains(ex.tiles[i])) {
                         guard result == nil else { return }
                         withAnimation(Theme.bouncy) { built.removeAll { $0 == i } }
                     }
@@ -334,7 +370,7 @@ struct SentenceSession: View {
             // tile bank
             FlowLayout(spacing: 8, lineSpacing: 10, alignment: .center) {
                 ForEach(Array(ex.tiles.enumerated()), id: \.offset) { i, text in
-                    tile(text, used: built.contains(i)) {
+                    tile(text, used: built.contains(i), isNew: newTexts.contains(text)) {
                         guard result == nil, !built.contains(i) else { return }
                         Speaker.shared.say(text)
                         withAnimation(Theme.bouncy) { built.append(i) }
@@ -345,10 +381,11 @@ struct SentenceSession: View {
         }
     }
 
-    private func tile(_ text: String, used: Bool = false, action: @escaping () -> Void) -> some View {
+    private func tile(_ text: String, used: Bool = false, isNew: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(text)
                 .font(.hanzi(24, weight: .medium))
+                .modifier(NewWordMark(on: isNew && !used))
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(used ? Color.secondary.opacity(0.12) : Theme.card,
                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -358,6 +395,7 @@ struct SentenceSession: View {
         }
         .buttonStyle(PressableStyle(scale: 0.92))
         .disabled(used)
+        .accessibilityLabel(isNew ? "new word, \(text)" : text)
     }
 
     private func feedback(_ ex: Exercise, right: Bool) -> some View {
@@ -385,7 +423,7 @@ struct SentenceSession: View {
             Text(correct * 2 >= exercises.count ? "You're reading real Chinese! 厉害 lìhai!" : "Sentences are hard. 加油 jiāyóu!")
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .multilineTextAlignment(.center)
-            Text("+\(correct * 4) XP").font(.rounded(.headline, weight: .bold)).foregroundStyle(Theme.gold)
+            Text(node != nil && gained == 0 ? "replay · no XP" : "+\(gained) XP").font(.rounded(.headline, weight: .bold)).foregroundStyle(Theme.gold)
             Spacer()
             BigButton(title: "Done", systemImage: "checkmark") { dismiss() }
         }
@@ -407,7 +445,8 @@ struct SentenceSession: View {
     private func finish(right: Bool, _ ex: Exercise) {
         withAnimation(Theme.spring) { result = right }
         if right {
-            correct += 1
+            solved += 1
+            if index < exercises.count { correct += 1 }   // first try
             rightTick += 1
             SFX.shared.play(.correct)
             if ex.kind != .listenPick { Speaker.shared.say(ex.sentence.zh) }
@@ -415,13 +454,26 @@ struct SentenceSession: View {
             wrongTick += 1
             SFX.shared.play(.wrong)
             withAnimation(.linear(duration: 0.4)) { shake += 1 }
+            if node != nil {
+                hearts = Int(loseHeart(hearts: UInt32(hearts)))
+                queue.append(queue[index])
+            }
         }
     }
 
     private func next() {
-        if index + 1 >= exercises.count {
-            store.addXP(correct * 4)
-            store.count(.sentences)
+        if node != nil && lessonFailed(hearts: UInt32(hearts)) {
+            withAnimation(Theme.spring) { failed = true }
+            return
+        }
+        if index + 1 >= queue.count {
+            if let node {
+                gained = store.finishPathSentences(number: Int(node.number))
+            } else {
+                gained = correct * 4
+                store.addXP(gained)
+                store.count(.sentences)
+            }
             withAnimation(Theme.bouncy) { finished = true }
             if correct > 0 { confetti += 1; SFX.shared.play(.win) }
             return
@@ -432,6 +484,12 @@ struct SentenceSession: View {
             built = []
             result = nil
         }
+        presented()
+    }
+
+    /// The current exercise just came up.
+    private func presented() {
+        if let ex { store.markSeen(ex.sentence.tokens.newIds) }
         autoplay()
     }
 

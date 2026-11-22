@@ -6,7 +6,7 @@ import Observation
 
 /// Little synthesized sound effects (no audio files). Lo-fi on purpose, to fit the street look.
 final class SFX {
-    enum Sound: CaseIterable { case correct, wrong, hit, coin, win, lose, tick, go, swoosh, micOn, micOff }
+    enum Sound: CaseIterable { case correct, wrong, hit, coin, win, lose, tick, go, swoosh, micOn, micOff, newWord, heartLost, outOfHearts }
 
     static let shared = SFX()
 
@@ -62,6 +62,13 @@ final class SFX {
         case .swoosh: return noise(0.16, vol: 0.35, sweep: true)
         case .micOn: return tones([Note(freq: 740, dur: 0.06, wave: 0), Note(freq: 1110, dur: 0.08, wave: 0)])
         case .micOff: return tones([Note(freq: 1110, dur: 0.06, wave: 0), Note(freq: 740, dur: 0.08, wave: 0)])
+        case .newWord: return tones([Note(freq: 1319, dur: 0.07, vol: 0.45), Note(freq: 1760, dur: 0.22, vol: 0.45)])
+        case .heartLost:
+            return mix(noise(0.08, vol: 0.4), tones([Note(freq: 440, dur: 0.1, wave: 1, bend: -120, vol: 0.7),
+                                                     Note(freq: 262, dur: 0.2, wave: 1, bend: -90, vol: 0.7)]))
+        case .outOfHearts:
+            return tones([Note(freq: 392, dur: 0.16, wave: 1, vol: 0.7), Note(freq: 311, dur: 0.16, wave: 1, vol: 0.7),
+                          Note(freq: 233, dur: 0.36, wave: 1, bend: -50, vol: 0.7)])
         }
     }
 

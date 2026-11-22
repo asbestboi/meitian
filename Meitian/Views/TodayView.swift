@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Learn tab: one winding path through the current HSK level (Duolingo-style map). Lessons, a story
+/// Learn tab: one winding path through the current HSK level (Duolingo-style map). Lessons, sentences, a story
 /// checkpoint after every unit, the level-up test at the end. One big button always says what's next.
 struct TodayView: View {
     @Environment(AppStore.self) private var store
@@ -12,7 +12,7 @@ struct TodayView: View {
     @State private var testLevel: LevelRef?
     @State private var story: StoryRef?
     @State private var storyUnit = 0
-    @State private var storyId = ""
+    @State private var sentenceNode: SentenceNodeRef?
     @State private var goals = false
     @State private var hint: String?
     @State private var hintTick = 0
@@ -55,8 +55,11 @@ struct TodayView: View {
         .fullScreenCover(item: $testLevel) { ref in
             LevelTestView(level: ref.level, onPracticeWeak: goToPractice).environment(store)
         }
-        .fullScreenCover(item: $story, onDismiss: storyClosed) { ref in
-            StoryPlayer(story: ref.story).environment(store)
+        .fullScreenCover(item: $story) { ref in
+            StoryPlayer(story: ref.story, onFinished: storyFinished).environment(store)
+        }
+        .fullScreenCover(item: $sentenceNode) { ref in
+            SentenceSession(node: ref.node).environment(store)
         }
         .sheet(isPresented: $goals) {
             GoalsSheet()
@@ -76,13 +79,16 @@ struct TodayView: View {
         case (_, .locked):
             switch node.kind {
             case .lesson: show("finish the lessons before this one first")
-            case .story: show("finish unit \(node.unit) to open its story")
+            case .sentences: show("finish lesson \(node.number) to open these sentences")
+            case .story: show("finish unit \(node.unit)'s sentences to open its story")
             case .test: show("learn every lesson to unlock the test")
             }
         case (.lesson, .done):
             start(store.lessonWords(Int(node.number)))
         case (.lesson, .open):
             start(store.nextUpWords())
+        case (.sentences, _):
+            sentenceNode = SentenceNodeRef(node: node)
         case (.story, _):
             openStory(unit: Int(node.unit), done: node.state == .done)
         case (.test, _):
@@ -104,23 +110,20 @@ struct TodayView: View {
             ?? StoryProgress.next(chat: !chat, store: store, unit: unit) {
             ImagePrefetch.run(s)
             storyUnit = done ? 0 : unit
-            storyId = s.id
             story = StoryRef(story: s)
         } else if !done {
             // nothing new to read right now: the checkpoint becomes a treasure chest
             store.finishPathStory(unit: unit)
             show("🎁 chest opened · +20 XP")
         } else {
-            show("you've read every story at this level")
+            show("learn more words to unlock the next story")
         }
     }
 
-    private func storyClosed() {
+    /// Finishing the story completes the checkpoint.
+    private func storyFinished(translations: Int) {
         guard storyUnit > 0 else { return }
-        // finishing the story (it lands in the reading history) completes the checkpoint
-        if StoryProgress.isRead(storyId) {
-            store.finishPathStory(unit: storyUnit)
-        }
+        store.finishPathStory(unit: storyUnit, translations: translations)
         storyUnit = 0
     }
 
@@ -244,6 +247,7 @@ struct TodayView: View {
     private func startTitle(_ n: PathNode) -> String {
         switch n.kind {
         case .test: return "take the HSK \(store.currentLevel) test"
+        case .sentences: return "build sentences"
         case .story: return "read the unit \(n.unit) story"
         case .lesson: return store.today.learnedDone ? "start lesson \(n.number)" : "learn today's words"
         }
@@ -252,10 +256,16 @@ struct TodayView: View {
     private func startSubtitle(_ n: PathNode) -> String {
         switch n.kind {
         case .test: return "pass with 80% to unlock HSK \(store.currentLevel + 1)"
+        case .sentences: return "+\(pathSentencesXp()) XP · only words you know"
         case .story: return "+20 XP"
         case .lesson: return "unit \(n.unit) · lesson \(n.number) · \(store.profile.dailyGoal) new words"
         }
     }
+}
+
+struct SentenceNodeRef: Identifiable {
+    let node: PathNode
+    var id: String { "\(node.unit)-\(node.number)" }
 }
 
 /// One stop on the path: a chunky round button with a darker base (pressable depth).
@@ -273,7 +283,13 @@ struct PathNodeButton: View {
     private var color: Color {
         switch node.state {
         case .locked: return Color.secondary.opacity(0.22)
-        case .done, .open: return node.kind == .test ? Theme.gold : (node.kind == .story ? Theme.hot : Theme.levelColor(level))
+        case .done, .open:
+            switch node.kind {
+            case .test: return Theme.gold
+            case .story: return Theme.hot
+            case .sentences: return Theme.sky
+            case .lesson: return Theme.levelColor(level)
+            }
         }
     }
 
@@ -281,6 +297,8 @@ struct PathNodeButton: View {
         switch (node.kind, node.state) {
         case (.lesson, .done): return "checkmark"
         case (.lesson, _): return node.state == .locked ? "lock.fill" : "star.fill"
+        case (.sentences, .done): return "checkmark.bubble.fill"
+        case (.sentences, _): return "text.bubble.fill"
         case (.story, .done): return "book.closed.fill"
         case (.story, _): return "book.fill"
         case (.test, _): return "trophy.fill"
@@ -320,7 +338,7 @@ struct PathNodeButton: View {
         }
         .overlay(alignment: .bottom) {
             if node.kind != .lesson {
-                Text(node.kind == .test ? "level-up test" : "story")
+                Text(caption)
                     .font(.rounded(.caption, weight: .bold)).foregroundStyle(.secondary)
                     .offset(y: 28).fixedSize()
             }
@@ -335,9 +353,19 @@ struct PathNodeButton: View {
         .accessibilityLabel(accessibility)
     }
 
+    private var caption: String {
+        switch node.kind {
+        case .lesson: return ""
+        case .sentences: return "sentences · +\(pathSentencesXp()) XP"
+        case .story: return "story"
+        case .test: return "level-up test"
+        }
+    }
+
     private var accessibility: String {
         let what = switch node.kind {
         case .lesson: "Lesson \(node.number)"
+        case .sentences: "Sentences after lesson \(node.number)"
         case .story: "Unit \(node.unit) story"
         case .test: "HSK \(level) test"
         }
@@ -379,7 +407,7 @@ struct LearnSession: View {
     @Environment(\.dismiss) private var dismiss
     let words: [Word]
 
-    enum Phase { case cards, quiz, done }
+    enum Phase { case cards, quiz, failed, done }
     @State private var phase: Phase = .cards
     @State private var questions: [QuizQuestion] = []
     @State private var score = 0
@@ -414,7 +442,9 @@ struct LearnSession: View {
                     })
                     .transition(.opacity)
                 case .quiz:
-                    QuizRunner(questions: questions, onDone: { correct in
+                    QuizRunner(questions: questions, useHearts: true, onFailed: {
+                        withAnimation(Theme.spring) { phase = .failed }
+                    }, onDone: { correct in
                         score = correct
                         store.finishLearning(words, quizCorrect: correct)
                         if correct == questions.count { store.count(.perfect) }
@@ -422,6 +452,14 @@ struct LearnSession: View {
                         confetti += 1
                     })
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                case .failed:
+                    // from the top: cards and a fresh quiz; nothing was saved from this try
+                    OutOfHeartsView(onRetry: {
+                        questions = []
+                        score = 0
+                        withAnimation(Theme.spring) { phase = .cards }
+                    }, onQuit: { dismiss() })
+                    .transition(.opacity)
                 case .done:
                     done.transition(.scale(scale: 0.9).combined(with: .opacity))
                 }

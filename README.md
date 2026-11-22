@@ -4,6 +4,8 @@ A playful app for learning a little Chinese every day, for **iPhone** (SwiftUI) 
 
 - **Confirm your level.** Say how good your Chinese is, then a short adaptive placement quiz (HSK 1–4) checks it. New words start just above what you already know.
 - **New words daily.** Pick 3, 5 or 8 words a day. Swipe through flip cards (right = got it, left = again), hear native pronunciation, then take a quick quiz.
+- **Learning path.** Lessons, sentence nodes built only from words you've learned, a story after every unit, and the HSK level-up test. Lessons, sentence nodes and stories give you three ❤️: wrong answers cost one and come back at the end, and at zero the lesson starts over.
+- **Stories and chats you can follow.** A story unlocks once at most three of its words are new to you; locked ones show how many words are missing. New words are highlighted wherever they first appear and recapped at the end. One line per story can be translated for free; more than that and it pays no XP.
 - **Friend challenge.** Every day you get a mission to use one of today's words in a real sentence, with a **Chinese friend** (ask, sneak it in, voice message…) or a **non‑Chinese friend** (teach them, charades, secret code…). Tick off the steps, rate how it went, add a note, and get +50 XP.
 - **Pinyin everywhere for beginners.** Pinyin sits right above each character (ruby style), colored by tone (1 red, 2 orange, 3 green, 4 blue). Switch it off in Progress when you want to test your reading; the placement quiz never shows it.
 - **Arena: battle friends offline.** Scan each other's QR code and the phones link directly over Bluetooth / peer‑to‑peer Wi‑Fi (MultipeerConnectivity), so no server or internet is needed. ⚔️ **Duel**: same question for both, first right answer hits (faster = harder), knock their HP to 0. ⚡️ **Blitz**: 45‑second race, most correct wins. 📱 **Same‑phone duel**: split screen on one phone. Wins earn 🪙 coins for the shop (avatars, card frames, titles, particle hit effects, auras), and you get battle stats plus head‑to‑head records per rival.
@@ -39,7 +41,7 @@ scripts/build-ipa.sh          # -> build/Meitian.ipa
 
 ```
 core/        Rust: words (compiled in), pinyin + ruby alignment, spaced repetition, streaks,
-             levels, placement, daily challenges, quiz options, battle rules, speech matching.
+             levels, placement, learning path, sentence lessons, story unlocking, hearts, daily challenges, quiz options, battle rules, speech matching.
              Exposed to Swift and Kotlin through UniFFI. `cd core && cargo test`
 Meitian/     iOS app (SwiftUI). scripts/build-core-ios.sh builds the core for aarch64-apple-ios
              and generates the Swift bindings; scripts/build-ipa.sh makes the .ipa.
@@ -55,7 +57,8 @@ in its QR code (`meitian-duel:<id>?os=…&lan=…&port=…`); the scanning phone
 messages are the same JSON on both platforms.
 
 Lessons are downloaded from [meitian-content](https://github.com/asbestboi/meitian-content)
-(GitHub Pages): HSK 1–6 words, graded Tatoeba sentences and illustrated stories, cached for offline use.
+(GitHub Pages): HSK 1–6 words (all word lists, so story words can be explained and tagged), graded Tatoeba sentences
+for the learner's band ±1 and illustrated stories, cached for offline use.
 
 ## Get the Android app
 

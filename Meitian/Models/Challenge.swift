@@ -57,6 +57,12 @@ struct QuizQuestion: Identifiable {
         return self
     }
 
+    /// The same question asked again later (reshuffled).
+    func again() -> QuizQuestion { QuizQuestion(word: word, kind: kind, options: options.shuffled()) }
+
+    /// The same word as a silent question (for "can't speak here").
+    func silent() -> QuizQuestion { QuizQuestion(word: word, kind: .hanziToMeaning, options: options) }
+
     func label(for option: Word) -> String {
         kind == .hanziToMeaning ? option.shortMeaning : option.hanzi
     }

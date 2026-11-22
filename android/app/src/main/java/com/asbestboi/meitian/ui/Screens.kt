@@ -384,7 +384,7 @@ private fun LessonDownloads() {
         Text(status, fontSize = 12.sp, color = Street.c.secondary)
     }
     HorizontalDivider(color = Street.c.ink.copy(alpha = 0.2f))
-    ToggleRow("Download every level", "Otherwise only the HSK levels around yours (saves space).", all) {
+    ToggleRow("Download every level", "Otherwise only sentences for the HSK levels around yours (saves space).", all) {
         all = it
         ContentSync.setAllLevels(context, it)
         scope.launch { ContentSync.refresh(context, level) }

@@ -6,7 +6,7 @@ struct PracticeView: View {
     @State private var session: PracticeSession.Mode?
     @State private var search = ""
     @State private var levelFilter = 0
-    @State private var status: WordStatus = .all
+    @State private var status: WordFilter = .all
     @State private var selected: Word?
     @State private var sprint = false
     @State private var sentences = false
@@ -208,7 +208,7 @@ struct PracticeView: View {
             .pickerStyle(.segmented)
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
-                    ForEach(WordStatus.allCases) { s in
+                    ForEach(WordFilter.allCases) { s in
                         Button { withAnimation(Theme.spring) { status = s } } label: {
                             Text(s.label).font(.rounded(.caption, weight: .bold))
                                 .padding(.horizontal, 12).padding(.vertical, 7)
@@ -405,7 +405,7 @@ struct PracticeSession: View {
 }
 
 /// Word library filter by how the learner is doing with each word.
-enum WordStatus: String, CaseIterable, Identifiable {
+enum WordFilter: String, CaseIterable, Identifiable {
     case all, learned, weak, due, mastered, new
     var id: String { rawValue }
     var label: String {

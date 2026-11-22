@@ -90,6 +90,10 @@ struct SwipeDeck: View {
     @State private var feedbackAgain = 0
     @State private var started = false
     @State private var flipTick = 0
+    /// Unlearned words get the NEW tag the first time their card comes up.
+    @State private var newIds: Set<String> = []
+    @State private var again: Set<String> = []
+    @Environment(AppStore.self) private var store
 
     private let commitDistance: CGFloat = 120
 
@@ -107,7 +111,14 @@ struct SwipeDeck: View {
             controls
         }
         .onAppear {
-            if !started { queue = words; started = true }
+            if !started {
+                newIds = store.newIds(words)
+                queue = words
+                started = true
+            }
+        }
+        .onChange(of: queue.first?.id) { _, id in
+            if let id, newIds.contains(id) { store.markSeen([id]) }
         }
         .sensoryFeedback(.success, trigger: feedbackKnown)
         .sensoryFeedback(.impact(weight: .medium), trigger: feedbackAgain)
@@ -132,6 +143,11 @@ struct SwipeDeck: View {
         let drag = isTop ? offset : .zero
         let progress = min(abs(drag.width) / commitDistance, 1)
         WordCardFace(word: word, flipped: isTop && flipped)
+            .overlay(alignment: .topTrailing) {
+                if newIds.contains(word.id) && !again.contains(word.id) && !(isTop && flipped) {
+                    NewBadge().padding(18)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 stamp("GOT IT", color: Theme.jade, angle: -14)
                     .opacity(isTop && drag.width > 0 ? Double(progress) : 0)
@@ -208,7 +224,10 @@ struct SwipeDeck: View {
                 offset = .zero
                 guard !queue.isEmpty else { return }
                 let w = queue.removeFirst()
-                if !known { queue.append(w) }
+                if !known {
+                    queue.append(w)
+                    again.insert(w.id)
+                }
             }
             if queue.isEmpty { onFinish() }
         }

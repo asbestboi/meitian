@@ -95,12 +95,14 @@ pub fn parse_manifest(json: String) -> Result<Manifest, ContentError> {
     })
 }
 
-/// Packs worth downloading for a learner at `level` (their band ±1, plus stories). `all` = every pack.
+/// Packs worth downloading for a learner at `level`: every word list (stories use words of all bands, and each
+/// must be known to be tagged, explained and counted as new), sentences for their band ±1, and the stories.
+/// `all` = every pack.
 #[uniffi::export]
 pub fn packs_for_level(manifest: Manifest, level: u8, all: bool) -> Vec<PackInfo> {
     let lo = level.saturating_sub(1).max(1);
     let hi = (level + 1).max(2);
-    manifest.packs.into_iter().filter(|p| all || p.level == 0 || (lo..=hi).contains(&p.level)).collect()
+    manifest.packs.into_iter().filter(|p| all || p.level == 0 || p.kind == "words" || (lo..=hi).contains(&p.level)).collect()
 }
 
 // ---------- sentences ----------
@@ -322,13 +324,14 @@ mod tests {
             r#"{"schema":1,"version":"x","packs":[
             {"id":"words-1","kind":"words","level":1,"url":"words-1.json"},
             {"id":"words-4","kind":"words","level":4,"url":"words-4.json"},
+            {"id":"sentences-4","kind":"sentences","level":4,"url":"sentences-4.json"},
             {"id":"stories","kind":"stories","level":0,"url":"stories.json"}]}"#
                 .into(),
         )
         .unwrap();
         let ids: Vec<_> = packs_for_level(m.clone(), 1, false).into_iter().map(|p| p.id).collect();
-        assert_eq!(ids, vec!["words-1", "stories"]);
-        assert_eq!(packs_for_level(m, 1, true).len(), 3);
+        assert_eq!(ids, vec!["words-1", "words-4", "stories"], "every word list, near sentences only");
+        assert_eq!(packs_for_level(m, 1, true).len(), 4);
         assert!(parse_manifest(r#"{"schema":99,"version":"x","packs":[]}"#.into()).is_err());
         assert!(parse_manifest("nope".into()).is_err());
     }

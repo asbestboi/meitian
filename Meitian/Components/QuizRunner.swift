@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// Runs a list of questions one at a time: multiple choice, listening and speaking.
+/// Runs a list of questions one at a time: multiple choice, listening and speaking. With `useHearts` every wrong
+/// answer costs a heart and comes back at the end until it's right; `onFailed` runs when the hearts are gone.
+/// `onDone` gets the number of questions that were right the first time.
 struct QuizRunner: View {
     let questions: [QuizQuestion]
     var showProgress = true
@@ -9,6 +11,11 @@ struct QuizRunner: View {
     var onAnswer: (QuizQuestion, Bool) -> Void = { _, _ in }
     /// Return false to stop early (used by the adaptive placement test).
     var shouldContinue: (Int) -> Bool = { _ in true }
+    /// Lessons only: not for practice, tests or battles.
+    var useHearts = false
+    var onFailed: () -> Void = {}
+    /// Off for the placement test.
+    var tagNew = true
     var onDone: (Int) -> Void
 
     @State private var items: [QuizQuestion] = []
@@ -21,19 +28,29 @@ struct QuizRunner: View {
     @State private var wrongTick = 0
     @State private var listener = SpeechListener()
     @State private var speakTries = 0
+    @State private var hearts = Int(lessonHearts())
+    @State private var solved = 0
+    @State private var newIds: Set<String> = []
+    @Environment(AppStore.self) private var store
     @AppStorage(PinyinPrefs.show) private var showPinyin = true
 
     private var pinyinOn: Bool { allowPinyin && showPinyin }
     private var q: QuizQuestion? { index < items.count ? items[index] : nil }
+    /// Questions after the original ones are wrong answers asked again.
+    private var isRetry: Bool { index >= questions.count }
+    private func isNew(_ q: QuizQuestion) -> Bool { !isRetry && newIds.contains(q.word.id) }
 
     var body: some View {
         VStack(spacing: 18) {
             HStack(spacing: 10) {
                 if showProgress {
-                    ProgressView(value: Double(index), total: Double(max(items.count, 1)))
+                    // with hearts the bar counts solved questions, so repeats don't push it back
+                    let done = min(useHearts ? solved : index, max(questions.count, 1))
+                    ProgressView(value: Double(done), total: Double(max(questions.count, 1)))
                         .tint(Theme.red)
-                        .animation(Theme.spring, value: index)
+                        .animation(Theme.spring, value: done)
                 }
+                if useHearts { HeartsBar(hearts: hearts) }
                 pauseButton
             }
             if let q {
@@ -45,6 +62,9 @@ struct QuizRunner: View {
                     promptView(q)
                         .frame(maxWidth: .infinity, minHeight: 170)
                         .cardSurface()
+                        .overlay(alignment: .topTrailing) {
+                            if isNew(q) { NewBadge().padding(12) }
+                        }
                     if q.kind == .speak {
                         speakControls(q)
                     } else {
@@ -67,7 +87,11 @@ struct QuizRunner: View {
         .sensoryFeedback(.success, trigger: rightTick)
         .sensoryFeedback(.error, trigger: wrongTick)
         .onAppear {
-            if items.isEmpty { items = questions.map { $0.adjusted() } }
+            if items.isEmpty {
+                if tagNew { newIds = store.newIds(questions.map(\.word)) }
+                items = questions.map { $0.adjusted() }
+                markSeen()
+            }
             autoplay()
         }
         .onDisappear { listener.stop() }
@@ -174,7 +198,7 @@ struct QuizRunner: View {
             .multilineTextAlignment(.center)
 
             if answered == nil && (speakTries >= 2 || listener.state == .denied || listener.state == .unavailable) {
-                Button("Skip this one") { answer(q, right: false) }
+                Button("Skip this one") { skip(q) }
                     .font(.rounded(.subheadline, weight: .bold))
             }
         }
@@ -222,15 +246,33 @@ struct QuizRunner: View {
         listener.stop()
         withAnimation(Theme.bouncy) { answered = right }
         if right {
-            correct += 1
+            if !isRetry { correct += 1 }
+            solved += 1
             rightTick += 1
             SFX.shared.play(.correct)
         } else {
             wrongTick += 1
             SFX.shared.play(.wrong)
             withAnimation(.linear(duration: 0.4)) { shake += 1 }
+            if useHearts {
+                hearts = Int(loseHeart(hearts: UInt32(hearts)))
+                // asked again at the end until it's right
+                items.append(q.again())
+            }
         }
         onAnswer(q, right)
+    }
+
+    /// Can't speak here: with hearts, ask about the word silently instead of counting it as a mistake.
+    private func skip(_ q: QuizQuestion) {
+        guard useHearts else { answer(q, right: false); return }
+        listener.reset()
+        speakTries = 0
+        withAnimation(Theme.spring) { items[index] = q.silent() }
+    }
+
+    private func markSeen() {
+        if let q, isNew(q) { store.markSeen([q.word.id]) }
     }
 
     private func feedback(_ q: QuizQuestion, right: Bool) -> some View {
@@ -261,6 +303,10 @@ struct QuizRunner: View {
     }
 
     private func next() {
+        if useHearts && lessonFailed(hearts: UInt32(hearts)) {
+            onFailed()
+            return
+        }
         let answeredCount = index + 1
         if answeredCount >= items.count || !shouldContinue(answeredCount) {
             onDone(correct)
@@ -274,6 +320,7 @@ struct QuizRunner: View {
             index += 1
             items[index] = items[index].adjusted()
         }
+        markSeen()
         autoplay()
     }
 

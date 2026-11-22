@@ -154,7 +154,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                 }
                 4 -> {
                     Spacer(Modifier.weight(1f))
-                    Text(listOf("🌱", "🐣", "🎋", "🐼", "🐉")[confirmed], fontSize = 90.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Text(listOf("🌱", "🐣", "🎋", "🐼", "🐉", "🦅", "👑")[confirmed.coerceIn(0, 6)], fontSize = 90.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
                     Text(if (confirmed == 0) "FRESH START" else "HSK $confirmed", style = street(48.sp), color = Street.c.text,
                         modifier = Modifier.align(Alignment.CenterHorizontally))
                     Text(

@@ -84,6 +84,8 @@ struct Profile: Codable, Hashable {
     var frozenDays: [Int64]?
     /// Story checkpoints finished on the learning path, as "level-unit".
     var pathStories: [String]?
+    /// Sentence nodes finished on the learning path, as "level-number".
+    var pathSentences: [String]?
 }
 
 private struct SaveFile: Codable {
@@ -91,6 +93,8 @@ private struct SaveFile: Codable {
     var cards: [String: CardState]
     var days: [String: DayLog]
     var xp: Int
+    /// Optional so older saves still decode.
+    var seen: [String]?
 }
 
 @Observable
@@ -99,6 +103,8 @@ final class AppStore {
     var cards: [String: CardState] = [:]
     var days: [String: DayLog] = [:]
     var xp = 0
+    /// Words shown (tagged as new) but not learned yet.
+    private(set) var seen: Set<String> = []
     /// Milestones reached by the last XP gain, waiting to be celebrated.
     var milestoneQueue: [Milestone] = []
     /// Set when freezes just saved the streak (shown once on Today).
@@ -126,6 +132,7 @@ final class AppStore {
         cards = file.cards
         days = file.days
         xp = file.xp
+        seen = Set(file.seen ?? [])
         migrateToLevelTests()
     }
 
@@ -142,7 +149,7 @@ final class AppStore {
     }
 
     func save() {
-        let file = SaveFile(profile: profile, cards: cards, days: days, xp: xp)
+        let file = SaveFile(profile: profile, cards: cards, days: days, xp: xp, seen: seen.sorted())
         if let data = try? JSONEncoder().encode(file) {
             try? data.write(to: url, options: .atomic)
         }
@@ -153,6 +160,7 @@ final class AppStore {
         cards = [:]
         days = [:]
         xp = 0
+        seen = []
         milestoneQueue.removeAll()
         freezeNotice = nil
         // progress kept outside the save file
@@ -247,6 +255,34 @@ final class AppStore {
         set { days[todayKey] = newValue }
     }
 
+    // MARK: known and new words
+
+    /// Learned words plus the words of confirmed levels.
+    var known: [String] {
+        Meitian.knownWordIds(cardIds: Array(cards.keys), confirmedLevel: UInt8(clamping: profile.confirmedLevel))
+    }
+
+    /// The words of a lesson that aren't learned yet (they get the NEW tag).
+    func newIds(_ words: [Word]) -> Set<String> {
+        let ids = words.map(\.id)
+        let status = wordStatuses(wordIds: ids, knownWordIds: known, seenWordIds: Array(seen))
+        return Set(zip(ids, status).filter { $0.1 != .learned }.map { $0.0 })
+    }
+
+    /// These words were just shown with their NEW tag. The first time ever, that's a soft ding.
+    func markSeen(_ ids: [String], ding: Bool = true) {
+        let fresh = ids.filter { !seen.contains($0) && cards[$0] == nil }
+        guard !fresh.isEmpty else { return }
+        seen.formUnion(fresh)
+        if ding { SFX.shared.play(.newWord) }
+        save()
+    }
+
+    /// What the next lesson will teach (stories like to preview it).
+    var upcomingIds: [String] {
+        WordBank.words(level: currentLevel).filter { cards[$0.id] == nil }.prefix(profile.dailyGoal).map(\.id)
+    }
+
     // MARK: daily words
 
     /// Placement confirmed levels are already known, so new words start one above.
@@ -312,28 +348,42 @@ final class AppStore {
     /// The current level's map: units of lessons, a story checkpoint after each unit, the test at the end.
     var learnPath: [PathUnit] {
         let level = currentLevel
-        let done = (profile.pathStories ?? []).compactMap { key -> UInt32? in
-            let p = key.split(separator: "-")
-            guard p.count == 2, Int(p[0]) == level else { return nil }
-            return UInt32(p[1])
+        func done(_ keys: [String]?) -> [UInt32] {
+            (keys ?? []).compactMap { key -> UInt32? in
+                let p = key.split(separator: "-")
+                guard p.count == 2, Int(p[0]) == level else { return nil }
+                return UInt32(p[1])
+            }
         }
         return Meitian.learnPath(learned: UInt32(learnedCount(level: level)),
                                  total: UInt32(WordBank.words(level: level).count),
                                  lessonSize: UInt32(max(profile.dailyGoal, 1)),
-                                 storiesDone: done)
+                                 storiesDone: done(profile.pathStories),
+                                 sentencesDone: done(profile.pathSentences))
     }
 
     /// The node the big start button points at.
     var nextPathNode: PathNode? { learnPath.flatMap(\.nodes).first(where: \.next) }
 
-    /// A story checkpoint is finished: +20 XP once.
-    func finishPathStory(unit: Int) {
+    /// A story checkpoint is finished: +20 XP once (nothing when its lines were translated).
+    func finishPathStory(unit: Int, translations: Int = 0) {
         let key = "\(currentLevel)-\(unit)"
         var done = profile.pathStories ?? []
         guard !done.contains(key) else { return }
         done.append(key)
         profile.pathStories = done
-        addXP(20)
+        addXP(Int(storyXp(base: 20, translationsRevealed: UInt32(clamping: translations))))
+    }
+
+    /// A sentence node is finished. Returns the XP it paid (only the first time).
+    func finishPathSentences(number: Int) -> Int {
+        let key = "\(currentLevel)-\(number)"
+        let first = !(profile.pathSentences ?? []).contains(key)
+        if first { profile.pathSentences = (profile.pathSentences ?? []) + [key] }
+        let gained = first ? Int(pathSentencesXp()) : 0
+        addXP(gained)
+        count(.sentences)
+        return gained
     }
 
     /// Word ids of one unit on the current level's path (default: the unit of the last finished lesson),
