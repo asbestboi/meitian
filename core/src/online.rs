@@ -1,6 +1,5 @@
 //! Online play: the server's JSON (profiles, friends, leaderboards, live events) parsed once here, so the
-//! iPhone and Android apps read it identically. The battle itself uses the same JSON protocol as the
-//! Wi‑Fi link (the server's rooms relay it), so only the server's own messages are decoded here.
+//! iPhone and Android apps read it identically. What happens inside a room is handled by `battle.rs`.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -22,15 +21,14 @@ pub struct OnlineProfile {
     pub online: bool,
     /// Only on your own profile.
     pub friend_code: String,
-    /// Equipped cosmetics as sent by their app (`avatar`, `aura`, `fx`, `title`…).
-    pub cosmetic_avatar: String,
+    /// Equipped cosmetics as sent by their app (`aura`, `fx`, `title`…; older apps also send `avatar`, which is ignored).
     pub cosmetic_aura: String,
     pub cosmetic_fx: String,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
-struct RawProfile {
+pub(crate) struct RawProfile {
     id: String,
     nickname: String,
     tag: String,
@@ -51,7 +49,6 @@ impl From<RawProfile> for OnlineProfile {
     fn from(r: RawProfile) -> Self {
         let cos = |k: &str| r.cosmetics.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         OnlineProfile {
-            cosmetic_avatar: cos("avatar"),
             cosmetic_aura: cos("aura"),
             cosmetic_fx: cos("fx"),
             id: r.id,
@@ -146,6 +143,8 @@ pub fn online_parse_profile(json: String) -> Result<OnlineProfile, OnlineError> 
 pub struct OnlineChallenge {
     pub room: String,
     pub mode: String,
+    /// An invitation to a party: its code ("" for a 1v1 challenge).
+    pub party: String,
     pub from: OnlineProfile,
 }
 
@@ -153,12 +152,14 @@ pub struct OnlineChallenge {
 struct RawChallenge {
     room: String,
     mode: String,
+    #[serde(default)]
+    party: Option<String>,
     from: RawProfile,
 }
 
 impl From<RawChallenge> for OnlineChallenge {
     fn from(c: RawChallenge) -> Self {
-        OnlineChallenge { room: c.room, mode: c.mode, from: c.from.into() }
+        OnlineChallenge { room: c.room, mode: c.mode, party: c.party.unwrap_or_default(), from: c.from.into() }
     }
 }
 
@@ -240,62 +241,61 @@ pub fn online_parse_leaderboard(json: String) -> Result<Leaderboard, OnlineError
     Ok(Leaderboard { board: l.board, top: l.top.into_iter().map(conv).collect(), me: conv(l.me) })
 }
 
-/// What the server says on the queue and room sockets. Anything else on a room socket is the other
-/// phone's battle message (`Battle`), handled by the existing battle code.
+/// What the server says while waiting for a quick match.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
-pub enum OnlineEvent {
-    /// Waiting in the quick-match queue.
+pub enum QueueEvent {
     Queued,
-    /// Paired: join this room.
-    Matched { room: String, mode: String, opponent: OnlineProfile },
-    /// Joined a room; `peer` = the opponent is already there.
-    Joined { opponent: Option<OnlineProfile>, peer: bool },
-    /// The opponent connected (`up`) or dropped.
-    Peer { up: bool },
-    /// The game's rating result (`counted` = false when the two phones disagreed).
-    Rating { counted: bool, rating: i32, delta: i32 },
-    /// The opponent left mid-game and didn't come back: you win.
-    Forfeit,
-    Battle { json: String },
+    /// Waiting for a group: how many players there are so far.
+    Waiting { count: u32 },
+    /// Matched: join this room.
+    Matched { room: String, mode: String, opponents: Vec<OnlineProfile> },
     Ignore,
 }
 
+pub(crate) fn profile_from(v: &Value) -> Option<OnlineProfile> {
+    v.is_object().then(|| serde_json::from_value::<RawProfile>(v.clone()).ok()).flatten().map(OnlineProfile::from)
+}
+
 #[uniffi::export]
-pub fn online_event(json: String) -> OnlineEvent {
-    if json == "pong" {
-        return OnlineEvent::Ignore;
-    }
+pub fn queue_event(json: String) -> QueueEvent {
     let Ok(v) = serde_json::from_str::<Value>(&json) else {
-        return OnlineEvent::Ignore;
+        return QueueEvent::Ignore;
     };
     let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-    let profile = |k: &str| {
-        v.get(k)
-            .filter(|p| p.is_object())
-            .and_then(|p| serde_json::from_value::<RawProfile>(p.clone()).ok())
-            .map(OnlineProfile::from)
-    };
-    let int = |k: &str| v.get(k).and_then(Value::as_i64).unwrap_or(0) as i32;
-    let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
     match s("t").as_str() {
-        "queued" => OnlineEvent::Queued,
-        "matched" => match profile("opponent") {
-            Some(opponent) => OnlineEvent::Matched { room: s("room"), mode: s("mode"), opponent },
-            None => OnlineEvent::Ignore,
-        },
-        "_room" => OnlineEvent::Joined { opponent: profile("opponent"), peer: flag("peer") },
-        "_peer" => OnlineEvent::Peer { up: flag("up") },
-        "_rating" => OnlineEvent::Rating { counted: flag("counted"), rating: int("rating"), delta: int("delta") },
-        "_forfeit" => OnlineEvent::Forfeit,
-        t if t.starts_with('_') => OnlineEvent::Ignore,
-        _ => OnlineEvent::Battle { json },
+        "queued" => QueueEvent::Queued,
+        "waiting" => QueueEvent::Waiting { count: v.get("count").and_then(Value::as_u64).unwrap_or(1) as u32 },
+        "matched" => {
+            let opponents: Vec<OnlineProfile> = match v.get("players").and_then(Value::as_array) {
+                Some(list) => list.iter().filter_map(profile_from).collect(),
+                None => v.get("opponent").and_then(profile_from).into_iter().collect(),
+            };
+            QueueEvent::Matched { room: s("room"), mode: s("mode"), opponents }
+        }
+        _ => QueueEvent::Ignore,
     }
 }
 
-/// The game report each phone sends when a game ends (`won`: Some(true) win, Some(false) loss, None draw).
+/// Query string for the quick-match queue. `group`: 3–4 players instead of a rated 1v1.
 #[uniffi::export]
-pub fn online_report(won: Option<bool>) -> String {
-    serde_json::json!({ "t": "report", "won": won }).to_string()
+pub fn queue_path(mode: crate::game::BattleMode, group: bool, swears: bool) -> String {
+    format!(
+        "/v1/queue?mode={}&size={}&swears={}&v={}",
+        crate::game::mode_info(mode).wire,
+        if group { 4 } else { 2 },
+        swears as u8,
+        crate::battle::PROTOCOL
+    )
+}
+
+/// The code in `POST /v1/party`'s answer.
+#[uniffi::export]
+pub fn online_parse_party(json: String) -> Result<String, OnlineError> {
+    #[derive(Deserialize)]
+    struct P {
+        code: String,
+    }
+    Ok(parse::<P>(&json)?.code)
 }
 
 /// Same rule as the server: 2–16 letters (any script) or digits, space, `_ - .`, no links.
@@ -361,26 +361,26 @@ mod tests {
     }
 
     #[test]
-    fn events() {
-        assert_eq!(online_event(r#"{"t":"queued"}"#.into()), OnlineEvent::Queued);
+    fn queue() {
+        assert_eq!(queue_event(r#"{"t":"queued"}"#.into()), QueueEvent::Queued);
+        assert_eq!(queue_event(r#"{"t":"waiting","count":3}"#.into()), QueueEvent::Waiting { count: 3 });
         assert!(matches!(
-            online_event(format!(r#"{{"t":"matched","room":"r1","mode":"Blitz","opponent":{P}}}"#)),
-            OnlineEvent::Matched { ref room, .. } if room == "r1"
+            queue_event(format!(r#"{{"t":"matched","room":"r1","mode":"Blitz","opponent":{P},"players":[{P},{P}]}}"#)),
+            QueueEvent::Matched { ref room, ref opponents, .. } if room == "r1" && opponents.len() == 2
         ));
-        assert_eq!(
-            online_event(r#"{"t":"_room","opponent":null,"peer":true}"#.into()),
-            OnlineEvent::Joined { opponent: None, peer: true }
-        );
-        assert_eq!(online_event(r#"{"t":"_peer","up":false}"#.into()), OnlineEvent::Peer { up: false });
-        assert_eq!(
-            online_event(r#"{"t":"_rating","counted":true,"rating":1016,"delta":16}"#.into()),
-            OnlineEvent::Rating { counted: true, rating: 1016, delta: 16 }
-        );
-        let battle = r#"{"t":"answer","i":2,"ok":true,"ms":900}"#.to_string();
-        assert_eq!(online_event(battle.clone()), OnlineEvent::Battle { json: battle });
-        assert_eq!(online_event("pong".into()), OnlineEvent::Ignore);
-        assert_eq!(online_report(Some(true)), r#"{"t":"report","won":true}"#);
-        assert_eq!(online_report(None), r#"{"t":"report","won":null}"#);
+        assert!(matches!(
+            queue_event(format!(r#"{{"t":"matched","room":"r1","mode":"Blitz","opponent":{P}}}"#)),
+            QueueEvent::Matched { ref opponents, .. } if opponents.len() == 1
+        ));
+        assert_eq!(queue_event("pong".into()), QueueEvent::Ignore);
+        assert_eq!(queue_path(crate::game::BattleMode::ToneClash, true, false), "/v1/queue?mode=ToneClash&size=4&swears=0&v=2");
+        assert_eq!(online_parse_party(r#"{"code":"ABC234"}"#.into()).unwrap(), "ABC234");
+        let inbox = online_parse_inbox(format!(
+            r#"{{"requests":1,"challenges":[{{"room":"r","mode":"Party","party":"ABC234","from":{P}}},{{"room":"q","mode":"Duel","party":null,"from":{P}}}]}}"#
+        ))
+        .unwrap();
+        assert_eq!(inbox.challenges[0].party, "ABC234");
+        assert_eq!(inbox.challenges[1].party, "");
     }
 
     #[test]

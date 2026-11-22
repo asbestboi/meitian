@@ -44,7 +44,15 @@ pub struct EffectSpec {
     pub shake: f32,
     /// Full-screen flash color ("" = none).
     pub flash: String,
+    /// Impact sound (`hit_sound_pcm`), one per hit effect. Empty for auras.
+    pub sound: String,
 }
+
+/// Every hit effect cosmetic.
+pub const HIT_EFFECTS: [&str; 17] = [
+    "fx.boom", "fx.fire", "fx.zap", "fx.envelope", "fx.blossom", "fx.dragon", "fx.bomb", "fx.glove", "fx.firecracker",
+    "fx.tomato", "fx.mic", "fx.poop", "fx.glitch", "fx.money", "fx.snow", "fx.hearts", "fx.chrome",
+];
 
 fn spec(id: &str, shape: ParticleShape, glyphs: &[&str], colors: &[&str]) -> EffectSpec {
     EffectSpec {
@@ -64,6 +72,7 @@ fn spec(id: &str, shape: ParticleShape, glyphs: &[&str], colors: &[&str]) -> Eff
         projectile: String::new(),
         shake: 6.0,
         flash: String::new(),
+        sound: String::new(),
     }
 }
 
@@ -162,6 +171,7 @@ pub fn effect_spec(id: String) -> EffectSpec {
     if s.id != "fx.boom" {
         s.id = id;
     }
+    s.sound = s.id.trim_start_matches("fx.").to_string();
     s
 }
 
@@ -192,11 +202,7 @@ mod tests {
 
     #[test]
     fn every_effect_has_a_recipe() {
-        let ids = [
-            "fx.boom", "fx.fire", "fx.zap", "fx.envelope", "fx.blossom", "fx.dragon", "fx.bomb", "fx.glove", "fx.firecracker",
-            "fx.tomato", "fx.mic", "fx.poop", "fx.glitch", "fx.money", "fx.snow", "fx.hearts", "fx.chrome",
-        ];
-        for id in ids {
+        for id in HIT_EFFECTS {
             let s = effect_spec(id.into());
             assert_eq!(s.id, id);
             assert!(!s.colors.is_empty(), "{id} needs colors");

@@ -284,7 +284,6 @@ name = "meitian_core"
 version = "1.13.0"
 dependencies = [
  "fastrand",
- "libc",
  "serde",
  "serde_json",
  "uniffi",
