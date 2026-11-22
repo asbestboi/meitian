@@ -87,10 +87,12 @@ fun LearnSession(words: List<CoreWord>, close: () -> Unit) {
                     questions = words.shuffled().mapIndexed { i, w -> Question.make(w, kinds[i % kinds.size], pool) }
                     phase = 1
                 }
-                1 -> QuizRunner(questions, onDone = { c ->
+                1 -> QuizRunner(questions, useHearts = true, onFailed = { phase = 3 }, onDone = { c ->
                     score = c; app.finishLearning(words, c); phase = 2; confetti++
                     if (c == questions.size) app.count(com.asbestboi.meitian.data.AppState.Counter.Perfect)
                 })
+                // from the top: cards and a fresh quiz; nothing was saved from this try
+                3 -> OutOfHearts(onRetry = { questions = emptyList(); score = 0; phase = 0 }, onQuit = close)
                 else -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Spacer(Modifier.weight(1f))
                     Text("🎉", fontSize = 90.sp)

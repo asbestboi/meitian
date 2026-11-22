@@ -142,7 +142,7 @@ fun OnboardingScreen(retakeOnly: Boolean = false, onDone: () -> Unit = {}) {
                     }
                     Gap(10.dp)
                     QuizRunner(
-                        questions, allowPinyin = false,
+                        questions, allowPinyin = false, tagNew = false,
                         onAnswer = { q, right -> results += PlacementAnswer(q.word.level, right) },
                         shouldContinue = { placementShouldContinue(results.toList()) },
                         onDone = {

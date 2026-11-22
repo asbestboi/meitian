@@ -14,7 +14,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +31,13 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,10 +80,15 @@ import com.asbestboi.meitian.data.AppState
 import uniffi.meitian_core.shelfStories
 import uniffi.meitian_core.storyAvailability
 import uniffi.meitian_core.storyById
-import uniffi.meitian_core.storyFitsLevel
+import uniffi.meitian_core.TranslationCost
+import uniffi.meitian_core.lessonFailed
+import uniffi.meitian_core.lessonHearts
+import uniffi.meitian_core.loseHeart
+import uniffi.meitian_core.storyUnlocked
+import uniffi.meitian_core.storyXp
+import uniffi.meitian_core.translationCost
 import uniffi.meitian_core.storyImageUrls
 import uniffi.meitian_core.storyOfTheDay
-import uniffi.meitian_core.storyWordIds
 
 /** Reading history (ordered, oldest first) and the current "next story" surprise for each kind. */
 object StoryProgress {
@@ -107,26 +117,23 @@ object StoryProgress {
     fun reset(c: Context) = prefs(c).edit().clear().apply()
 
     /**
-     * The surprise waiting for this learner, picked to fit the lesson they're on (`recent` = the current unit's
-     * words). It stays the same until it's read or another lesson is finished, then a new unread one is picked.
+     * The surprise waiting for this learner, picked to fit the lesson they're on. It stays the same until it's read
+     * or another lesson is finished, then a new unread one is picked. Only unlocked stories.
      */
-    fun next(c: Context, chat: Boolean, dayKey: String, level: Int, learned: List<String>, recent: List<String>): Story? {
+    fun next(c: Context, chat: Boolean, app: AppState, unit: Int? = null): Story? {
         val key = if (chat) "nextChat" else "nextStory"
         val readIds = read(c)
+        val known = app.knownList
         val p = prefs(c)
         p.getString(key, null)?.let { id ->
-            val s = storyById(id)
-            if (s != null && id !in readIds && p.getInt(key + "At", -1) == learned.size && (s.style == "chat") == chat &&
-                (s.date.isEmpty() || s.date <= dayKey) && storyFitsLevel(s, level.coerceIn(0, 255).toUByte())) return s
+            val s = storyById(id, known)
+            if (s != null && id !in readIds && p.getInt(key + "At", -1) == known.size && (s.style == "chat") == chat &&
+                (s.date.isEmpty() || s.date <= app.todayKey) && storyUnlocked(s, known)) return s
         }
-        val s = nextStory(chat, dayKey, level.coerceIn(0, 255).toUByte(), readIds, learned, recent, kotlin.random.Random.nextLong().toULong())
-        p.edit().apply { if (s == null) remove(key) else putString(key, s.id).putInt(key + "At", learned.size) }.apply()
+        val s = nextStory(chat, app.todayKey, readIds, known, app.unitWordIds(unit), app.upcomingIds, kotlin.random.Random.nextLong().toULong())
+        p.edit().apply { if (s == null) remove(key) else putString(key, s.id).putInt(key + "At", known.size) }.apply()
         return s
     }
-
-    /** Same, for the learner in [app]. */
-    fun next(c: Context, chat: Boolean, app: AppState, unit: Int? = null): Story? =
-        next(c, chat, app.todayKey, app.currentLevel, app.cards.keys.toList(), app.unitWordIds(unit))
 }
 
 /** Story picture. Panels show the whole image (fit) over a blurred filled copy; cards fill and crop. */
@@ -181,7 +188,8 @@ fun FullScreenImage(image: StoryImage, close: () -> Unit) {
 }
 
 @Composable
-private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () -> Unit) {
+private fun StoryCard(story: Story, done: Boolean, missing: Int = 0, onClick: () -> Unit = {}) {
+    val locked = missing > 0
     Column(
         Modifier.width(200.dp).card().clickable(enabled = !locked, onClick = onClick).alpha(if (locked) 0.55f else 1f),
     ) {
@@ -191,7 +199,8 @@ private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () 
             if (done) Text("✅", fontSize = 20.sp, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
             if (locked) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("🔒", fontSize = 30.sp)
-                Text("HSK ${story.level.toInt() - 1} first", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(learnMore(missing), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 8.dp, vertical = 3.dp))
             }
             if (story.style == "chat" || story.date.isNotEmpty()) Text(if (story.style == "chat") "💬 chat" else "daily",
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White,
@@ -206,25 +215,28 @@ private fun StoryCard(story: Story, locked: Boolean, done: Boolean, onClick: () 
     }
 }
 
-/** Practice tab: a mystery "next story" (no cover, no title — a surprise), plus the history of stories
- *  already read, which can be revisited (no XP the second time). */
+private fun learnMore(missing: Int) = "learn $missing more word${if (missing == 1) "" else "s"} to unlock"
+
+/** Practice tab: a mystery "next story" (no cover, no title — a surprise), the stories that unlock next, and the
+ *  history of stories already read, which can be revisited (no XP the second time). */
 @Composable
 fun StoryHub(chats: Boolean = false) {
     val app = LocalApp.current
     val nav = LocalNav.current
     val ctx = LocalContext.current
     // recomputed when content changes, the day changes, or a story screen closes
-    val key = listOf(ContentSync.generation, app.todayKey, nav.content == null, app.currentLevel)
-    val all = remember(key, chats) { shelfStories(app.todayKey).filter { (it.style == "chat") == chats } }
-    if (all.isEmpty()) return
-    val cap = app.currentLevel.coerceAtLeast(1)
-    val fits = remember(key, chats) { storyAvailability(chats, app.todayKey, app.currentLevel.coerceIn(0, 255).toUByte()) }
-    val history = remember(key, chats) { val byId = all.associateBy { it.id }; StoryProgress.read(ctx).reversed().mapNotNull { byId[it] } }
+    val key = listOf(ContentSync.generation, app.todayKey, nav.content == null, app.known.size)
+    val shelf = remember(key, chats) { shelfStories(app.todayKey, app.knownList).filter { (it.story.style == "chat") == chats } }
+    if (shelf.isEmpty()) return
+    val history = remember(key, chats) { val byId = shelf.associateBy { it.story.id }; StoryProgress.read(ctx).reversed().mapNotNull { byId[it]?.story } }
+    val fits = remember(key, chats) { storyAvailability(chats, app.todayKey, app.knownList) }
+    val readIds = history.map { it.id }.toSet()
+    val locked = shelf.filter { !it.unlocked && it.story.id !in readIds }
     val next = remember(key, chats) { StoryProgress.next(ctx, chats, app) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (chats) "chats 💬" else "stories ✦", style = street(22.sp), color = Street.c.text, modifier = Modifier.weight(1f))
-            Text("${history.count { it.level.toInt() <= cap }} / ${fits.atLevel} read", fontSize = 12.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
+            Text("${shelf.count { it.unlocked && it.story.id in readIds }} / ${fits.unlocked} read", fontSize = 12.sp, color = Street.c.secondary, fontWeight = FontWeight.SemiBold)
         }
         if (next != null) {
             Row(Modifier.fillMaxWidth().block(Street.night()).clickable { prefetchStory(ctx, next); nav.show { StoryPlayer(next) { nav.close() } } }.padding(18.dp),
@@ -239,16 +251,22 @@ fun StoryHub(chats: Boolean = false) {
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFC6FF3D)).padding(horizontal = 14.dp, vertical = 8.dp))
             }
         } else {
-            val kind = if (chats) "chat" else "story"
-            Text(if (fits.aboveLevel > 0u) "You've read every HSK $cap $kind ✦ ${fits.aboveLevel} more unlock at higher HSK levels."
+            val soonest = locked.firstOrNull()?.missingWords?.toInt()
+            Text(if (soonest != null) "${learnMore(soonest)} the next ${if (chats) "chat" else "story"} ✦"
                 else if (chats) "You've read every chat ✦ new ones arrive soon." else "You've read every story ✦ new ones arrive soon.",
                 color = Street.c.secondary, modifier = Modifier.fillMaxWidth().card().padding(16.dp))
         }
+        if (locked.isNotEmpty()) {
+            Text("coming up", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(locked, key = { it.story.id }) { StoryCard(it.story, done = false, missing = it.missingWords.toInt()) }
+            }
+        }
         if (history.isNotEmpty()) {
             Text("history", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                history.forEach { s ->
-                    StoryCard(s, locked = false, done = true) { prefetchStory(ctx, s); nav.show { StoryPlayer(s) { nav.close() } } }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(history, key = { it.id }) { s ->
+                    StoryCard(s, done = true) { prefetchStory(ctx, s); nav.show { StoryPlayer(s) { nav.close() } } }
                 }
             }
         }
@@ -261,7 +279,7 @@ fun StoryOfTheDayCard() {
     val app = LocalApp.current
     val nav = LocalNav.current
     val ctx = LocalContext.current
-    val s = remember(ContentSync.generation, app.todayKey) { storyOfTheDay(app.todayKey, app.currentLevel.toUByte()) } ?: return
+    val s = remember(ContentSync.generation, app.todayKey, app.known.size) { storyOfTheDay(app.todayKey, app.knownList) } ?: return
     if (s.date != app.todayKey) return
     val read = remember(nav.content == null) { StoryProgress.isRead(ctx, s.id) }
     Row(Modifier.fillMaxWidth().block(Street.pink()).clickable { prefetchStory(ctx, s); nav.show { StoryPlayer(s) { nav.close() } } }.padding(18.dp),
@@ -277,9 +295,43 @@ fun StoryOfTheDayCard() {
     }
 }
 
-/** Plays a story: picture, lines one at a time as bubbles (read aloud, tap words), then a question. */
+/** Which lines of a story were translated. One peek is free; the next one costs the story's XP (the rule is in the core).
+ *  [free]: a replay, which pays no XP anyway. */
+private class Translations(private val free: Boolean) {
+    /** The next tap on a line or reply shows its English. */
+    var armed by mutableStateOf(false)
+    val shown = mutableStateListOf<String>()
+    val cost get() = if (free) TranslationCost.NOTHING else translationCost(shown.size.toUInt())
+    fun reveal(key: String) { if (key !in shown) shown.add(key); armed = false }
+}
+
+/** Wraps a line: while the EN button is armed, a tap anywhere on it shows its English. */
 @Composable
-fun StoryPlayer(original: Story, close: () -> Unit) {
+private fun Translatable(key: String, tr: Translations, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val armed = tr.armed && key !in tr.shown
+    Box(if (armed) modifier.border(2.dp, Street.c.sky, RoundedCornerShape(18.dp)) else modifier) {
+        content()
+        if (armed) Box(Modifier.matchParentSize().clip(RoundedCornerShape(18.dp)).clickable(onClickLabel = "Show translation") {
+            Sfx.play(Sfx.Sound.Tick); tr.reveal(key)
+        })
+    }
+}
+
+/** Plays a story: picture, lines one at a time as bubbles (read aloud, tap words), then a question. Wrong answers
+ *  cost hearts; [onFinished] gets the number of lines that were translated. */
+@Composable
+fun StoryPlayer(original: Story, onFinished: (Int) -> Unit = {}, close: () -> Unit) {
+    val ctx = LocalContext.current
+    var attempt by remember { mutableIntStateOf(0) }
+    val revisit = remember { StoryProgress.isRead(ctx, original.id) }   // read before: no XP this time
+    // peeks stay used when the story starts over
+    val tr = remember { Translations(free = revisit) }
+    LaunchedEffect(original.id) { prefetchStory(ctx, original) }
+    key(attempt) { StoryAttempt(original, revisit, tr, onFinished, onRetry = { attempt++ }, close) }
+}
+
+@Composable
+private fun StoryAttempt(original: Story, revisit: Boolean, tr: Translations, onFinished: (Int) -> Unit, onRetry: () -> Unit, close: () -> Unit) {
     // reply choices are reshuffled every time a story opens (remembered, so recomposition doesn't reshuffle)
     val story = remember(original.id) { shuffleStoryReplies(original, kotlin.random.Random.nextLong().toULong()) }
     val app = LocalApp.current
@@ -289,53 +341,126 @@ fun StoryPlayer(original: Story, close: () -> Unit) {
     var picked by remember { mutableStateOf<Int?>(null) }
     var correct by remember { mutableIntStateOf(0) }
     var finished by remember { mutableStateOf(false) }
-    var english by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    var hearts by remember { mutableIntStateOf(lessonHearts().toInt()) }
+    // panels whose question was answered wrong: asked again after the last panel
+    val again = remember { mutableStateListOf<Int>() }
+    var retrying by remember { mutableStateOf(false) }
+    var asks by remember { mutableIntStateOf(0) }
+    var askCost by remember { mutableStateOf(false) }
     var confetti by remember { mutableIntStateOf(0) }
     var zoomed by remember { mutableStateOf<StoryImage?>(null) }
     var typing by remember { mutableStateOf(false) }
-    val revisit = remember { StoryProgress.isRead(ctx, story.id) }   // read before: no XP this time
     // chat stories: messages added by your replies (+ reactions) per panel, and which pictures were revealed
     val sent = remember { androidx.compose.runtime.mutableStateMapOf<Int, List<StoryLine>>() }
-    val triedWrong = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
-    val replyDone = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
-    val revealed = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val triedWrong = remember { mutableStateListOf<Int>() }
+    val replyDone = remember { mutableStateListOf<Int>() }
+    val revealed = remember { mutableStateListOf<String>() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val isChat = story.style == "chat"
-    LaunchedEffect(story.id) { prefetchStory(ctx, story) }
+    val newWords = remember { story.panels.flatMap { p -> p.lines.flatMap { it.tokens.newIds } + p.reply.flatMap { o -> o.tokens.newIds + (o.reaction?.tokens?.newIds ?: emptyList()) } }.distinct() }
     val p = story.panels[panel]
     val linesDone = shown >= p.lines.size
+    val dead = lessonFailed(hearts.toUInt())
     val replyPending = linesDone && p.reply.isNotEmpty() && panel !in replyDone
     val questionPending = replyPending || (linesDone && p.question != null && picked == null)
 
     LaunchedEffect(panel, shown) {
         val line = p.lines.getOrNull(shown - 1) ?: return@LaunchedEffect
+        app.markSeen(line.tokens.newIds)
         delay(300); Speaker.say(line.zh)
+    }
+    LaunchedEffect(replyPending) { if (replyPending) app.markSeen(p.reply.flatMap { it.tokens.newIds }) }
+
+    fun answer(q: StoryQuestion, i: Int) {
+        if (picked != null) return
+        picked = i
+        if (i == q.answer.toInt()) {
+            if (!retrying) correct++
+            Sfx.play(Sfx.Sound.Correct)
+        } else {
+            Sfx.play(Sfx.Sound.Wrong)
+            hearts = loseHeart(hearts.toUInt()).toInt()
+            again.add(panel)
+        }
+    }
+
+    fun sendReply(i: Int) {
+        val option = p.reply[i]
+        val pi = panel
+        sent[pi] = (sent[pi] ?: emptyList()) + StoryLine(story.me, null, option.zh, option.pinyin, option.en, option.tokens)
+        Sfx.play(Sfx.Sound.Swoosh); Speaker.say(option.zh)
+        if (option.correct) { if (triedWrong.isEmpty()) correct++ }
+        else { triedWrong.add(i); hearts = loseHeart(hearts.toUInt()).toInt() }
+        scope.launch {
+            option.reaction?.let { r ->
+                typing = true; delay(900); typing = false
+                sent[pi] = (sent[pi] ?: emptyList()) + r
+                app.markSeen(r.tokens.newIds)
+                Sfx.play(if (option.correct) Sfx.Sound.Correct else Sfx.Sound.Wrong)
+            }
+            if (option.correct) { replyDone.add(pi); triedWrong.clear() }
+        }
+    }
+
+    fun finish() {
+        if (!revisit) {
+            StoryProgress.markRead(ctx, story.id)
+            app.addXP(storyXp((20 + correct * 5).toUInt(), tr.shown.size.toUInt()).toInt())
+            app.count(AppState.Counter.Story)
+        }
+        app.markSeen(newWords, ding = false)
+        onFinished(tr.shown.size)
+        finished = true; confetti++
+        Sfx.play(Sfx.Sound.Win)
+    }
+
+    /** After the last panel: wrong questions come back until they're right. */
+    fun nextRetry() {
+        if (again.isEmpty()) return finish()
+        panel = again.removeAt(0)
+        shown = story.panels[panel].lines.size
+        picked = null
+        retrying = true
+        asks++
     }
 
     Box(Modifier.fillMaxSize()) {
-        if (finished) {
-            StoryResults(story, correct, revisit, close)
+        if (failed) OutOfHearts(onRetry, close)
+        else if (finished) {
+            StoryResults(story, correct, revisit, tr.shown.size, newWords, close)
         } else Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CloseButton(close); HSpacer(12.dp)
-                val progress = panel + if (linesDone) 1f else shown.toFloat() / p.lines.size.coerceAtLeast(1)
+                val progress = if (retrying) story.panels.size.toFloat() else panel + if (linesDone) 1f else shown.toFloat() / p.lines.size.coerceAtLeast(1)
                 LinearProgressIndicator(progress = { progress / story.panels.size }, Modifier.weight(1f), color = Street.c.pink)
                 HSpacer(10.dp)
-                Text(if (english) "EN ✓" else "EN", fontWeight = FontWeight.Bold, fontSize = 13.sp,
-                    color = if (english) Street.c.paper else Street.c.text,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (english) Street.c.ink else Street.c.card)
-                        .clickable { english = !english }.padding(horizontal = 12.dp, vertical = 8.dp))
+                HeartsBar(hearts)
+                HSpacer(10.dp)
+                val cost = tr.cost
+                val spent = cost != TranslationCost.FREE && !revisit
+                Text(when { tr.armed -> "EN ✓"; spent -> "EN used"; else -> "EN" }, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                    color = if (tr.armed) Street.c.paper else if (spent) Street.c.secondary else Street.c.text,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (tr.armed) Street.c.ink else Street.c.card).alpha(if (spent && !tr.armed) 0.55f else 1f)
+                        .clickable(onClickLabel = if (cost == TranslationCost.XP) "Show another translation, costs this story's XP" else "Translate one line") {
+                            if (tr.armed) tr.armed = false
+                            else if (cost == TranslationCost.XP) askCost = true
+                            else tr.armed = true
+                        }.padding(horizontal = 12.dp, vertical = 8.dp))
             }
-            if (isChat) Box(Modifier.weight(1f)) {
-                ChatThread(story, panel, shown, sent, typing, english, revealed, onImage = { zoomed = it })
-                val q = p.question
+            AnimatedVisibility(tr.armed) {
+                Text("tap a line or a reply to see its English", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Street.c.sky,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            }
+            val q = p.question
+            if (retrying && q != null) Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("one more time 再来一次", style = street(22.sp), color = Street.c.text)
+                p.lines.forEachIndexed { i, line -> Bubble("$panel-$i", line, tr) }
+                key(asks) { Question(q, picked) { i -> answer(q, i) } }
+            } else if (isChat) Box(Modifier.weight(1f)) {
+                ChatThread(story, panel, shown, sent, typing, tr, revealed, onImage = { zoomed = it })
                 if (q != null && linesDone && !replyPending) Box(Modifier.align(Alignment.BottomCenter)) {
-                    Question(q, picked) { i ->
-                        if (picked == null) {
-                            picked = i
-                            if (i == q.answer.toInt()) { correct++; Sfx.play(Sfx.Sound.Correct) } else Sfx.play(Sfx.Sound.Wrong)
-                        }
-                    }
+                    Question(q, picked) { i -> answer(q, i) }
                 }
             } else AnimatedContent(panel, Modifier.weight(1f),
                 transitionSpec = { (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut()) }, label = "panel") { idx ->
@@ -347,71 +472,66 @@ fun StoryPlayer(original: Story, close: () -> Unit) {
                             modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(img.source))) } })
                     }
                     cur.lines.forEachIndexed { i, line ->
-                        AnimatedVisibility(i < shown || idx != panel, enter = slideInVertically { it / 2 } + fadeIn()) { Bubble(line, english) }
+                        AnimatedVisibility(i < shown || idx != panel, enter = slideInVertically { it / 2 } + fadeIn()) { Bubble("$idx-$i", line, tr) }
                     }
-                    val q = cur.question
-                    if (q != null && (idx != panel || linesDone)) Question(q, picked) { i ->
-                        if (picked == null) {
-                            picked = i
-                            if (i == q.answer.toInt()) { correct++; Sfx.play(Sfx.Sound.Correct) } else Sfx.play(Sfx.Sound.Wrong)
-                        }
-                    }
+                    val cq = cur.question
+                    if (cq != null && (idx != panel || linesDone)) Question(cq, picked) { i -> answer(cq, i) }
                 }
             }
-            if (replyPending) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (dead && (picked != null || !typing)) BigButton("continue") { failed = true }
+            else if (replyPending) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 // choose what you send; a reply that doesn't fit gets a reaction and you try again
                 Text("your reply", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Street.c.secondary)
                 p.reply.forEachIndexed { i, option ->
                     val tried = i in triedWrong
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                        .background(if (tried) Street.c.red.copy(alpha = 0.12f) else Street.c.sky.copy(alpha = 0.14f))
-                        .clickable(enabled = !tried && !typing) {
-                            val pi = panel
-                            sent[pi] = (sent[pi] ?: emptyList()) + StoryLine(story.me, null, option.zh, option.pinyin, option.en, option.tokens)
-                            Sfx.play(Sfx.Sound.Swoosh); Speaker.say(option.zh)
-                            if (option.correct) { if (triedWrong.isEmpty()) correct++ } else triedWrong.add(i)
-                            scope.launch {
-                                option.reaction?.let { r ->
-                                    typing = true; delay(900); typing = false
-                                    sent[pi] = (sent[pi] ?: emptyList()) + r
-                                    Sfx.play(if (option.correct) Sfx.Sound.Correct else Sfx.Sound.Wrong)
-                                }
-                                if (option.correct) { replyDone.add(pi); triedWrong.clear() }
-                            }
+                    val key = "$panel-r-${option.zh}"
+                    Translatable(key, tr, Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                            .background(if (tried) Street.c.red.copy(alpha = 0.12f) else Street.c.sky.copy(alpha = 0.14f))
+                            .clickable(enabled = !tried && !typing && !dead) { sendReply(i) }
+                            .semantics { contentDescription = option.tokens.spoken() }
+                            .alpha(if (tried) 0.5f else 1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            Text(markedText(option.tokens), fontSize = 18.sp, color = Street.c.text,
+                                textDecoration = if (tried) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                            Text(option.pinyin, fontSize = 12.sp, color = Street.c.secondary)
+                            if (key in tr.shown) Text(option.en, fontSize = 12.sp, color = Street.c.secondary)
                         }
-                        .alpha(if (tried) 0.5f else 1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        Text(option.zh, fontSize = 18.sp, color = Street.c.text,
-                            textDecoration = if (tried) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
-                        Text(option.pinyin, fontSize = 12.sp, color = Street.c.secondary)
-                        if (english) Text(option.en, fontSize = 12.sp, color = Street.c.secondary)
                     }
                 }
-            } else BigButton(if (!linesDone) "continue" else if (panel + 1 < story.panels.size) "next" else "finish", enabled = !questionPending) {
+            } else BigButton(if (!linesDone) "continue" else if (!retrying && panel + 1 < story.panels.size) "next" else if (again.isNotEmpty()) "continue" else "finish", enabled = !questionPending) {
                 when {
                     !linesDone && isChat -> if (!typing) scope.launch {
                         // "…" first, like a real chat
                         typing = true; delay(650); typing = false; shown++; Sfx.play(Sfx.Sound.Tick)
                     }
                     !linesDone -> shown++
-                    panel + 1 < story.panels.size -> { panel++; shown = 1; picked = null; Sfx.play(Sfx.Sound.Swoosh) }
-                    else -> {
-                        if (!revisit) {
-                            StoryProgress.markRead(ctx, story.id)
-                            app.addXP(20 + correct * 5); app.count(com.asbestboi.meitian.data.AppState.Counter.Story)
-                        }
-                        finished = true; confetti++
-                        Sfx.play(Sfx.Sound.Win)
-                    }
+                    !retrying && panel + 1 < story.panels.size -> { panel++; shown = 1; picked = null; Sfx.play(Sfx.Sound.Swoosh) }
+                    else -> nextRetry()
                 }
             }
         }
         Confetti(confetti, sound = false)
         zoomed?.let { FullScreenImage(it) { zoomed = null } }
+        if (askCost) ConfirmTranslation(onYes = { askCost = false; tr.armed = true }) { askCost = false }
+    }
+}
+
+/** Before a second translation. */
+@Composable
+private fun ConfirmTranslation(onYes: () -> Unit, onNo: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onNo) {
+        Column(Modifier.fillMaxWidth().card().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Show translation?", style = street(22.sp), color = Street.c.text)
+            Text("You'll get no XP for this story. Tapping a single word is always free.", color = Street.c.secondary)
+            BigButton("Keep reading", onClick = onNo)
+            Text("Show it, no XP", fontWeight = FontWeight.Bold, color = Street.c.red, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onYes).padding(10.dp))
+        }
     }
 }
 
 @Composable
-private fun Bubble(line: StoryLine, english: Boolean) {
+private fun Bubble(key: String, line: StoryLine, tr: Translations) = Translatable(key, tr) {
     val narration = line.speaker.isEmpty()
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
@@ -425,7 +545,7 @@ private fun Bubble(line: StoryLine, english: Boolean) {
             Box(Modifier.weight(1f)) { TokenSentence(line.tokens, 22.sp) }
             SpeakButton(line.zh, 32.dp, Street.c.sky)
         }
-        if (english) Text(line.en, fontSize = 14.sp, color = Street.c.secondary)
+        if (key in tr.shown) Text(line.en, fontSize = 14.sp, color = Street.c.secondary)
     }
 }
 
@@ -450,23 +570,28 @@ private fun Question(q: StoryQuestion, picked: Int?, onPick: (Int) -> Unit) {
 }
 
 @Composable
-private fun StoryResults(story: Story, correct: Int, revisit: Boolean, close: () -> Unit) {
+private fun StoryResults(story: Story, correct: Int, revisit: Boolean, translations: Int, newWords: List<String>, close: () -> Unit) {
     val app = LocalApp.current
-    val fresh = remember { storyWordIds(story).mapNotNull { Words[it] }.filter { app.cards[it.id] == null && !it.isSwear } }
+    val recap = remember { newWords.mapNotNull { Words[it] } }
+    val fresh = remember { recap.filter { app.cards[it.id] == null } }
     var added by remember { mutableStateOf(false) }
-    val questions = story.panels.count { it.question != null }
+    val questions = story.panels.count { it.question != null } + story.panels.count { it.reply.isNotEmpty() }
+    val gained = storyXp((20 + correct * 5).toUInt(), translations.toUInt())
     Column(Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Spacer(Modifier.weight(1f))
-        StoryImageView(story.cover, 180.dp, Modifier.padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)), fill = true)
-        Text("故事读完了！", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.text)
-        Text("story finished · $correct/$questions questions right", color = Street.c.secondary)
-        Text(if (revisit) "replay · no XP" else "+${20 + correct * 5} XP", style = street(26.sp), color = if (revisit) Street.c.secondary else Street.c.gold)
-        if (fresh.isNotEmpty()) {
-            Text(if (added) "added ${fresh.size} words ✓" else "＋ add ${fresh.size} new words to review", fontWeight = FontWeight.Bold, color = Street.c.jade,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(Street.c.jade.copy(alpha = 0.15f))
-                    .clickable(enabled = !added) { app.addToReview(fresh); added = true }.padding(horizontal = 20.dp, vertical = 12.dp))
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Spacer(Modifier.height(20.dp))
+            StoryImageView(story.cover, 180.dp, Modifier.padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)), fill = true)
+            Text("故事读完了！", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Street.c.text)
+            Text("story finished · $correct/$questions questions right", color = Street.c.secondary)
+            Text(if (revisit) "replay · no XP" else if (gained == 0u) "translated · no XP" else "+$gained XP", style = street(26.sp),
+                color = if (revisit || gained == 0u) Street.c.secondary else Street.c.gold)
+            if (recap.isNotEmpty()) NewWordsRecap(recap)
+            if (fresh.isNotEmpty()) {
+                Text(if (added) "added ${fresh.size} words ✓" else "＋ add ${fresh.size} new words to review", fontWeight = FontWeight.Bold, color = Street.c.jade,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Street.c.jade.copy(alpha = 0.15f))
+                        .clickable(enabled = !added) { app.addToReview(fresh); added = true }.padding(horizontal = 20.dp, vertical = 12.dp))
+            }
         }
-        Spacer(Modifier.weight(1f))
         BigButton("Done", onClick = close)
     }
 }
@@ -479,7 +604,7 @@ fun prefetchStory(ctx: android.content.Context, story: Story) {
 
 /** An SMS thread: earlier panels stay visible, my messages on the right, pictures inside bubbles. */
 @Composable
-private fun ChatThread(story: Story, panel: Int, shown: Int, sent: Map<Int, List<StoryLine>>, typing: Boolean, english: Boolean,
+private fun ChatThread(story: Story, panel: Int, shown: Int, sent: Map<Int, List<StoryLine>>, typing: Boolean, tr: Translations,
                        revealed: MutableList<String>, onImage: (StoryImage) -> Unit) {
     val items = buildList {
         for (pi in 0..panel) {
@@ -494,7 +619,7 @@ private fun ChatThread(story: Story, panel: Int, shown: Int, sent: Map<Int, List
     androidx.compose.foundation.lazy.LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 200.dp)) {
         items(items.size, key = { items[it].first }) { idx ->
-            ChatBubble(items[idx].second, story.me, english, revealed, onImage)
+            ChatBubble(items[idx].first, items[idx].second, story.me, tr, revealed, onImage)
         }
         if (typing) item(key = "typing") {
             Text("•••", fontSize = 18.sp, color = Street.c.secondary,
@@ -506,10 +631,14 @@ private fun ChatThread(story: Story, panel: Int, shown: Int, sent: Map<Int, List
 }
 
 @Composable
-private fun ChatBubble(line: StoryLine, me: String, english: Boolean, revealed: MutableList<String>, onImage: (StoryImage) -> Unit) {
+private fun ChatBubble(key: String, line: StoryLine, me: String, tr: Translations, revealed: MutableList<String>, onImage: (StoryImage) -> Unit) {
     if (line.speaker.isEmpty()) {
-        Text(if (english) "${line.zh} · ${line.en}" else line.zh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Street.c.secondary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
+        Translatable(key, tr, Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                TokenSentence(line.tokens, 13.sp, center = true)
+                if (key in tr.shown) Text(line.en, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Street.c.secondary)
+            }
+        }
         return
     }
     val mine = line.speaker == me
@@ -527,14 +656,14 @@ private fun ChatBubble(line: StoryLine, me: String, english: Boolean, revealed: 
             }
             if (line.zh.isNotEmpty()) {
                 val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp)
-                Column(Modifier.clip(shape).background(if (mine) Street.c.sky.copy(alpha = 0.2f) else Street.c.card).padding(horizontal = 12.dp, vertical = 9.dp)) {
+                Translatable(key, tr) { Column(Modifier.clip(shape).background(if (mine) Street.c.sky.copy(alpha = 0.2f) else Street.c.card).padding(horizontal = 12.dp, vertical = 9.dp)) {
                     Row(verticalAlignment = Alignment.Top) {
                         Box(Modifier.weight(1f, fill = false)) { TokenSentence(line.tokens, 20.sp) }
                         HSpacer(6.dp)
                         SpeakButton(line.zh, 28.dp, Street.c.sky)
                     }
-                    if (english) Text(line.en, fontSize = 12.sp, color = Street.c.secondary)
-                }
+                    if (key in tr.shown) Text(line.en, fontSize = 12.sp, color = Street.c.secondary)
+                } }
             }
         }
     }

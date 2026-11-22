@@ -1,6 +1,7 @@
 package com.asbestboi.meitian.data
 
 import android.content.Context
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -31,15 +32,20 @@ import uniffi.meitian_core.questsAllDoneBonus
 import uniffi.meitian_core.streakFreezeMax
 import uniffi.meitian_core.streakFreezePrice
 import uniffi.meitian_core.streakWithFreezes
+import uniffi.meitian_core.WordStatus
 import uniffi.meitian_core.knownLevel
+import uniffi.meitian_core.knownWordIds
 import uniffi.meitian_core.matchCoins
 import uniffi.meitian_core.playerLevel
 import uniffi.meitian_core.quizOptions
 import uniffi.meitian_core.srsGrade
+import uniffi.meitian_core.pathSentencesXp
 import uniffi.meitian_core.srsIsMastered
+import uniffi.meitian_core.storyXp
 import uniffi.meitian_core.streetLevel
 import uniffi.meitian_core.swearWords
 import uniffi.meitian_core.wordLevels
+import uniffi.meitian_core.wordStatuses
 import java.time.LocalDate
 import java.util.UUID
 
@@ -96,6 +102,9 @@ data class Question(val word: CoreWord, val kind: Kind, val options: List<CoreWo
         kind == Kind.Speak && !s.canSpeak -> copy(kind = Kind.HanziToMeaning)
         else -> this
     }
+
+    /** The same question asked again later (reshuffled). */
+    fun again(): Question = Question(word, kind, options.shuffled())
 
     companion object {
         fun make(word: CoreWord, kind: Kind, pool: List<CoreWord>): Question {
@@ -162,6 +171,8 @@ data class Profile(
     val reminderMinute: Int = 0,
     /** Story checkpoints finished on the learning path, as "level-unit". */
     val pathStories: List<String> = emptyList(),
+    /** Sentence nodes finished on the learning path, as "level-number". */
+    val pathSentences: List<String> = emptyList(),
 )
 
 data class Settings(
@@ -207,6 +218,9 @@ class AppState(private val context: Context) {
     var xp by mutableStateOf(0)
     val cards = mutableStateMapOf<String, Card>()
     val days = mutableStateMapOf<String, DayLog>()
+    /** Words shown (tagged as new) but not learned yet. */
+    var seen by mutableStateOf(emptySet<String>())
+        private set
     var todayKey by mutableStateOf(LocalDate.now().toString())
     /** Milestones reached by the last XP gain, waiting to be celebrated. */
     val milestoneQueue = mutableStateListOf<Milestone>()
@@ -286,6 +300,34 @@ class AppState(private val context: Context) {
         get() = days[todayKey] ?: DayLog()
         set(v) { days[todayKey] = v }
 
+    // ----- known and new words -----
+
+    /** Learned words plus the words of confirmed levels. */
+    val known: Set<String> by derivedStateOf {
+        Words.all.size // downloaded packs add words to confirmed levels
+        knownWordIds(cards.keys.toList(), profile.confirmedLevel.coerceIn(0, 255).toUByte()).toHashSet()
+    }
+    val knownList: List<String> get() = known.toList()
+
+    /** The words of a lesson that aren't learned yet (they get the NEW tag). */
+    fun newIds(words: List<CoreWord>): Set<String> {
+        val ids = words.map { it.id }
+        return ids.zip(wordStatuses(ids, knownList, seen.toList())).filter { it.second != WordStatus.LEARNED }.map { it.first }.toSet()
+    }
+
+    /** These words were just shown with their NEW tag. The first time ever, that's a soft ding. */
+    fun markSeen(ids: Collection<String>, ding: Boolean = true) {
+        val fresh = ids.filter { it !in seen && it !in known }
+        if (fresh.isEmpty()) return
+        seen = seen + fresh
+        if (ding) Sfx.play(Sfx.Sound.NewWord)
+        save()
+    }
+
+    /** What the next lesson will teach (stories like to preview it). */
+    val upcomingIds: List<String>
+        get() = Words.level(currentLevel).filter { cards[it.id] == null }.take(profile.dailyGoal).map { it.id }
+
     // ----- words of the day -----
 
     val startLevel get() = (profile.confirmedLevel + 1).coerceIn(1, Words.maxLevel)
@@ -343,20 +385,31 @@ class AppState(private val context: Context) {
     val learnPath: List<PathUnit>
         get() {
             val level = currentLevel
-            val done = profile.pathStories.mapNotNull { key ->
+            fun done(keys: List<String>) = keys.mapNotNull { key ->
                 val p = key.split("-")
                 if (p.size == 2 && p[0].toIntOrNull() == level) p[1].toUIntOrNull() else null
             }
             return uniffi.meitian_core.learnPath(learnedCount(level).toUInt(), Words.level(level).size.toUInt(),
-                profile.dailyGoal.coerceAtLeast(1).toUInt(), done)
+                profile.dailyGoal.coerceAtLeast(1).toUInt(), done(profile.pathStories), done(profile.pathSentences))
         }
 
-    /** A story checkpoint is finished: +20 XP once. */
-    fun finishPathStory(unit: Int) {
+    /** A story checkpoint is finished: +20 XP once (nothing when its lines were translated). */
+    fun finishPathStory(unit: Int, translations: Int = 0) {
         val key = "$currentLevel-$unit"
         if (key in profile.pathStories) return
         profile = profile.copy(pathStories = profile.pathStories + key)
-        addXP(20)
+        addXP(storyXp(20u, translations.toUInt()).toInt())
+    }
+
+    /** A sentence node is finished. Returns the XP it paid (only the first time). */
+    fun finishPathSentences(number: Int): Int {
+        val key = "$currentLevel-$number"
+        val first = key !in profile.pathSentences
+        if (first) profile = profile.copy(pathSentences = profile.pathSentences + key)
+        val gained = if (first) pathSentencesXp().toInt() else 0
+        addXP(gained)
+        count(Counter.Sentences)
+        return gained
     }
 
     /** The words of one lesson on the current level's path (for replaying a finished lesson). */
@@ -538,7 +591,7 @@ class AppState(private val context: Context) {
     fun resetAll() {
         val id = arena.playerId
         profile = Profile(); settings = settings.copy(swears = false); arena = Arena(playerId = id); xp = 0
-        cards.clear(); days.clear(); milestoneQueue.clear(); freezeNotice = null
+        cards.clear(); days.clear(); seen = emptySet(); milestoneQueue.clear(); freezeNotice = null
         Reminders.cancel(context)
         // progress kept outside the save: story history (ui.StoryProgress) and the sprint best
         context.getSharedPreferences("stories", Context.MODE_PRIVATE).edit().clear().apply()
@@ -556,8 +609,9 @@ class AppState(private val context: Context) {
             put("goal", profile.dailyGoal); put("onboarded", profile.onboarded); put("friend", profile.friend)
             put("levelTests", profile.levelTests); put("freezes", profile.freezes); put("frozen", JSONArray(profile.frozenDays))
             put("rem", profile.reminderOn); put("remH", profile.reminderHour); put("remM", profile.reminderMinute)
-            put("pathSt", JSONArray(profile.pathStories))
+            put("pathSt", JSONArray(profile.pathStories)); put("pathSe", JSONArray(profile.pathSentences))
         })
+        o.put("seen", JSONArray(seen.toList()))
         o.put("settings", JSONObject().apply {
             val s = settings
             put("pinyin", s.showPinyin); put("tones", s.toneColors); put("swears", s.swears); put("sounds", s.sounds)
@@ -639,8 +693,10 @@ class AppState(private val context: Context) {
                     p.optBoolean("onboarded"), p.optString("friend", "chinese"), p.optBoolean("levelTests"),
                     p.optInt("freezes"), p.optJSONArray("frozen")?.let { a -> (0 until a.length()).map { a.getLong(it) } } ?: emptyList(),
                     p.optBoolean("rem"), p.optInt("remH", 19), p.optInt("remM", 0),
-                    p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
+                    p.optJSONArray("pathSt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+                    p.optJSONArray("pathSe")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
             }
+            o.optJSONArray("seen")?.let { a -> seen = (0 until a.length()).map { a.getString(it) }.toSet() }
             o.optJSONObject("settings")?.let { s ->
                 settings = Settings(s.optBoolean("pinyin", true), s.optBoolean("tones", true), s.optBoolean("swears"),
                     s.optBoolean("sounds", true), s.optBoolean("listening", true), s.optBoolean("speaking", true),

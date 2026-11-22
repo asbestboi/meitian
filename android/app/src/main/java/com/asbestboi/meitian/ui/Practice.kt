@@ -56,7 +56,7 @@ import uniffi.meitian_core.sprintMultiplier
 enum class PracticeMode(val title: String) { Review("Review"), Listening("Listening"), Speaking("Speaking"), Mixed("Speed mix"), Weak("Weak words") }
 
 /** Word library filter by how the learner is doing with each word. */
-enum class WordStatus(val label: String) { All("all"), Learned("learned"), Weak("⚡ weak"), Due("due"), Mastered("👑 mastered"), New("not yet") }
+enum class WordFilter(val label: String) { All("all"), Learned("learned"), Weak("⚡ weak"), Due("due"), Mastered("👑 mastered"), New("not yet") }
 
 @Composable
 fun PracticeScreen() {
@@ -142,20 +142,20 @@ fun WordLibrary(close: () -> Unit) {
     val app = LocalApp.current
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableIntStateOf(0) }
-    var status by remember { mutableStateOf(WordStatus.All) }
+    var status by remember { mutableStateOf(WordFilter.All) }
     var detail by remember { mutableStateOf<CoreWord?>(null) }
     val shown = remember(search, filter, status, app.settings.swears, Words.all.size, app.cards.toMap()) {
         val q = search.trim().lowercase()
-        val weakIds = if (status == WordStatus.Weak) app.weakWords(200).map { it.id }.toSet() else emptySet()
+        val weakIds = if (status == WordFilter.Weak) app.weakWords(200).map { it.id }.toSet() else emptySet()
         Words.visible(app.settings.swears).filter { w ->
             val c = app.cards[w.id]
             val statusOk = when (status) {
-                WordStatus.All -> true
-                WordStatus.Learned -> c != null
-                WordStatus.Weak -> w.id in weakIds
-                WordStatus.Due -> c != null && c.dueDay <= app.todayNumber
-                WordStatus.Mastered -> c?.mastered == true
-                WordStatus.New -> c == null
+                WordFilter.All -> true
+                WordFilter.Learned -> c != null
+                WordFilter.Weak -> w.id in weakIds
+                WordFilter.Due -> c != null && c.dueDay <= app.todayNumber
+                WordFilter.Mastered -> c?.mastered == true
+                WordFilter.New -> c == null
             }
             statusOk && (filter == 0 || w.lvl == filter) &&
                 (q.isEmpty() || w.hanzi.contains(q) || w.meaning.lowercase().contains(q) || uniffi.meitian_core.toneless(w.pinyin).contains(uniffi.meitian_core.toneless(q)))
@@ -182,7 +182,7 @@ fun WordLibrary(close: () -> Unit) {
             }
             Gap(6.dp)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                WordStatus.entries.forEach { s ->
+                WordFilter.entries.forEach { s ->
                     Box(Modifier.clip(RoundedCornerShape(50)).background(if (status == s) Street.c.ink else Street.c.card).clickable { status = s }
                         .padding(horizontal = 12.dp, vertical = 6.dp)) {
                         Text(s.label, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (status == s) Street.c.paper else Street.c.text)

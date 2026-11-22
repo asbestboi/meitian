@@ -72,6 +72,9 @@ import com.asbestboi.meitian.data.shortMeaning
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.meitian_core.CoreWord
+import uniffi.meitian_core.lessonFailed
+import uniffi.meitian_core.lessonHearts
+import uniffi.meitian_core.loseHeart
 import uniffi.meitian_core.pinyinSyllables
 import uniffi.meitian_core.pinyinTone
 import uniffi.meitian_core.rubyUnits
@@ -276,6 +279,11 @@ fun SwipeDeck(words: List<CoreWord>, onFinish: () -> Unit) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     var width by remember { mutableIntStateOf(1000) }
+    val app = LocalApp.current
+    // unlearned words get the NEW tag the first time their card comes up
+    val newIds = remember(words) { app.newIds(words) }
+    val again = remember(words) { mutableStateListOf<String>() }
+    LaunchedEffect(queue.firstOrNull()?.id) { queue.firstOrNull()?.let { if (it.id in newIds) app.markSeen(listOf(it.id)) } }
 
     fun commit(known: Boolean) {
         val w = queue.firstOrNull() ?: return
@@ -284,7 +292,7 @@ fun SwipeDeck(words: List<CoreWord>, onFinish: () -> Unit) {
         scope.launch {
             dx.animateTo(if (known) width * 1.4f else -width * 1.4f, spring(stiffness = Spring.StiffnessMediumLow))
             queue.removeAt(0)
-            if (!known) queue.add(w)
+            if (!known) { queue.add(w); again.add(w.id) }
             flipped = false
             dx.snapTo(0f)
             if (queue.isEmpty()) onFinish()
@@ -333,6 +341,7 @@ fun SwipeDeck(words: List<CoreWord>, onFinish: () -> Unit) {
                         ),
                 ) {
                     WordCardFace(word, top && flipped)
+                    if (word.id in newIds && word.id !in again && !(top && flipped)) NewBadge(Modifier.align(Alignment.TopEnd).padding(18.dp))
                     if (top && dx.value != 0f) {
                         Text(
                             if (dx.value > 0) "GOT IT" else "AGAIN",
@@ -355,11 +364,18 @@ fun SwipeDeck(words: List<CoreWord>, onFinish: () -> Unit) {
 
 // ---------- quiz ----------
 
-/** Multiple choice, listening and speaking questions, one at a time. */
+/** Multiple choice, listening and speaking questions, one at a time. With [useHearts] every wrong answer costs a
+ *  heart and comes back at the end until it's right; [onFailed] runs when the hearts are gone. [onDone] gets the
+ *  number of questions that were right the first time. */
 @Composable
 fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer: (Question, Boolean) -> Unit = { _, _ -> },
-               shouldContinue: (Int) -> Boolean = { true }, onDone: (Int) -> Unit) {
+               shouldContinue: (Int) -> Boolean = { true }, useHearts: Boolean = false, onFailed: () -> Unit = {},
+               tagNew: Boolean = true, onDone: (Int) -> Unit) {
     val app = LocalApp.current
+    var hearts by remember { mutableIntStateOf(lessonHearts().toInt()) }
+    var solved by remember { mutableIntStateOf(0) }
+    val retries = remember { mutableStateListOf<Long>() }
+    val newIds = remember(questions) { if (tagNew) app.newIds(questions.map { it.word }) else emptySet() }
     val context = LocalContext.current
     val items = remember(questions) { mutableStateListOf<Question>().apply { addAll(questions.map { it.adjusted(app.settings) }) } }
     var index by remember { mutableIntStateOf(0) }
@@ -409,12 +425,34 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
         if (answered != null) return
         listener.stop()
         answered = right
-        if (right) { correct++; Sfx.play(Sfx.Sound.Correct) } else Sfx.play(Sfx.Sound.Wrong)
+        if (right) {
+            solved++
+            if (q.id !in retries) correct++
+            Sfx.play(Sfx.Sound.Correct)
+        } else {
+            Sfx.play(Sfx.Sound.Wrong)
+            if (useHearts) {
+                hearts = loseHeart(hearts.toUInt()).toInt()
+                // asked again at the end until it's right
+                val again = q.again()
+                retries.add(again.id)
+                items.add(again)
+            }
+        }
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         onAnswer(q, right)
     }
 
+    /** Can't speak here: with hearts, ask about the word silently instead of counting it as a mistake. */
+    fun skip() {
+        if (!useHearts) return answer(false)
+        listener.reset(); tries = 0
+        items[index] = q.copy(kind = Kind.HanziToMeaning)
+    }
+
+    val isNew = q.word.id in newIds && q.id !in retries
     LaunchedEffect(q.id) {
+        if (isNew) app.markSeen(listOf(q.word.id))
         if (q.kind == Kind.Listen && app.settings.canListen) { delay(350); Speaker.say(q.word.hanzi) }
     }
     LaunchedEffect(listener.state) {
@@ -426,7 +464,10 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            LinearProgressIndicator(progress = { index.toFloat() / items.size.coerceAtLeast(1) }, modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)), color = Street.c.red)
+            // with hearts the bar counts solved questions, so repeats don't push it back
+            val progress = (if (useHearts) solved else index).toFloat() / questions.size.coerceAtLeast(1)
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)), color = Street.c.red)
+            if (useHearts) { HSpacer(10.dp); HeartsBar(hearts) }
             if (answered == null && (q.kind == Kind.Listen || q.kind == Kind.Speak)) {
                 HSpacer(10.dp)
                 val listen = q.kind == Kind.Listen
@@ -443,6 +484,7 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
         }
         Text(q.prompt.lowercase(), color = Street.c.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
         Box(Modifier.fillMaxWidth().heightIn(min = 160.dp).card().padding(18.dp), contentAlignment = Alignment.Center) {
+            if (isNew) NewBadge(Modifier.align(Alignment.TopEnd))
             when (q.kind) {
                 Kind.HanziToMeaning, Kind.Speak -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (allowPinyin) RubyText(q.word.hanzi, q.word.pinyin, if (q.word.hanzi.length > 3) 48.sp else 64.sp, FontWeight.SemiBold, alwaysShow = q.kind == Kind.Speak, center = true)
@@ -481,7 +523,7 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                         modifier = Modifier.clickable { openVoiceDialog(q.word) }.padding(6.dp))
                 }
                 if (answered == null && (tries >= 2 || micDenied || listener.state == SpeechListener.State.Unavailable)) {
-                    Text("Skip this one", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { answer(false) })
+                    Text("Skip this one", color = Street.c.red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { skip() })
                 }
             }
         } else {
@@ -520,6 +562,7 @@ fun QuizRunner(questions: List<Question>, allowPinyin: Boolean = true, onAnswer:
                 }
                 BigButton(if (index + 1 < items.size) "Continue" else "Finish", brush = if (right) Street.jade() else Street.warm()) {
                     val n = index + 1
+                    if (useHearts && lessonFailed(hearts.toUInt())) { onFailed(); return@BigButton }
                     if (n >= items.size || !shouldContinue(n)) { onDone(correct); return@BigButton }
                     listener.reset(); picked = null; answered = null; tries = 0
                     items[n] = items[n].adjusted(app.settings)

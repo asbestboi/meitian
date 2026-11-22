@@ -51,7 +51,7 @@ object Speaker {
 
 /** Synthesized lo-fi sound effects (same recipes as iOS), played from static AudioTracks. */
 object Sfx {
-    enum class Sound { Correct, Wrong, Hit, Coin, Win, Lose, Tick, Go, Swoosh, MicOn, MicOff }
+    enum class Sound { Correct, Wrong, Hit, Coin, Win, Lose, Tick, Go, Swoosh, MicOn, MicOff, NewWord, HeartLost, OutOfHearts }
 
     var enabled = true
     private const val RATE = 44100
@@ -109,6 +109,9 @@ object Sfx {
         Sound.Swoosh -> noise(0.16, 0.35, sweep = true)
         Sound.MicOn -> tones(listOf(Note(740.0, 0.06), Note(1110.0, 0.08)))
         Sound.MicOff -> tones(listOf(Note(1110.0, 0.06), Note(740.0, 0.08)))
+        Sound.NewWord -> tones(listOf(Note(1319.0, 0.07, vol = 0.45), Note(1760.0, 0.22, vol = 0.45)))
+        Sound.HeartLost -> mix(noise(0.08, 0.4), tones(listOf(Note(440.0, 0.1, 1, -120.0, 0.7), Note(262.0, 0.2, 1, -90.0, 0.7))))
+        Sound.OutOfHearts -> tones(listOf(Note(392.0, 0.16, 1, vol = 0.7), Note(311.0, 0.16, 1, vol = 0.7), Note(233.0, 0.36, 1, -50.0, 0.7)))
     }
 
     fun play(s: Sound) {

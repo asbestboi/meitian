@@ -51,9 +51,10 @@ import uniffi.meitian_core.PathNode
 import uniffi.meitian_core.PathNodeKind
 import uniffi.meitian_core.PathNodeState
 import uniffi.meitian_core.PathUnit
+import uniffi.meitian_core.pathSentencesXp
 import uniffi.meitian_core.pathSwing
 
-/** Learn tab: one winding path through the current HSK level (Duolingo-style map). Lessons, a story
+/** Learn tab: one winding path through the current HSK level (Duolingo-style map). Lessons, sentences, a story
  *  checkpoint after every unit, the level-up test at the end. One big button always says what's next. */
 @Composable
 fun LearnScreen(goToPractice: () -> Unit) {
@@ -80,14 +81,11 @@ fun LearnScreen(goToPractice: () -> Unit) {
             s != null -> {
                 prefetchStory(ctx, s)
                 nav.show {
-                    StoryPlayer(s) {
-                        nav.close()
-                        if (!done && StoryProgress.isRead(ctx, s.id)) app.finishPathStory(unit)
-                    }
+                    StoryPlayer(s, onFinished = { translations -> if (!done) app.finishPathStory(unit, translations) }) { nav.close() }
                 }
             }
             !done -> { app.finishPathStory(unit); show("🎁 chest opened · +20 XP") }
-            else -> show("you've read every story at this level")
+            else -> show("learn more words to unlock the next story")
         }
     }
 
@@ -95,13 +93,15 @@ fun LearnScreen(goToPractice: () -> Unit) {
         if (node.state == PathNodeState.LOCKED) {
             show(when (node.kind) {
                 PathNodeKind.LESSON -> "finish the lessons before this one first"
-                PathNodeKind.STORY -> "finish unit ${node.unit} to open its story"
+                PathNodeKind.SENTENCES -> "finish lesson ${node.number} to open these sentences"
+                PathNodeKind.STORY -> "finish unit ${node.unit}'s sentences to open its story"
                 PathNodeKind.TEST -> "learn every lesson to unlock the test"
             })
             return
         }
         when (node.kind) {
             PathNodeKind.LESSON -> start(if (node.state == PathNodeState.DONE) app.lessonWords(node.number.toInt()) else app.nextUpWords())
+            PathNodeKind.SENTENCES -> nav.show { SentenceSession(node) { nav.close() } }
             PathNodeKind.STORY -> openStory(node.unit.toInt(), node.state == PathNodeState.DONE)
             PathNodeKind.TEST -> if (app.canLevelUp) {
                 val level = app.currentLevel
@@ -160,6 +160,7 @@ fun LearnScreen(goToPractice: () -> Unit) {
             next?.let { n ->
                 val (title, sub) = when (n.kind) {
                     PathNodeKind.TEST -> "take the HSK ${app.currentLevel} test" to "pass with 80% to unlock HSK ${app.currentLevel + 1}"
+                    PathNodeKind.SENTENCES -> "build sentences" to "+${pathSentencesXp()} XP · only words you know"
                     PathNodeKind.STORY -> "read the unit ${n.unit} story" to "+20 XP"
                     PathNodeKind.LESSON -> (if (app.today.learnedDone) "start lesson ${n.number}" else "learn today's words") to
                         "unit ${n.unit} · lesson ${n.number} · ${app.profile.dailyGoal} new words"
@@ -226,10 +227,12 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
         locked -> Street.c.secondary.copy(alpha = 0.22f)
         node.kind == PathNodeKind.TEST -> Street.c.gold
         node.kind == PathNodeKind.STORY -> Street.c.pink
+        node.kind == PathNodeKind.SENTENCES -> Street.c.sky
         else -> Street.levelColor(level)
     }
     val icon = when (node.kind) {
         PathNodeKind.LESSON -> if (node.state == PathNodeState.DONE) "✓" else if (locked) "🔒" else "★"
+        PathNodeKind.SENTENCES -> "💬"
         PathNodeKind.STORY -> "📖"
         PathNodeKind.TEST -> "🏆"
     }
@@ -254,7 +257,11 @@ private fun PathNodeButton(node: PathNode, level: Int, swing: Float, onClick: ()
                         color = if (locked) Street.c.secondary else Color.White)
                 }
             }
-            if (!lesson) Text(if (node.kind == PathNodeKind.TEST) "level-up test" else "story", fontSize = 12.sp,
+            if (!lesson) Text(when (node.kind) {
+                PathNodeKind.TEST -> "level-up test"
+                PathNodeKind.SENTENCES -> "sentences · +${pathSentencesXp()} XP"
+                else -> "story"
+            }, fontSize = 12.sp,
                 fontWeight = FontWeight.Bold, color = Street.c.secondary, modifier = Modifier.padding(top = 4.dp))
         }
     }
