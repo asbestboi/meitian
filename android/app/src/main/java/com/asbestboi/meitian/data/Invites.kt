@@ -96,8 +96,9 @@ object Invites {
     private fun schedule(c: Context) {
         val js = c.getSystemService(JobScheduler::class.java)
         if (js.getPendingJob(JOB) != null) return
-        js.schedule(JobInfo.Builder(JOB, ComponentName(c, InviteJob::class.java)).setPeriodic(15 * 60_000L)
-            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPersisted(true).build())
+        // a nice-to-have: never take the app down over it
+        runCatching { js.schedule(JobInfo.Builder(JOB, ComponentName(c, InviteJob::class.java)).setPeriodic(15 * 60_000L)
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPersisted(true).build()) }
     }
 }
 

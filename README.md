@@ -5,11 +5,12 @@ A playful app for learning a little Chinese every day, for **iPhone** (SwiftUI) 
 - **Confirm your level.** Say how good your Chinese is, then a short adaptive placement quiz (HSK 1–4) checks it. New words start just above what you already know.
 - **New words daily.** Pick 3, 5 or 8 words a day. Swipe through flip cards (right = got it, left = again), hear native pronunciation, then take a quick quiz.
 - **Learning path.** Lessons, sentence nodes built only from words you've learned, a story after every unit, and the HSK level-up test. Lessons, sentence nodes and stories give you three ❤️: wrong answers cost one and come back at the end, and at zero the lesson starts over.
-- **Stories and chats you can follow.** A story unlocks once at most three of its words are new to you; locked ones show how many words are missing. New words are highlighted wherever they first appear and recapped at the end. One line per story can be translated for free; more than that and it pays no XP.
+- **Stories and chats you can follow.** Every roadmap unit ends with a story it just unlocked: the lessons teach the words that story needs, and at most three stay new. Locked stories aren't shown. Chats use WeChat's own emoji. New words are highlighted wherever they first appear and recapped at the end. One line per story can be translated for free; more than that and it pays no XP.
 - **Daily slot machine 🎰.** One free spin every 24 hours: coins (rarely a 500 jackpot), a cosmetic you don't own, or a sentence of the day to hear, build and type for XP. The prize is decided by the core (seeded per player and spin), and online the server keeps the 24-hour clock.
 - **Pinyin everywhere for beginners.** Pinyin sits right above each character (ruby style), colored by tone (1 red, 2 orange, 3 green, 4 blue). Switch it off in Progress when you want to test your reading; the placement quiz never shows it.
 - **Arena: online battles for 2–4 players.** Quick-match a rated 1v1, queue for a group, or open a private party with a 6-character code (friends can be invited from the friends list). Ten modes: ⚔️ Duel, ⚡️ Blitz, 🎧 Listen, 🎵 Tone clash, 🧩 Sentence builder, ⌨️ Pinyin type, ☠️ Sudden death, ❤️ Survival, 👑 Battle royale (3–4) and 🤝 Team 2v2. 1v1s change your rating; groups pay 🪙 coins by place. Coins buy card frames, titles, particle hit effects (each with its own sound), auras and stickers. Profile pictures (or coloured initials) show who you are.
-- **Arenas.** The scenery gets darker as the material gets harder: spring meadow, bamboo forest, misty temple mountains, volcanic badlands, lava fields, and the gates of hell at HSK 6.
+- **Arenas.** The scenery behind the path and the battles gets darker as the material gets harder: spring meadow, bamboo forest, misty temple mountains, volcanic badlands, lava fields, and the gates of hell at HSK 6. Tap the HSK badge for the arena road and see all six.
+- **Battle invitations.** A banner anywhere in the app when a friend invites you, a notification when it's closed. There's no push service: Android checks about every 15 minutes, iOS when it grants a background refresh. Invitations stay open for 30 minutes.
 - **Spaced repetition** reviews, listening drills and a speed mix.
 - **Streaks, XP, levels** and an activity calendar. Daily reminder notifications.
 
@@ -43,7 +44,7 @@ scripts/build-ipa.sh          # -> build/Meitian.ipa
 ```
 core/        Rust: words (compiled in), pinyin + ruby alignment, spaced repetition, streaks,
              levels, placement, learning path, sentence lessons, story unlocking, hearts, the daily slot machine, quiz options,
-             the battle engine (referee for 2–4 players), sounds, arenas, speech matching.
+             the battle engine (referee for 2–4 players), sounds, every hit effect, aura and arena (drawn as draw commands, see draw.rs), speech matching.
              Exposed to Swift and Kotlin through UniFFI. `cd core && cargo test`
 Meitian/     iOS app (SwiftUI). scripts/build-core-ios.sh builds the core for aarch64-apple-ios
              and generates the Swift bindings; scripts/build-ipa.sh makes the .ipa.

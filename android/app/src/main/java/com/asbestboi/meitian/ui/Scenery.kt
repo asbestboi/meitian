@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -37,6 +38,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -47,11 +51,16 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.asbestboi.meitian.data.Sfx
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import uniffi.meitian_core.ArenaTheme
 import uniffi.meitian_core.SoundId
 import uniffi.meitian_core.ArenaStop
@@ -61,12 +70,32 @@ import uniffi.meitian_core.arenaRoad
 import uniffi.meitian_core.arenaScene
 import com.asbestboi.meitian.LocalApp
 
+/** Part of the scenery, rendered once. Taller than the view, so moving it up never uncovers its bottom. */
+private class SceneImage(val image: ImageBitmap, val parallax: Float)
+
+private const val SCENE_SCALE = 0.75f
+private const val SCENE_TALL = 1.15f
+
+/** Renders the still layers; without parallax ([flat]) they become one picture. */
+private fun renderScene(theme: ArenaTheme, w: Float, h: Float, dark: Boolean, density: Float, flat: Boolean): List<SceneImage> {
+    val layers = arenaScene(theme, w, h, dark)
+    val renderer = OpsRenderer()
+    val px = (w * density * SCENE_SCALE).toInt().coerceAtLeast(1)
+    val py = (h * density * SCENE_SCALE * (if (flat) 1f else SCENE_TALL)).toInt().coerceAtLeast(1)
+    fun bitmap(parts: List<uniffi.meitian_core.SceneLayer>) = android.graphics.Bitmap.createBitmap(px, py, android.graphics.Bitmap.Config.ARGB_8888).also { bm ->
+        val c = android.graphics.Canvas(bm)
+        parts.forEach { renderer.draw(c, it.ops, density * SCENE_SCALE) }
+        bm.prepareToDraw()
+    }.asImageBitmap()
+    return if (flat) listOf(SceneImage(bitmap(layers), 0f)) else layers.map { SceneImage(bitmap(listOf(it)), it.parallax) }
+}
+
 /**
  * An arena's scenery, drawn by the core: still layers that move a little with [scroll] (px, parallax) and a moving
  * part on top. [strength] fades it into the paper colour so text on top stays readable.
  */
 @Composable
-fun ArenaBackground(theme: ArenaTheme, modifier: Modifier = Modifier, strength: Float = 0.55f, live: Boolean = true, scroll: () -> Float = { 0f }) {
+fun ArenaBackground(theme: ArenaTheme, modifier: Modifier = Modifier, strength: Float = 0.55f, live: Boolean = true, scroll: (() -> Float)? = null) {
     val dark = isSystemInDarkTheme()
     val reduce = reduceMotion()
     val density = LocalDensity.current.density
@@ -83,21 +112,21 @@ fun ArenaBackground(theme: ArenaTheme, modifier: Modifier = Modifier, strength: 
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds()) {
         val w = constraints.maxWidth / density
         val h = constraints.maxHeight / density
-        val layers = remember(theme.id, w, h, dark) { arenaScene(theme, w, h, dark) }
-        // the still layers have their own canvas, so the particles don't make them draw again
+        // rendered once, away from the main thread
+        val scene by produceState(emptyList<SceneImage>(), theme.id, w, h, dark) {
+            value = withContext(Dispatchers.Default) { renderScene(theme, w, h, dark, density, scroll == null) }
+        }
         Canvas(Modifier.fillMaxSize()) {
-            val y = if (reduce) 0f else scroll()
-            drawIntoCanvas { c ->
-                layers.forEach { layer ->
-                    val shift = (y * layer.parallax).coerceIn(-size.height * 0.12f, size.height * 0.12f)
-                    c.nativeCanvas.save()
-                    c.nativeCanvas.translate(0f, -shift)
-                    renderer.draw(c.nativeCanvas, layer.ops, density)
-                    c.nativeCanvas.restore()
-                }
+            val y = if (reduce || scroll == null) 0f else scroll()
+            scene.forEach { layer ->
+                val shift = (y * layer.parallax).coerceIn(-size.height * 0.12f, size.height * 0.12f)
+                drawImage(layer.image, dstOffset = IntOffset(0, -shift.roundToInt()),
+                    dstSize = IntSize(size.width.roundToInt(), (size.height * layer.image.height / (size.height * SCENE_SCALE)).roundToInt()),
+                    filterQuality = FilterQuality.Low)
             }
         }
         Canvas(Modifier.fillMaxSize()) {
+            if (scene.isEmpty()) return@Canvas
             val ops = arenaFrame(theme, (frame / 1_000_000L).toULong(), w, h, dark)
             drawIntoCanvas { renderer.draw(it.nativeCanvas, ops, density) }
             if (strength < 1f) drawRect(paper.copy(alpha = 1f - strength))

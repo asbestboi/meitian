@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -37,7 +38,7 @@ import uniffi.meitian_core.initials
 /** A player's profile picture, or their initials on a colour of their own. [path] is the server's, "" for none. */
 @Composable
 fun Picture(id: String, name: String, path: String, size: Dp = 46.dp, modifier: Modifier = Modifier) {
-    Box(modifier.size(size).clip(CircleShape).background(hexColor(avatarColor(id))), contentAlignment = Alignment.Center) {
+    Box(modifier.requiredSize(size).clip(CircleShape).background(hexColor(avatarColor(id))), contentAlignment = Alignment.Center) {
         Text(initials(name), fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1)
         if (path.isNotEmpty()) AsyncImage(Online.baseUrl + path, "$name's picture", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
